@@ -1,0 +1,13 @@
+[package]
+name = "byteable"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["derive", "tokio"]
+derive = ["dep:byteable_derive"]
+tokio = ["dep:tokio"]
+
+[dependencies]
+byteable_derive = { path = "./byteable_derive", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
