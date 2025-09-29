@@ -64,12 +64,12 @@ fn main() {
 
     // Convert to Big Endian
     let be_value = BigEndian::new(value);
-    println!("Value in Big Endian: {:?}", be_value.into_inner()); // Will show 0x01020304 (assuming native is big-endian or converted)
+    println!("Value in Big Endian: {:?}", be_value); // Will show 0x01020304
 
 
     // Convert to Little Endian
     let le_value = LittleEndian::new(value);
-    println!("Value in Little Endian: {:?}", le_value.into_inner()); // Will show 0x01020304 (assuming native is little-endian or converted)
+    println!("Value in Little Endian: {:?}", le_value); // Will show 0x04030201
 }
 ```
 
