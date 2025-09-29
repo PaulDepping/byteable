@@ -1,14 +1,14 @@
-# byteable
+*A Rust crate for convenient serialization and deserialization of byte-oriented data.*
 
 `byteable` is a Rust crate providing traits and utilities for seamless conversion between data structures and byte arrays, handling both synchronous and asynchronous I/O operations, and managing endianness.
 
 ## Features
 
-- **`Byteable` Trait**: Define how your custom types can be converted into and from byte arrays.
-- **`ReadByteable` & `WriteByteable` Traits**: Extend `std::io::Read` and `std::io::Write` to easily read and write `Byteable` types.
-- **`AsyncReadByteable` & `AsyncWriteByteable` Traits (with `tokio` feature)**: Asynchronous versions of I/O traits for `Byteable` types, integrated with `tokio`.
-- **`Endianable` Trait & Wrappers**: Utility for handling endianness conversion for primitive types, including `BigEndian` and `LittleEndian` wrappers.
-- **`#[derive(Byteable)]` (with `derive` feature)**: A procedural macro to automatically implement the `Byteable` trait for your structs.
+- **`Byteable` Trait**: The core trait for types that can be converted to and from a byte array.
+- **`ReadByteable` & `WriteByteable` Traits**: Extension traits for `std::io::Read` and `std::io::Write`, enabling convenient reading and writing of `Byteable` types.
+- **`AsyncReadByteable` & `AsyncWriteByteable` Traits (with `tokio` feature)**: Asynchronous counterparts to `ReadByteable` and `WriteByteable`, designed for use with `tokio`'s async I/O.
+- **`Endianable` Trait & Wrappers**: Provides methods for converting primitive types between different endianness (little-endian and big-endian), along with `BigEndian<T>` and `LittleEndian<T>` wrapper types.
+- **`#[derive(Byteable)]` (with `derive` feature)**: A procedural macro that automatically implements the `Byteable` trait for structs, significantly simplifying boilerplate.
 
 ## Installation
 
@@ -28,10 +28,13 @@ byteable = { version = "0.1", features = ["derive", "tokio"] }
 
 ## Usage
 
-### Basic `Byteable` Implementation
+### Basic `Byteable` Conversion
+
+Implement the `Byteable` trait manually or use the `#[derive(Byteable)]` macro (with the `derive` feature enabled):
 
 ```rust
-use byteable::{Byteable, ReadByteable, WriteByteable};
+use byteable::{Byteable, ReadByteable, WriteByteable, LittleEndian};
+use std::io::Cursor;
 
 #[derive(Byteable, Debug, PartialEq, Copy, Clone)]
 #[byteable(transparent)] // For single-field structs

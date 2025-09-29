@@ -3,6 +3,9 @@ name = "byteable"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/PaulDepping/byteable"
+description = "A Rust crate for convenient serialization and deserialization of byte-oriented data."
+readme = "README.md"
 
 [features]
 all = ["derive", "tokio"]
