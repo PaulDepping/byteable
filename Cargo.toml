@@ -14,5 +14,5 @@ derive = ["dep:byteable_derive"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-byteable_derive = { path = "./byteable_derive", optional = true }
+byteable_derive = { version = "*", path = "./byteable_derive", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
