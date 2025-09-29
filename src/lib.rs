@@ -8,7 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub trait ByteableByteArray {
     fn create_zeroed() -> Self;
+    #[must_use]
     fn as_byteslice_mut(&mut self) -> &mut [u8];
+    #[must_use]
     fn as_byteslice(&self) -> &[u8];
 }
 
@@ -28,6 +30,7 @@ impl<const SIZE: usize> ByteableByteArray for [u8; SIZE] {
 
 pub trait Byteable: Copy {
     type ByteArray: ByteableByteArray;
+    #[must_use]
     fn as_bytearray(self) -> Self::ByteArray;
     fn from_bytearray(ba: Self::ByteArray) -> Self;
 }
@@ -376,18 +379,45 @@ impl<T: Endianable + Default> Default for LittleEndian<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
-    #[test]
-    fn big_endian_test() {
-        assert_eq!([1, 2, 3, 4], BigEndian::new(0x01020304u32).0.to_ne_bytes());
+    mod byteable {
+        #[cfg(feature = "derive")]
+        mod derive {
+            use crate::{BigEndian, Byteable, LittleEndian};
+            #[derive(Byteable, Clone, Copy)]
+            #[repr(C, packed)]
+            struct ABC {
+                a: LittleEndian<u16>,
+                b: LittleEndian<u16>,
+                c: BigEndian<u16>,
+            }
+
+            #[test]
+            fn test_derive() {
+                let a = ABC {
+                    a: LittleEndian::new(1),
+                    b: LittleEndian::new(2),
+                    c: BigEndian::new(3),
+                };
+
+                assert_eq!(a.as_bytearray(), [1, 0, 2, 0, 0, 3]);
+            }
+        }
     }
 
-    #[test]
-    fn little_endian_test() {
-        assert_eq!(
-            [4, 3, 2, 1],
-            LittleEndian::new(0x01020304u32).0.to_ne_bytes()
-        );
+    mod endian {
+        use super::super::{BigEndian, LittleEndian};
+        #[test]
+        fn big_endian_test() {
+            assert_eq!([1, 2, 3, 4], BigEndian::new(0x01020304u32).0.to_ne_bytes());
+        }
+
+        #[test]
+        fn little_endian_test() {
+            assert_eq!(
+                [4, 3, 2, 1],
+                LittleEndian::new(0x01020304u32).0.to_ne_bytes()
+            );
+        }
     }
 }
