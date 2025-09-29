@@ -55,10 +55,10 @@
 //! use byteable::{BigEndian, LittleEndian, Endianable};
 //!
 //! let value_be = BigEndian::new(0x01020304u32);
-//! assert_eq!(value_be.0.to_be_bytes(), [1, 2, 3, 4]);
+//! assert_eq!(value_be.to_native().to_ne_bytes(), [1, 2, 3, 4]);
 //!
 //! let value_le = LittleEndian::new(0x01020304u32);
-//! assert_eq!(value_le.0.to_le_bytes(), [4, 3, 2, 1]);
+//! assert_eq!(value_le.to_native().to_ne_bytes(), [4, 3, 2, 1]);
 //! ```
 //!
 //! ### Asynchronous I/O (with `tokio` feature)
@@ -67,7 +67,7 @@
 //! #[cfg(feature = "tokio")]
 //! async fn async_example() -> std::io::Result<()> {
 //!     use byteable::{Byteable, AsyncReadByteable, AsyncWriteByteable, LittleEndian};
-//!     use tokio::io::Cursor;
+//!     use std::io::Cursor;
 //!
 //!     #[derive(Byteable, Clone, Copy, PartialEq, Debug)]
 //!     #[repr(C, packed)]
@@ -530,7 +530,12 @@ impl<T: Endianable> BigEndian<T> {
     /// Consumes the `BigEndian` wrapper and returns the inner value,
     /// converting it from big-endian to the native endianness.
     pub fn into_inner(self) -> T {
-        self.0.from_be()
+        self.to_native().from_be()
+    }
+
+    /// Returns the underlying native representation without any endian conversion.
+    pub fn to_native(self) -> T {
+        self.0
     }
 }
 
@@ -558,7 +563,12 @@ impl<T: Endianable> LittleEndian<T> {
     /// Consumes the `LittleEndian` wrapper and returns the inner value,
     /// converting it from little-endian to the native endianness.
     pub fn into_inner(self) -> T {
-        self.0.from_le()
+        self.to_native().from_le()
+    }
+
+    /// Returns the underlying native representation without any endian conversion.
+    pub fn to_native(self) -> T {
+        self.0
     }
 }
 
@@ -614,8 +624,8 @@ mod tests {
             // into_inner converts from BE to native, so if we create it from a native value,
             // and then turn it back, it should be the original value.
             assert_eq!(be_val.into_inner(), val);
-            assert_eq!(be_val.0.to_be_bytes(), [1, 2, 3, 4]);
-            assert_eq!(u32::from_be_bytes(be_val.0.to_be_bytes()), val);
+            assert_eq!(be_val.to_native().to_ne_bytes(), [1, 2, 3, 4]);
+            assert_eq!(u32::from_be_bytes(be_val.to_native().to_ne_bytes()), val);
         }
 
         #[test]
@@ -627,8 +637,8 @@ mod tests {
             // into_inner converts from LE to native, so if we create it from a native value,
             // and then turn it back, it should be the original value.
             assert_eq!(le_val.into_inner(), val);
-            assert_eq!(le_val.0.to_le_bytes(), [4, 3, 2, 1]);
-            assert_eq!(u32::from_le_bytes(le_val.0.to_le_bytes()), val);
+            assert_eq!(le_val.to_native().to_ne_bytes(), [4, 3, 2, 1]);
+            assert_eq!(u32::from_le_bytes(le_val.to_native().to_ne_bytes()), val);
         }
     }
 }
