@@ -1,4 +1,4 @@
-*A Rust crate for convenient serialization and deserialization of byte-oriented data.*
+_A Rust crate for convenient serialization and deserialization of byte-oriented data._
 
 `byteable` is a Rust crate providing traits and utilities for seamless conversion between data structures and byte arrays, handling both synchronous and asynchronous I/O operations, and managing endianness.
 
@@ -16,14 +16,14 @@ Add `byteable` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-byteable = "0.1" # Or specify the latest version
+byteable = "*" # Or specify the latest version
 ```
 
 To enable the `derive` macro and `tokio` integration, you can specify features:
 
 ```toml
 [dependencies]
-byteable = { version = "0.1", features = ["derive", "tokio"] }
+byteable = { version = "*", features = ["derive", "tokio"] }
 ```
 
 ## Usage

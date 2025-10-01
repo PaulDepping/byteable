@@ -55,10 +55,10 @@
 //! use byteable::{BigEndian, LittleEndian, Endianable};
 //!
 //! let value_be = BigEndian::new(0x01020304u32);
-//! assert_eq!(value_be.to_native().to_ne_bytes(), [1, 2, 3, 4]);
+//! assert_eq!(value_be.get_raw().to_ne_bytes(), [1, 2, 3, 4]);
 //!
 //! let value_le = LittleEndian::new(0x01020304u32);
-//! assert_eq!(value_le.to_native().to_ne_bytes(), [4, 3, 2, 1]);
+//! assert_eq!(value_le.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
 //! ```
 //!
 //! ### Asynchronous I/O (with `tokio` feature)
@@ -515,7 +515,7 @@ impl Endianable for f64 {
 /// A wrapper type that ensures the inner `Endianable` value is treated as Big-Endian.
 ///
 /// When creating a `BigEndian` instance, the value is converted to big-endian.
-/// When retrieving the inner value with `into_inner`, it is converted back
+/// When retrieving the inner value with `get`, it is converted back
 /// to the native endianness.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -527,14 +527,13 @@ impl<T: Endianable> BigEndian<T> {
         Self(val.to_be())
     }
 
-    /// Consumes the `BigEndian` wrapper and returns the inner value,
-    /// converting it from big-endian to the native endianness.
-    pub fn into_inner(self) -> T {
-        self.to_native().from_be()
+    /// Returns the inner value, converting it from big-endian to the native endianness.
+    pub fn get(self) -> T {
+        self.get_raw().from_be()
     }
 
     /// Returns the underlying native representation without any endian conversion.
-    pub fn to_native(self) -> T {
+    pub fn get_raw(self) -> T {
         self.0
     }
 }
@@ -548,7 +547,7 @@ impl<T: Endianable + Default> Default for BigEndian<T> {
 /// A wrapper type that ensures the inner `Endianable` value is treated as Little-Endian.
 ///
 /// When creating a `LittleEndian` instance, the value is converted to little-endian.
-/// When retrieving the inner value with `into_inner`, it is converted back
+/// When retrieving the inner value with `get`, it is converted back
 /// to the native endianness.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -560,14 +559,13 @@ impl<T: Endianable> LittleEndian<T> {
         Self(val.to_le())
     }
 
-    /// Consumes the `LittleEndian` wrapper and returns the inner value,
-    /// converting it from little-endian to the native endianness.
-    pub fn into_inner(self) -> T {
-        self.to_native().from_le()
+    /// Returns the inner value, converting it from little-endian to the native endianness.
+    pub fn get(self) -> T {
+        self.get_raw().from_le()
     }
 
     /// Returns the underlying native representation without any endian conversion.
-    pub fn to_native(self) -> T {
+    pub fn get_raw(self) -> T {
         self.0
     }
 }
@@ -605,9 +603,9 @@ mod tests {
                 assert_eq!(a.as_bytearray(), expected_bytes);
 
                 let read_a = ABC::from_bytearray(expected_bytes);
-                assert_eq!(read_a.a.into_inner(), 1);
-                assert_eq!(read_a.b.into_inner(), 2);
-                assert_eq!(read_a.c.into_inner(), 3);
+                assert_eq!(read_a.a.get(), 1);
+                assert_eq!(read_a.b.get(), 2);
+                assert_eq!(read_a.c.get(), 3);
                 assert_eq!(read_a, a);
             }
         }
@@ -621,11 +619,11 @@ mod tests {
             let val = 0x01020304u32;
             let be_val = BigEndian::new(val);
 
-            // into_inner converts from BE to native, so if we create it from a native value,
+            // get converts from BE to native, so if we create it from a native value,
             // and then turn it back, it should be the original value.
-            assert_eq!(be_val.into_inner(), val);
-            assert_eq!(be_val.to_native().to_ne_bytes(), [1, 2, 3, 4]);
-            assert_eq!(u32::from_be_bytes(be_val.to_native().to_ne_bytes()), val);
+            assert_eq!(be_val.get(), val);
+            assert_eq!(be_val.get_raw().to_ne_bytes(), [1, 2, 3, 4]);
+            assert_eq!(u32::from_be_bytes(be_val.get_raw().to_ne_bytes()), val);
         }
 
         #[test]
@@ -634,11 +632,11 @@ mod tests {
             let val = 0x01020304u32;
             let le_val = LittleEndian::new(val);
 
-            // into_inner converts from LE to native, so if we create it from a native value,
+            // get converts from LE to native, so if we create it from a native value,
             // and then turn it back, it should be the original value.
-            assert_eq!(le_val.into_inner(), val);
-            assert_eq!(le_val.to_native().to_ne_bytes(), [4, 3, 2, 1]);
-            assert_eq!(u32::from_le_bytes(le_val.to_native().to_ne_bytes()), val);
+            assert_eq!(le_val.get(), val);
+            assert_eq!(le_val.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
+            assert_eq!(u32::from_le_bytes(le_val.get_raw().to_ne_bytes()), val);
         }
     }
 }
