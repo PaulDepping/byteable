@@ -148,6 +148,26 @@ pub trait Byteable: Copy {
     fn from_bytearray(ba: Self::ByteArray) -> Self;
 }
 
+macro_rules! impl_byteable_generic {
+    ($type:ident, $generic:ident) => {
+        impl Byteable for $type<$generic> {
+            type ByteArray = [u8; std::mem::size_of::<Self>()];
+            fn as_bytearray(self) -> Self::ByteArray {
+                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                // and the size of Self matches the size of Self::ByteArray.
+                // The Byteable trait requires that the struct is `Copy`.
+                unsafe { std::mem::transmute(self) }
+            }
+            fn from_bytearray(ba: Self::ByteArray) -> Self {
+                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                // and the size of Self matches the size of Self::ByteArray.
+                // The Byteable trait requires that the struct is `Copy`.
+                unsafe { std::mem::transmute(ba) }
+            }
+        }
+    };
+}
+
 /// Extends `std::io::Read` with a method to read a `Byteable` type.
 pub trait ReadByteable: Read {
     /// Reads one `Byteable` element from the reader.
@@ -247,270 +267,65 @@ pub trait Endianable: Copy {
     fn to_be(self) -> Self;
 }
 
-/// Implements `Endianable` for `u8`.
-/// `u8` does not change with endianness on a single byte.
-impl Endianable for u8 {
-    fn from_le(self) -> Self {
-        self
-    }
+macro_rules! impl_endianable {
+    ($type:ident) => {
+        impl Endianable for $type {
+            fn from_le(self) -> Self {
+                Self::from_le(self)
+            }
 
-    fn from_be(self) -> Self {
-        self
-    }
+            fn from_be(self) -> Self {
+                Self::from_be(self)
+            }
 
-    fn to_le(self) -> Self {
-        self
-    }
+            fn to_le(self) -> Self {
+                Self::to_le(self)
+            }
 
-    fn to_be(self) -> Self {
-        self
-    }
-}
-/// Implements `Endianable` for `u16`.
-impl Endianable for u16 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-/// Implements `Endianable` for `u32`.
-impl Endianable for u32 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-/// Implements `Endianable` for `u64`.
-impl Endianable for u64 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-/// Implements `Endianable` for `u128`.
-impl Endianable for u128 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-/// Implements `Endianable` for `usize`.
-impl Endianable for usize {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
+            fn to_be(self) -> Self {
+                Self::to_be(self)
+            }
+        }
+    };
 }
 
-/// Implements `Endianable` for `i8`.
-/// `i8` does not change with endianness on a single byte.
-impl Endianable for i8 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
+macro_rules! impl_endianable_float {
+    ($ftype:ident,$ntype:ident) => {
+        impl Endianable for $ftype {
+            fn from_le(self) -> Self {
+                Self::from_bits($ntype::from_le(self.to_bits()))
+            }
 
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
+            fn from_be(self) -> Self {
+                Self::from_bits($ntype::from_be(self.to_bits()))
+            }
 
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
+            fn to_le(self) -> Self {
+                Self::from_bits($ntype::to_le(self.to_bits()))
+            }
 
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
+            fn to_be(self) -> Self {
+                Self::from_bits($ntype::to_be(self.to_bits()))
+            }
+        }
+    };
 }
 
-/// Implements `Endianable` for `i16`.
-impl Endianable for i16 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
+impl_endianable!(u8);
+impl_endianable!(u16);
+impl_endianable!(u32);
+impl_endianable!(u64);
+impl_endianable!(u128);
+impl_endianable!(usize);
+impl_endianable!(i8);
+impl_endianable!(i16);
+impl_endianable!(i32);
+impl_endianable!(i64);
+impl_endianable!(i128);
+impl_endianable!(isize);
 
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-
-/// Implements `Endianable` for `i32`.
-impl Endianable for i32 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-
-/// Implements `Endianable` for `i64`.
-impl Endianable for i64 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-
-/// Implements `Endianable` for `i128`.
-impl Endianable for i128 {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-
-/// Implements `Endianable` for `isize`.
-impl Endianable for isize {
-    fn from_le(self) -> Self {
-        Self::from_le(self)
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_be(self)
-    }
-
-    fn to_le(self) -> Self {
-        Self::to_le(self)
-    }
-
-    fn to_be(self) -> Self {
-        Self::to_be(self)
-    }
-}
-
-// impl Endianable for f16 {}
-/// Implements `Endianable` for `f32`.
-impl Endianable for f32 {
-    fn from_le(self) -> Self {
-        Self::from_bits(u32::from_le(self.to_bits()))
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_bits(u32::from_be(self.to_bits()))
-    }
-
-    fn to_le(self) -> Self {
-        Self::from_bits(u32::to_le(self.to_bits()))
-    }
-
-    fn to_be(self) -> Self {
-        Self::from_bits(u32::to_be(self.to_bits()))
-    }
-}
-
-/// Implements `Endianable` for `f64`.
-impl Endianable for f64 {
-    fn from_le(self) -> Self {
-        Self::from_bits(u64::from_le(self.to_bits()))
-    }
-
-    fn from_be(self) -> Self {
-        Self::from_bits(u64::from_be(self.to_bits()))
-    }
-    fn to_le(self) -> Self {
-        Self::from_bits(u64::to_le(self.to_bits()))
-    }
-
-    fn to_be(self) -> Self {
-        Self::from_bits(u64::to_be(self.to_bits()))
-    }
-}
-
-// impl Endianable for f128 {}
+impl_endianable_float!(f32, u32);
+impl_endianable_float!(f64, u64);
 
 /// A wrapper type that ensures the inner `Endianable` value is treated as Big-Endian.
 ///
@@ -520,6 +335,21 @@ impl Endianable for f64 {
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BigEndian<T: Endianable>(pub(crate) T);
+
+impl_byteable_generic!(BigEndian, u8);
+impl_byteable_generic!(BigEndian, u16);
+impl_byteable_generic!(BigEndian, u32);
+impl_byteable_generic!(BigEndian, u64);
+impl_byteable_generic!(BigEndian, u128);
+impl_byteable_generic!(BigEndian, usize);
+impl_byteable_generic!(BigEndian, i8);
+impl_byteable_generic!(BigEndian, i16);
+impl_byteable_generic!(BigEndian, i32);
+impl_byteable_generic!(BigEndian, i64);
+impl_byteable_generic!(BigEndian, i128);
+impl_byteable_generic!(BigEndian, isize);
+impl_byteable_generic!(BigEndian, f32);
+impl_byteable_generic!(BigEndian, f64);
 
 impl<T: Endianable> BigEndian<T> {
     /// Creates a new `BigEndian` instance from a value, converting it to big-endian.
@@ -552,6 +382,21 @@ impl<T: Endianable + Default> Default for BigEndian<T> {
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LittleEndian<T: Endianable>(pub(crate) T);
+
+impl_byteable_generic!(LittleEndian, u8);
+impl_byteable_generic!(LittleEndian, u16);
+impl_byteable_generic!(LittleEndian, u32);
+impl_byteable_generic!(LittleEndian, u64);
+impl_byteable_generic!(LittleEndian, u128);
+impl_byteable_generic!(LittleEndian, usize);
+impl_byteable_generic!(LittleEndian, i8);
+impl_byteable_generic!(LittleEndian, i16);
+impl_byteable_generic!(LittleEndian, i32);
+impl_byteable_generic!(LittleEndian, i64);
+impl_byteable_generic!(LittleEndian, i128);
+impl_byteable_generic!(LittleEndian, isize);
+impl_byteable_generic!(LittleEndian, f32);
+impl_byteable_generic!(LittleEndian, f64);
 
 impl<T: Endianable> LittleEndian<T> {
     /// Creates a new `LittleEndian` instance from a value, converting it to little-endian.
