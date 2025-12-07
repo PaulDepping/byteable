@@ -13,7 +13,7 @@
 //! #[derive(Byteable, Clone, Copy, PartialEq, Debug)]
 //! #[repr(C, packed)]
 //! struct MyStruct {
-//!     field1: u16,
+//!     field1: LittleEndian<u16>,
 //!     field2: u8,
 //! }
 //!
@@ -30,7 +30,7 @@
 //!
 //! ### Requirements for `#[derive(Byteable)]`
 //!
-//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]` to ensure a well-defined memory layout.
+//! - The struct should be `#[repr(C)]` or `#[repr(C, packed)]` to ensure a well-defined memory layout.
 //! - The struct must implement `Copy`.
 //! - All fields in the struct must themselves be `Byteable` or `Endianable` (e.g., primitive integers,
 //!   `BigEndian<T>`, `LittleEndian<T>`).

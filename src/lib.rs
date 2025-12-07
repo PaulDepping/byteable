@@ -148,6 +148,26 @@ pub trait Byteable: Copy {
     fn from_bytearray(ba: Self::ByteArray) -> Self;
 }
 
+macro_rules! impl_byteable {
+    ($type:ident) => {
+        impl Byteable for $type {
+            type ByteArray = [u8; std::mem::size_of::<Self>()];
+            fn as_bytearray(self) -> Self::ByteArray {
+                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                // and the size of Self matches the size of Self::ByteArray.
+                // The Byteable trait requires that the struct is `Copy`.
+                unsafe { std::mem::transmute(self) }
+            }
+            fn from_bytearray(ba: Self::ByteArray) -> Self {
+                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                // and the size of Self matches the size of Self::ByteArray.
+                // The Byteable trait requires that the struct is `Copy`.
+                unsafe { std::mem::transmute(ba) }
+            }
+        }
+    };
+}
+
 macro_rules! impl_byteable_generic {
     ($type:ident, $generic:ident) => {
         impl Byteable for $type<$generic> {
@@ -166,6 +186,28 @@ macro_rules! impl_byteable_generic {
             }
         }
     };
+}
+
+pub trait ByteableFromRegularStruct: Byteable {
+    type RegularStruct: Into<Self>;
+
+    fn from_struct(s: Self::RegularStruct) -> Self {
+        s.into()
+    }
+}
+
+pub trait ToByteable: Into<Self::Target> {
+    type Target: Byteable;
+    fn to_byteable(self) -> Self::Target {
+        self.into()
+    }
+}
+
+pub trait ByteableToRegularStruct: Byteable + Into<Self::Target> {
+    type Target;
+    fn to_struct(self) -> Self::Target {
+        self.into()
+    }
 }
 
 /// Extends `std::io::Read` with a method to read a `Byteable` type.
@@ -482,6 +524,53 @@ mod tests {
             assert_eq!(le_val.get(), val);
             assert_eq!(le_val.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
             assert_eq!(u32::from_le_bytes(le_val.get_raw().to_ne_bytes()), val);
+        }
+    }
+
+    mod derive {
+        use crate::{Byteable, ByteableFromRegularStruct, ByteableToRegularStruct, ToByteable};
+
+        #[derive(Clone, Copy)]
+        struct Basic {
+            a: u16,
+            b: u32,
+            c: u16,
+        }
+
+        #[derive(Clone, Copy)]
+        #[repr(C, packed)]
+        struct BasicRaw {
+            a: u16,
+            b: u32,
+            c: u16,
+        }
+        impl_byteable!(BasicRaw);
+
+        impl From<Basic> for BasicRaw {
+            fn from(value: Basic) -> Self {
+                BasicRaw {
+                    a: value.a,
+                    b: value.b,
+                    c: value.c,
+                }
+            }
+        }
+        impl From<BasicRaw> for Basic {
+            fn from(value: BasicRaw) -> Self {
+                Basic {
+                    a: value.a,
+                    b: value.b,
+                    c: value.c,
+                }
+            }
+        }
+
+        impl ToByteable for Basic {
+            type Target = BasicRaw;
+        }
+
+        impl ByteableToRegularStruct for BasicRaw {
+            type Target = Basic;
         }
     }
 }

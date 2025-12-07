@@ -28,87 +28,45 @@ byteable = { version = "*", features = ["derive", "tokio"] }
 
 ## Usage
 
-### Basic `Byteable` Conversion
-
-Implement the `Byteable` trait manually or use the `#[derive(Byteable)]` macro (with the `derive` feature enabled):
+Here's a quick example demonstrating basic usage with file I/O:
 
 ```rust
-use byteable::{Byteable, ReadByteable, WriteByteable, LittleEndian};
-use std::io::Cursor;
+use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
+use std::fs::File;
 
-#[derive(Byteable, Debug, PartialEq, Copy, Clone)]
-#[byteable(transparent)] // For single-field structs
-struct MyCustomId(u32);
+#[derive(Byteable, Debug, PartialEq)]
+#[repr(C, packed)]
+struct Packet {
+    id: u8,
+    length: LittleEndian<u16>,
+    data: [u8; 4],
+}
 
 fn main() -> std::io::Result<()> {
-    let id = MyCustomId(12345);
-    let mut buffer = Vec::new();
-
-    // Write to buffer
-    buffer.write_one(id)?;
-
-    // Read from buffer
-    let mut reader = &buffer[..];
-    let read_id: MyCustomId = reader.read_one()?;
-
-    println!("Original ID: {:?}, Read ID: {:?}", id, read_id);
-    assert_eq!(id, read_id);
-    Ok(())
-}
-```
-
-### Endianness Conversion
-
-```rust
-use byteable::{BigEndian, LittleEndian};
-
-fn main() {
-    let value: u32 = 0x01020304;
-
-    // Convert to Big Endian
-    let be_value = BigEndian::new(value);
-    println!("Value in Big Endian: {:?}", be_value); // Will show 0x01020304
-
-
-    // Convert to Little Endian
-    let le_value = LittleEndian::new(value);
-    println!("Value in Little Endian: {:?}", le_value); // Will show 0x04030201
-}
-```
-
-### Asynchronous I/O (with `tokio` feature)
-
-```rust
-#[cfg(feature = "tokio")]
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    use byteable::{Byteable, AsyncReadByteable, AsyncWriteByteable};
-    use tokio::io::Cursor;
-
-    #[derive(Byteable, Debug, PartialEq, Copy, Clone)]
-    struct SensorData {
-        temperature: f32,
-        humidity: u16,
-    }
-
-    let data = SensorData {
-        temperature: 25.5,
-        humidity: 60,
+    // Create a packet
+    let packet = Packet {
+        id: 42,
+        length: LittleEndian::new(1024),
+        data: [0xDE, 0xAD, 0xBE, 0xEF],
     };
-    let mut buffer = Cursor::new(Vec::new());
 
-    // Write asynchronously
-    buffer.write_one(data).await?;
+    // Write packet to a file
+    let mut file = File::create("packet.bin")?;
+    file.write_one(packet)?;
+    println!("Packet written to file");
 
-    // Reset cursor and read asynchronously
-    buffer.set_position(0);
-    let read_data: SensorData = buffer.read_one().await?;
+    // Read packet back from file
+    let mut file = File::open("packet.bin")?;
+    let restored: Packet = file.read_one()?;
 
-    println!("Original Data: {:?}, Read Data: {:?}", data, read_data);
-    assert_eq!(data, read_data);
+    assert_eq!(packet, restored);
+    println!("Packet successfully read back: {:?}", restored);
+
     Ok(())
 }
 ```
+
+The same `ReadByteable` and `WriteByteable` traits work with any `Read`/`Write` implementor, including TCP streams, in-memory buffers, and more. For more examples, check out the [`examples/`](examples/) directory.
 
 ## Contributing
 

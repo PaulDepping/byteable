@@ -9,7 +9,7 @@ readme = "README.md"
 
 [features]
 all = ["derive", "tokio"]
-default = []
+default = ["derive"]
 derive = ["dep:byteable_derive"]
 tokio = ["dep:tokio"]
 
