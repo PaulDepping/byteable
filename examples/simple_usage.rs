@@ -3,25 +3,83 @@
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{BigEndian, Byteable, LittleEndian};
+use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian};
 
 /// A simple sensor reading structure
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(Byteable, Clone, Copy, Debug)]
 #[repr(C, packed)]
-struct SensorReading {
+struct SensorReadingRaw {
     sensor_id: u8,
     temperature: LittleEndian<u16>, // Temperature in 0.01°C units
     humidity: LittleEndian<u16>,    // Humidity in 0.01% units
     pressure: BigEndian<u32>,       // Pressure in Pascals
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SensorReading {
+    sensor_id: u8,
+    temperature: u16, // Temperature in 0.01°C units
+    humidity: u16,    // Humidity in 0.01% units
+    pressure: u32,    // Pressure in Pascals
+}
+
+impl ByteableRegular for SensorReading {
+    type Raw = SensorReadingRaw;
+
+    fn to_raw(self) -> Self::Raw {
+        Self::Raw {
+            sensor_id: self.sensor_id,
+            temperature: LittleEndian::new(self.temperature),
+            humidity: LittleEndian::new(self.humidity),
+            pressure: BigEndian::new(self.pressure),
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            sensor_id: raw.sensor_id,
+            temperature: raw.temperature.get(),
+            humidity: raw.humidity.get(),
+            pressure: raw.pressure.get(),
+        }
+    }
+}
+
 /// A compact RGB color structure
 #[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[repr(C, packed)]
+struct RgbColorRaw {
+    red: u8,
+    green: u8,
+    blue: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C, packed)]
 struct RgbColor {
     red: u8,
     green: u8,
     blue: u8,
+}
+
+impl ByteableRegular for RgbColor {
+    type Raw = RgbColorRaw;
+
+    fn to_raw(self) -> Self::Raw {
+        Self::Raw {
+            red: self.red,
+            green: self.green,
+            blue: self.blue,
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            red: raw.red,
+            green: raw.green,
+            blue: raw.blue,
+        }
+    }
 }
 
 fn main() {
@@ -30,19 +88,19 @@ fn main() {
     // Example 1: Create a sensor reading
     let reading = SensorReading {
         sensor_id: 5,
-        temperature: LittleEndian::new(2547), // 25.47°C
-        humidity: LittleEndian::new(6523),    // 65.23%
-        pressure: BigEndian::new(101325),     // Standard atmospheric pressure
+        temperature: 2547, // 25.47°C
+        humidity: 6523,    // 65.23%
+        pressure: 101325,  // Standard atmospheric pressure
     };
 
     println!("1. Sensor Reading:");
     println!("   Sensor ID: {}", reading.sensor_id);
     println!(
         "   Temperature: {:.2}°C",
-        reading.temperature.get() as f32 / 100.0
+        reading.temperature as f32 / 100.0
     );
-    println!("   Humidity: {:.2}%", reading.humidity.get() as f32 / 100.0);
-    println!("   Pressure: {} Pa", reading.pressure.get());
+    println!("   Humidity: {:.2}%", reading.humidity as f32 / 100.0);
+    println!("   Pressure: {} Pa", reading.pressure);
 
     // Convert to bytes
     let bytes = reading.as_bytearray();
@@ -105,7 +163,7 @@ fn main() {
     }
 
     // Convert entire palette to bytes
-    let total_size = std::mem::size_of::<RgbColor>() * color_palette.len();
+    let total_size = RgbColor::binary_size() * color_palette.len();
     println!("   Total palette size: {} bytes", total_size);
 
     println!("\n=== Example completed! ===");

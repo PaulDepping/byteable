@@ -64,18 +64,23 @@ pub fn byteable_derive_macro(input: proc_macro::TokenStream) -> proc_macro::Toke
 
     quote! {
         impl #impl_generics Byteable for #ident #type_generics #where_clause {
-            type ByteArray = [u8; std::mem::size_of::<Self>()];
+            type ByteArray = [u8; ::std::mem::size_of::<Self>()];
             fn as_bytearray(self) -> Self::ByteArray {
                 // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
                 // and the size of Self matches the size of Self::ByteArray.
                 // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(self) }
+                unsafe { ::std::mem::transmute(self) }
             }
+
             fn from_bytearray(ba: Self::ByteArray) -> Self {
                 // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
                 // and the size of Self matches the size of Self::ByteArray.
                 // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(ba) }
+                unsafe { ::std::mem::transmute(ba) }
+            }
+
+            fn binary_size() -> usize {
+                ::std::mem::size_of::<Self>()
             }
         }
     }

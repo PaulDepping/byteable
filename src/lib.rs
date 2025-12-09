@@ -94,7 +94,11 @@
 
 #[cfg(feature = "tokio")]
 use std::future::Future;
-use std::io::{Read, Write};
+use std::{
+    fmt,
+    hash::Hash,
+    io::{Read, Write},
+};
 
 #[cfg(feature = "derive")]
 pub use byteable_derive::Byteable;
@@ -102,7 +106,7 @@ pub use byteable_derive::Byteable;
 #[cfg(feature = "tokio")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Trait for types that can be represented as a byte array.
+/// Trait for working with byte arrays.
 ///
 /// This trait provides methods for creating zero-filled byte arrays and
 /// accessing them as mutable or immutable byte slices. It is primarily
@@ -111,10 +115,8 @@ pub trait ByteableByteArray {
     /// Creates a new byte array filled with zeros.
     fn create_zeroed() -> Self;
     /// Returns a mutable slice reference to the underlying byte array.
-    #[must_use]
     fn as_byteslice_mut(&mut self) -> &mut [u8];
     /// Returns an immutable slice reference to the underlying byte array.
-    #[must_use]
     fn as_byteslice(&self) -> &[u8];
 }
 
@@ -133,21 +135,23 @@ impl<const SIZE: usize> ByteableByteArray for [u8; SIZE] {
     }
 }
 
-/// Trait for types that can be converted to and from a `ByteableByteArray`.
+/// Trait for types that can be converted to and from a byte array.
 ///
 /// This trait is central to the `byteable` crate, enabling structured data
 /// to be easily serialized into and deserialized from byte arrays.
-/// It requires the type to implement `Copy`.
-pub trait Byteable: Copy {
+pub trait Byteable {
     /// The associated byte array type that can represent `Self`.
     type ByteArray: ByteableByteArray;
     /// Converts `self` into its `ByteableByteArray` representation.
-    #[must_use]
     fn as_bytearray(self) -> Self::ByteArray;
     /// Creates an instance of `Self` from a `ByteableByteArray`.
     fn from_bytearray(ba: Self::ByteArray) -> Self;
+
+    /// Returns the size in bytes of the binary representation of this type.
+    fn binary_size() -> usize;
 }
 
+/*
 macro_rules! impl_byteable {
     ($type:ident) => {
         impl Byteable for $type {
@@ -164,10 +168,31 @@ macro_rules! impl_byteable {
                 // The Byteable trait requires that the struct is `Copy`.
                 unsafe { std::mem::transmute(ba) }
             }
+
+            fn binary_size() -> usize {
+                std::mem::size_of::<Self>()
+            }
         }
     };
 }
+*/
 
+/// Macro to implement the `Byteable` trait for generic wrapper types.
+///
+/// This macro generates a `Byteable` implementation for a type with a single generic parameter.
+/// It uses `std::mem::transmute` to convert between the type and its byte array representation.
+///
+/// # Safety
+///
+/// The implementation assumes the type has `#[repr(transparent)]` or `#[repr(C, packed)]`
+/// to ensure a consistent memory layout for safe transmutation.
+///
+/// # Example
+///
+/// ```ignore
+/// impl_byteable_generic!(BigEndian, u32);
+/// // Expands to: impl Byteable for BigEndian<u32> { ... }
+/// ```
 macro_rules! impl_byteable_generic {
     ($type:ident, $generic:ident) => {
         impl Byteable for $type<$generic> {
@@ -184,18 +209,46 @@ macro_rules! impl_byteable_generic {
                 // The Byteable trait requires that the struct is `Copy`.
                 unsafe { std::mem::transmute(ba) }
             }
+
+            fn binary_size() -> usize {
+                std::mem::size_of::<Self>()
+            }
         }
     };
 }
 
+/// Trait for types that have a raw byteable representation and can be converted to/from a regular form.
+///
+/// This trait is automatically implemented for types that implement `Byteable` when there is
+/// a corresponding `ByteableRegular` type that uses them as their raw representation.
+///
+/// This trait facilitates a pattern where you have a "raw" type (suitable for byte serialization)
+/// and a "regular" type (more convenient for application logic), and you need to convert between them.
 pub trait ByteableRaw<Regular>: Byteable {
+    /// Converts the raw representation to the regular form.
     fn to_regular(self) -> Regular;
+    /// Converts the regular form to the raw representation.
     fn from_regular(regular: Regular) -> Self;
 }
 
+/// Trait for types that can be represented in a raw byteable form.
+///
+/// This trait allows types to specify an associated raw type that implements `Byteable`,
+/// providing conversion methods between the regular type and its raw representation.
+///
+/// By implementing this trait, your type automatically gains a `Byteable` implementation
+/// that delegates to the raw type's implementation.
+///
+/// # Example
+///
+/// This is useful for types that need preprocessing before serialization, such as
+/// converting between different representations (e.g., IPv4 addresses as `u32` vs `[u8; 4]`).
 pub trait ByteableRegular: Sized {
+    /// The raw byteable type that represents this type in serialized form.
     type Raw: Byteable;
+    /// Converts this type to its raw representation.
     fn to_raw(self) -> Self::Raw;
+    /// Constructs this type from its raw representation.
     fn from_raw(raw: Self::Raw) -> Self;
 }
 
@@ -210,6 +263,26 @@ where
 
     fn from_regular(regular: Regular) -> Self {
         regular.to_raw()
+    }
+}
+
+impl<Raw, Regular> Byteable for Regular
+where
+    Regular: ByteableRegular<Raw = Raw>,
+    Raw: Byteable,
+{
+    type ByteArray = Raw::ByteArray;
+
+    fn as_bytearray(self) -> Self::ByteArray {
+        self.to_raw().as_bytearray()
+    }
+
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        Self::from_raw(Raw::from_bytearray(ba))
+    }
+
+    fn binary_size() -> usize {
+        Raw::binary_size()
     }
 }
 
@@ -312,6 +385,17 @@ pub trait Endianable: Copy {
     fn to_be(self) -> Self;
 }
 
+/// Macro to implement the `Endianable` trait for integer types.
+///
+/// This macro generates an `Endianable` implementation for primitive integer types
+/// by delegating to their built-in endianness conversion methods.
+///
+/// # Example
+///
+/// ```ignore
+/// impl_endianable!(u32);
+/// // Expands to: impl Endianable for u32 { ... }
+/// ```
 macro_rules! impl_endianable {
     ($type:ident) => {
         impl Endianable for $type {
@@ -334,6 +418,23 @@ macro_rules! impl_endianable {
     };
 }
 
+/// Macro to implement the `Endianable` trait for floating-point types.
+///
+/// This macro generates an `Endianable` implementation for floating-point types
+/// by converting them to their integer bit representation, applying endianness
+/// conversion, and then converting back to the float type.
+///
+/// # Parameters
+///
+/// * `$ftype` - The floating-point type (e.g., `f32` or `f64`)
+/// * `$ntype` - The corresponding integer type for bit representation (e.g., `u32` for `f32`, `u64` for `f64`)
+///
+/// # Example
+///
+/// ```ignore
+/// impl_endianable_float!(f32, u32);
+/// // Expands to: impl Endianable for f32 { ... }
+/// ```
 macro_rules! impl_endianable_float {
     ($ftype:ident,$ntype:ident) => {
         impl Endianable for $ftype {
@@ -378,8 +479,40 @@ impl_endianable_float!(f64, u64);
 /// When retrieving the inner value with `get`, it is converted back
 /// to the native endianness.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy)]
 pub struct BigEndian<T: Endianable>(pub(crate) T);
+
+impl<T: fmt::Debug + Endianable> fmt::Debug for BigEndian<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("BigEndian").field(&self.get()).finish()
+    }
+}
+
+impl<T: PartialEq + Endianable> PartialEq for BigEndian<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl<T: Eq + Endianable> Eq for BigEndian<T> {}
+
+impl<T: PartialOrd + Endianable> PartialOrd for BigEndian<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.get().partial_cmp(&other.get())
+    }
+}
+
+impl<T: Ord + Endianable> Ord for BigEndian<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.get().cmp(&other.get())
+    }
+}
+
+impl<T: Hash + Endianable> Hash for BigEndian<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.get().hash(state);
+    }
+}
 
 impl_byteable_generic!(BigEndian, u8);
 impl_byteable_generic!(BigEndian, u16);
@@ -425,8 +558,40 @@ impl<T: Endianable + Default> Default for BigEndian<T> {
 /// When retrieving the inner value with `get`, it is converted back
 /// to the native endianness.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy)]
 pub struct LittleEndian<T: Endianable>(pub(crate) T);
+
+impl<T: fmt::Debug + Endianable> fmt::Debug for LittleEndian<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("LittleEndian").field(&self.get()).finish()
+    }
+}
+
+impl<T: PartialEq + Endianable> PartialEq for LittleEndian<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl<T: Eq + Endianable> Eq for LittleEndian<T> {}
+
+impl<T: PartialOrd + Endianable> PartialOrd for LittleEndian<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.get().partial_cmp(&other.get())
+    }
+}
+
+impl<T: Ord + Endianable> Ord for LittleEndian<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.get().cmp(&other.get())
+    }
+}
+
+impl<T: Hash + Endianable> Hash for LittleEndian<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.get().hash(state);
+    }
+}
 
 impl_byteable_generic!(LittleEndian, u8);
 impl_byteable_generic!(LittleEndian, u16);
@@ -527,65 +692,6 @@ mod tests {
             assert_eq!(le_val.get(), val);
             assert_eq!(le_val.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
             assert_eq!(u32::from_le_bytes(le_val.get_raw().to_ne_bytes()), val);
-        }
-    }
-
-    mod derive {
-        use crate::{Byteable, ByteableRegular};
-
-        #[derive(Clone, Copy)]
-        struct Basic {
-            a: u16,
-            b: u32,
-            c: u16,
-        }
-
-        #[derive(Clone, Copy)]
-        #[repr(C, packed)]
-        struct BasicRaw {
-            a: u16,
-            b: u32,
-            c: u16,
-        }
-        impl_byteable!(BasicRaw);
-
-        impl From<Basic> for BasicRaw {
-            fn from(value: Basic) -> Self {
-                BasicRaw {
-                    a: value.a,
-                    b: value.b,
-                    c: value.c,
-                }
-            }
-        }
-        impl From<BasicRaw> for Basic {
-            fn from(value: BasicRaw) -> Self {
-                Basic {
-                    a: value.a,
-                    b: value.b,
-                    c: value.c,
-                }
-            }
-        }
-
-        impl ByteableRegular for Basic {
-            type Raw = BasicRaw;
-
-            fn to_raw(self) -> Self::Raw {
-                BasicRaw {
-                    a: self.a,
-                    b: self.b,
-                    c: self.c,
-                }
-            }
-
-            fn from_raw(raw: Self::Raw) -> Self {
-                Self {
-                    a: raw.a,
-                    b: raw.b,
-                    c: raw.c,
-                }
-            }
         }
     }
 }
