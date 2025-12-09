@@ -188,25 +188,28 @@ macro_rules! impl_byteable_generic {
     };
 }
 
-pub trait ByteableFromRegularStruct: Byteable {
-    type RegularStruct: Into<Self>;
-
-    fn from_struct(s: Self::RegularStruct) -> Self {
-        s.into()
-    }
+pub trait ByteableRaw<Regular>: Byteable {
+    fn to_regular(self) -> Regular;
+    fn from_regular(regular: Regular) -> Self;
 }
 
-pub trait ToByteable: Into<Self::Target> {
-    type Target: Byteable;
-    fn to_byteable(self) -> Self::Target {
-        self.into()
-    }
+pub trait ByteableRegular: Sized {
+    type Raw: Byteable;
+    fn to_raw(self) -> Self::Raw;
+    fn from_raw(raw: Self::Raw) -> Self;
 }
 
-pub trait ByteableToRegularStruct: Byteable + Into<Self::Target> {
-    type Target;
-    fn to_struct(self) -> Self::Target {
-        self.into()
+impl<Raw, Regular> ByteableRaw<Regular> for Raw
+where
+    Regular: ByteableRegular<Raw = Raw>,
+    Raw: Byteable,
+{
+    fn to_regular(self) -> Regular {
+        Regular::from_raw(self)
+    }
+
+    fn from_regular(regular: Regular) -> Self {
+        regular.to_raw()
     }
 }
 
@@ -528,7 +531,7 @@ mod tests {
     }
 
     mod derive {
-        use crate::{Byteable, ByteableFromRegularStruct, ByteableToRegularStruct, ToByteable};
+        use crate::{Byteable, ByteableRegular};
 
         #[derive(Clone, Copy)]
         struct Basic {
@@ -565,12 +568,24 @@ mod tests {
             }
         }
 
-        impl ToByteable for Basic {
-            type Target = BasicRaw;
-        }
+        impl ByteableRegular for Basic {
+            type Raw = BasicRaw;
 
-        impl ByteableToRegularStruct for BasicRaw {
-            type Target = Basic;
+            fn to_raw(self) -> Self::Raw {
+                BasicRaw {
+                    a: self.a,
+                    b: self.b,
+                    c: self.c,
+                }
+            }
+
+            fn from_raw(raw: Self::Raw) -> Self {
+                Self {
+                    a: raw.a,
+                    b: raw.b,
+                    c: raw.c,
+                }
+            }
         }
     }
 }
