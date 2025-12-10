@@ -139,7 +139,7 @@ impl<const SIZE: usize> ByteableByteArray for [u8; SIZE] {
 ///
 /// This trait is central to the `byteable` crate, enabling structured data
 /// to be easily serialized into and deserialized from byte arrays.
-pub trait Byteable {
+pub trait Byteable: Copy {
     /// The associated byte array type that can represent `Self`.
     type ByteArray: ByteableByteArray;
     /// Converts `self` into its `ByteableByteArray` representation.
@@ -151,7 +151,7 @@ pub trait Byteable {
     fn binary_size() -> usize;
 }
 
-/*
+#[macro_export]
 macro_rules! impl_byteable {
     ($type:ident) => {
         impl Byteable for $type {
@@ -175,7 +175,6 @@ macro_rules! impl_byteable {
         }
     };
 }
-*/
 
 /// Macro to implement the `Byteable` trait for generic wrapper types.
 ///
@@ -268,7 +267,7 @@ where
 
 impl<Raw, Regular> Byteable for Regular
 where
-    Regular: ByteableRegular<Raw = Raw>,
+    Regular: ByteableRegular<Raw = Raw> + Copy,
     Raw: Byteable,
 {
     type ByteArray = Raw::ByteArray;
