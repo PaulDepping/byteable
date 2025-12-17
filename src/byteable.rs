@@ -55,6 +55,24 @@ macro_rules! impl_byteable {
     };
 }
 
+macro_rules! impl_byteable_primitive {
+    ($type:ty) => {
+        impl Byteable for $type {
+            type ByteArray = [u8; std::mem::size_of::<Self>()];
+            fn as_bytearray(self) -> Self::ByteArray {
+                <$type>::to_ne_bytes(self)
+            }
+            fn from_bytearray(ba: Self::ByteArray) -> Self {
+                <$type>::from_ne_bytes(ba)
+            }
+
+            fn binary_size() -> usize {
+                std::mem::size_of::<Self>()
+            }
+        }
+    };
+}
+
 /// Trait for types that have a raw byteable representation and can be converted to/from a regular form.
 ///
 /// This trait is automatically implemented for types that implement `Byteable` when there is
@@ -124,18 +142,18 @@ where
     }
 }
 
-impl_byteable!(u8);
-impl_byteable!(u16);
-impl_byteable!(u32);
-impl_byteable!(u64);
-impl_byteable!(u128);
-impl_byteable!(i8);
-impl_byteable!(i16);
-impl_byteable!(i32);
-impl_byteable!(i64);
-impl_byteable!(i128);
-impl_byteable!(f32);
-impl_byteable!(f64);
+impl_byteable_primitive!(u8);
+impl_byteable_primitive!(u16);
+impl_byteable_primitive!(u32);
+impl_byteable_primitive!(u64);
+impl_byteable_primitive!(u128);
+impl_byteable_primitive!(i8);
+impl_byteable_primitive!(i16);
+impl_byteable_primitive!(i32);
+impl_byteable_primitive!(i64);
+impl_byteable_primitive!(i128);
+impl_byteable_primitive!(f32);
+impl_byteable_primitive!(f64);
 
 #[cfg(test)]
 mod tests {
