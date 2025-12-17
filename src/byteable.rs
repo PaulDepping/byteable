@@ -124,6 +124,19 @@ where
     }
 }
 
+impl_byteable!(u8);
+impl_byteable!(u16);
+impl_byteable!(u32);
+impl_byteable!(u64);
+impl_byteable!(u128);
+impl_byteable!(i8);
+impl_byteable!(i16);
+impl_byteable!(i32);
+impl_byteable!(i64);
+impl_byteable!(i128);
+impl_byteable!(f32);
+impl_byteable!(f64);
+
 #[cfg(test)]
 mod tests {
     use crate::{BigEndian, Byteable, LittleEndian};
