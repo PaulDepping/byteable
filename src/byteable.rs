@@ -32,46 +32,52 @@ pub trait Byteable: Copy {
 /// to ensure a consistent memory layout for safe transmutation.
 #[macro_export]
 macro_rules! impl_byteable {
-    ($type:ty) => {
-        impl Byteable for $type {
-            type ByteArray = [u8; std::mem::size_of::<Self>()];
-            fn as_bytearray(self) -> Self::ByteArray {
-                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                // and the size of Self matches the size of Self::ByteArray.
-                // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(self) }
-            }
-            fn from_bytearray(ba: Self::ByteArray) -> Self {
-                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                // and the size of Self matches the size of Self::ByteArray.
-                // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(ba) }
-            }
+    ($($type:ty),+) => {
+        $(
+            impl Byteable for $type {
+                type ByteArray = [u8; std::mem::size_of::<Self>()];
+                fn as_bytearray(self) -> Self::ByteArray {
+                    // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                    // and the size of Self matches the size of Self::ByteArray.
+                    // The Byteable trait requires that the struct is `Copy`.
+                    unsafe { std::mem::transmute(self) }
+                }
+                fn from_bytearray(ba: Self::ByteArray) -> Self {
+                    // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
+                    // and the size of Self matches the size of Self::ByteArray.
+                    // The Byteable trait requires that the struct is `Copy`.
+                    unsafe { std::mem::transmute(ba) }
+                }
 
-            fn binary_size() -> usize {
-                std::mem::size_of::<Self>()
+                fn binary_size() -> usize {
+                    std::mem::size_of::<Self>()
+                }
             }
-        }
+        )+
     };
 }
 
 macro_rules! impl_byteable_primitive {
-    ($type:ty) => {
-        impl Byteable for $type {
-            type ByteArray = [u8; std::mem::size_of::<Self>()];
-            fn as_bytearray(self) -> Self::ByteArray {
-                <$type>::to_ne_bytes(self)
-            }
-            fn from_bytearray(ba: Self::ByteArray) -> Self {
-                <$type>::from_ne_bytes(ba)
-            }
+    ($($type:ty),+) => {
+        $(
+            impl Byteable for $type {
+                type ByteArray = [u8; std::mem::size_of::<Self>()];
+                fn as_bytearray(self) -> Self::ByteArray {
+                    <$type>::to_ne_bytes(self)
+                }
+                fn from_bytearray(ba: Self::ByteArray) -> Self {
+                    <$type>::from_ne_bytes(ba)
+                }
 
-            fn binary_size() -> usize {
-                std::mem::size_of::<Self>()
+                fn binary_size() -> usize {
+                    std::mem::size_of::<Self>()
+                }
             }
-        }
+        )+
     };
 }
+
+impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
 /// Trait for types that have a raw byteable representation and can be converted to/from a regular form.
 ///
@@ -141,19 +147,6 @@ where
         Raw::binary_size()
     }
 }
-
-impl_byteable_primitive!(u8);
-impl_byteable_primitive!(u16);
-impl_byteable_primitive!(u32);
-impl_byteable_primitive!(u64);
-impl_byteable_primitive!(u128);
-impl_byteable_primitive!(i8);
-impl_byteable_primitive!(i16);
-impl_byteable_primitive!(i32);
-impl_byteable_primitive!(i64);
-impl_byteable_primitive!(i128);
-impl_byteable_primitive!(f32);
-impl_byteable_primitive!(f64);
 
 #[cfg(test)]
 mod tests {
