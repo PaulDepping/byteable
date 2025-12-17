@@ -32,49 +32,8 @@ pub trait Byteable: Copy {
 /// to ensure a consistent memory layout for safe transmutation.
 #[macro_export]
 macro_rules! impl_byteable {
-    ($type:ident) => {
+    ($type:ty) => {
         impl Byteable for $type {
-            type ByteArray = [u8; std::mem::size_of::<Self>()];
-            fn as_bytearray(self) -> Self::ByteArray {
-                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                // and the size of Self matches the size of Self::ByteArray.
-                // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(self) }
-            }
-            fn from_bytearray(ba: Self::ByteArray) -> Self {
-                // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                // and the size of Self matches the size of Self::ByteArray.
-                // The Byteable trait requires that the struct is `Copy`.
-                unsafe { std::mem::transmute(ba) }
-            }
-
-            fn binary_size() -> usize {
-                std::mem::size_of::<Self>()
-            }
-        }
-    };
-}
-
-/// Macro to implement the `Byteable` trait for generic wrapper types.
-///
-/// This macro generates a `Byteable` implementation for a type with a single generic parameter.
-/// It uses `std::mem::transmute` to convert between the type and its byte array representation.
-///
-/// # Safety
-///
-/// The implementation assumes the type has `#[repr(transparent)]` or `#[repr(C, packed)]`
-/// to ensure a consistent memory layout for safe transmutation.
-///
-/// # Example
-///
-/// ```ignore
-/// impl_byteable_generic!(BigEndian, u32);
-/// // Expands to: impl Byteable for BigEndian<u32> { ... }
-/// ```
-#[macro_export]
-macro_rules! impl_byteable_generic {
-    ($type:ident, $generic:ident) => {
-        impl $crate::byteable::Byteable for $type<$generic> {
             type ByteArray = [u8; std::mem::size_of::<Self>()];
             fn as_bytearray(self) -> Self::ByteArray {
                 // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
@@ -167,7 +126,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{BigEndian, Byteable, LittleEndian, impl_byteable};
+    use crate::{BigEndian, Byteable, LittleEndian};
 
     #[derive(Clone, Copy, PartialEq, Debug)]
     #[repr(C, packed)]

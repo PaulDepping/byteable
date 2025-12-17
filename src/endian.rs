@@ -3,6 +3,7 @@
 //! This module provides the `Endianable` trait for types that support endianness conversion,
 //! along with `BigEndian` and `LittleEndian` wrapper types for explicit endianness control.
 
+use crate::Byteable;
 use std::{fmt, hash::Hash};
 
 /// Trait for types that support endianness conversion.
@@ -33,7 +34,7 @@ pub trait Endianable: Copy {
 /// // Expands to: impl Endianable for u32 { ... }
 /// ```
 macro_rules! impl_endianable {
-    ($type:ident) => {
+    ($type:ty) => {
         impl Endianable for $type {
             fn from_le(self) -> Self {
                 Self::from_le(self)
@@ -72,22 +73,22 @@ macro_rules! impl_endianable {
 /// // Expands to: impl Endianable for f32 { ... }
 /// ```
 macro_rules! impl_endianable_float {
-    ($ftype:ident,$ntype:ident) => {
+    ($ftype:ty,$ntype:ty) => {
         impl Endianable for $ftype {
             fn from_le(self) -> Self {
-                Self::from_bits($ntype::from_le(self.to_bits()))
+                Self::from_bits(<$ntype>::from_le(self.to_bits()))
             }
 
             fn from_be(self) -> Self {
-                Self::from_bits($ntype::from_be(self.to_bits()))
+                Self::from_bits(<$ntype>::from_be(self.to_bits()))
             }
 
             fn to_le(self) -> Self {
-                Self::from_bits($ntype::to_le(self.to_bits()))
+                Self::from_bits(<$ntype>::to_le(self.to_bits()))
             }
 
             fn to_be(self) -> Self {
-                Self::from_bits($ntype::to_be(self.to_bits()))
+                Self::from_bits(<$ntype>::to_be(self.to_bits()))
             }
         }
     };
@@ -150,20 +151,20 @@ impl<T: Hash + Endianable> Hash for BigEndian<T> {
     }
 }
 
-crate::impl_byteable_generic!(BigEndian, u8);
-crate::impl_byteable_generic!(BigEndian, u16);
-crate::impl_byteable_generic!(BigEndian, u32);
-crate::impl_byteable_generic!(BigEndian, u64);
-crate::impl_byteable_generic!(BigEndian, u128);
-crate::impl_byteable_generic!(BigEndian, usize);
-crate::impl_byteable_generic!(BigEndian, i8);
-crate::impl_byteable_generic!(BigEndian, i16);
-crate::impl_byteable_generic!(BigEndian, i32);
-crate::impl_byteable_generic!(BigEndian, i64);
-crate::impl_byteable_generic!(BigEndian, i128);
-crate::impl_byteable_generic!(BigEndian, isize);
-crate::impl_byteable_generic!(BigEndian, f32);
-crate::impl_byteable_generic!(BigEndian, f64);
+crate::impl_byteable!(BigEndian<u8>);
+crate::impl_byteable!(BigEndian<u16>);
+crate::impl_byteable!(BigEndian<u32>);
+crate::impl_byteable!(BigEndian<u64>);
+crate::impl_byteable!(BigEndian<u128>);
+crate::impl_byteable!(BigEndian<usize>);
+crate::impl_byteable!(BigEndian<i8>);
+crate::impl_byteable!(BigEndian<i16>);
+crate::impl_byteable!(BigEndian<i32>);
+crate::impl_byteable!(BigEndian<i64>);
+crate::impl_byteable!(BigEndian<i128>);
+crate::impl_byteable!(BigEndian<isize>);
+crate::impl_byteable!(BigEndian<f32>);
+crate::impl_byteable!(BigEndian<f64>);
 
 impl<T: Endianable> BigEndian<T> {
     /// Creates a new `BigEndian` instance from a value, converting it to big-endian.
@@ -229,20 +230,20 @@ impl<T: Hash + Endianable> Hash for LittleEndian<T> {
     }
 }
 
-crate::impl_byteable_generic!(LittleEndian, u8);
-crate::impl_byteable_generic!(LittleEndian, u16);
-crate::impl_byteable_generic!(LittleEndian, u32);
-crate::impl_byteable_generic!(LittleEndian, u64);
-crate::impl_byteable_generic!(LittleEndian, u128);
-crate::impl_byteable_generic!(LittleEndian, usize);
-crate::impl_byteable_generic!(LittleEndian, i8);
-crate::impl_byteable_generic!(LittleEndian, i16);
-crate::impl_byteable_generic!(LittleEndian, i32);
-crate::impl_byteable_generic!(LittleEndian, i64);
-crate::impl_byteable_generic!(LittleEndian, i128);
-crate::impl_byteable_generic!(LittleEndian, isize);
-crate::impl_byteable_generic!(LittleEndian, f32);
-crate::impl_byteable_generic!(LittleEndian, f64);
+crate::impl_byteable!(LittleEndian<u8>);
+crate::impl_byteable!(LittleEndian<u16>);
+crate::impl_byteable!(LittleEndian<u32>);
+crate::impl_byteable!(LittleEndian<u64>);
+crate::impl_byteable!(LittleEndian<u128>);
+crate::impl_byteable!(LittleEndian<usize>);
+crate::impl_byteable!(LittleEndian<i8>);
+crate::impl_byteable!(LittleEndian<i16>);
+crate::impl_byteable!(LittleEndian<i32>);
+crate::impl_byteable!(LittleEndian<i64>);
+crate::impl_byteable!(LittleEndian<i128>);
+crate::impl_byteable!(LittleEndian<isize>);
+crate::impl_byteable!(LittleEndian<f32>);
+crate::impl_byteable!(LittleEndian<f64>);
 
 impl<T: Endianable> LittleEndian<T> {
     /// Creates a new `LittleEndian` instance from a value, converting it to little-endian.
