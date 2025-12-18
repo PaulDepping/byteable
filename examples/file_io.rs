@@ -6,19 +6,30 @@
 //! - Read byteable structs from a file
 //! - Handle endianness with BigEndian and LittleEndian wrappers
 
-use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, WriteByteable};
+use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian, ReadByteable, WriteByteable};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
-/// A simple network packet structure demonstrating the Byteable derive macro.
-///
+/// A simple network packet structure.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct NetworkPacket {
+    /// Packet sequence number
+    sequence: u8,
+    /// Packet type identifier
+    packet_type: u16,
+    /// Payload length
+    payload_length: u32,
+    /// Timestamp
+    timestamp: u64,
+}
+
 /// Requirements for deriving Byteable:
 /// - Must be `#[repr(C, packed)]` or `#[repr(C)]` for predictable memory layout
 /// - Must implement `Copy`
 /// - All fields must be Byteable (primitives, or types wrapped in BigEndian/LittleEndian)
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(Byteable, Clone, Copy, Debug)]
 #[repr(C, packed)]
-struct NetworkPacket {
+struct NetworkPacketRaw {
     /// Packet sequence number (native endianness)
     sequence: u8,
     /// Packet type identifier (little-endian)
@@ -29,10 +40,46 @@ struct NetworkPacket {
     timestamp: LittleEndian<u64>,
 }
 
+impl ByteableRegular for NetworkPacket {
+    type Raw = NetworkPacketRaw;
+
+    fn to_raw(&self) -> Self::Raw {
+        Self::Raw {
+            sequence: self.sequence,
+            packet_type: LittleEndian::new(self.packet_type),
+            payload_length: BigEndian::new(self.payload_length),
+            timestamp: LittleEndian::new(self.timestamp),
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            sequence: raw.sequence,
+            packet_type: raw.packet_type.get(),
+            payload_length: raw.payload_length.get(),
+            timestamp: raw.timestamp.get(),
+        }
+    }
+}
+
 /// A configuration structure demonstrating mixed endianness.
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
-#[repr(C, packed)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct DeviceConfig {
+    /// Device ID
+    device_id: u32,
+    /// Protocol version
+    version: u8,
+    /// Flags bitfield
+    flags: u8,
+    /// Network port
+    port: u16,
+    /// Calibration factor
+    calibration: f32,
+}
+
+#[derive(Byteable, Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct DeviceConfigRaw {
     /// Device ID (little-endian, common for x86 devices)
     device_id: LittleEndian<u32>,
     /// Protocol version (native endianness for single-byte values)
@@ -45,6 +92,30 @@ struct DeviceConfig {
     calibration: LittleEndian<f32>,
 }
 
+impl ByteableRegular for DeviceConfig {
+    type Raw = DeviceConfigRaw;
+
+    fn to_raw(&self) -> Self::Raw {
+        Self::Raw {
+            device_id: LittleEndian::new(self.device_id),
+            version: self.version,
+            flags: self.flags,
+            port: BigEndian::new(self.port),
+            calibration: LittleEndian::new(self.calibration),
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            device_id: raw.device_id.get(),
+            version: raw.version,
+            flags: raw.flags,
+            port: raw.port.get(),
+            calibration: raw.calibration.get(),
+        }
+    }
+}
+
 fn main() -> io::Result<()> {
     println!("=== Byteable Derive Macro Example ===\n");
 
@@ -52,16 +123,16 @@ fn main() -> io::Result<()> {
     println!("1. Creating a NetworkPacket:");
     let packet = NetworkPacket {
         sequence: 42,
-        packet_type: LittleEndian::new(0x1234),
-        payload_length: BigEndian::new(1024),
-        timestamp: LittleEndian::new(1638360000),
+        packet_type: 0x1234,
+        payload_length: 1024,
+        timestamp: 1638360000,
     };
 
     println!("   Packet: {:?}", packet);
     println!("   Sequence: {}", packet.sequence);
-    println!("   Packet Type: 0x{:04X}", packet.packet_type.get());
-    println!("   Payload Length: {} bytes", packet.payload_length.get());
-    println!("   Timestamp: {}", packet.timestamp.get());
+    println!("   Packet Type: 0x{:04X}", packet.packet_type);
+    println!("   Payload Length: {} bytes", packet.payload_length);
+    println!("   Timestamp: {}", packet.timestamp);
 
     // Convert to byte array
     let bytes = packet.as_bytearray();
@@ -77,19 +148,19 @@ fn main() -> io::Result<()> {
 
     let packet2 = NetworkPacket {
         sequence: 43,
-        packet_type: LittleEndian::new(0x5678),
-        payload_length: BigEndian::new(2048),
-        timestamp: LittleEndian::new(1638360001),
+        packet_type: 0x5678,
+        payload_length: 2048,
+        timestamp: 1638360001,
     };
     file.write_one(packet2)?;
 
     // Write a device config
     let config = DeviceConfig {
-        device_id: LittleEndian::new(0xABCDEF01),
+        device_id: 0xABCDEF01,
         version: 1,
         flags: 0b10101010,
-        port: BigEndian::new(8080),
-        calibration: LittleEndian::new(3.14159),
+        port: 8080,
+        calibration: 3.14159,
     };
     file.write_one(config)?;
 
@@ -117,11 +188,11 @@ fn main() -> io::Result<()> {
     println!();
 
     println!("   Device config: {:?}", read_config);
-    println!("   Device ID: 0x{:08X}", read_config.device_id.get());
+    println!("   Device ID: 0x{:08X}", read_config.device_id);
     println!("   Version: {}", read_config.version);
     println!("   Flags: 0b{:08b}", read_config.flags);
-    println!("   Port: {}", read_config.port.get());
-    println!("   Calibration: {:.5}", read_config.calibration.get());
+    println!("   Port: {}", read_config.port);
+    println!("   Calibration: {:.5}", read_config.calibration);
     println!();
 
     // Example 4: Random access with seek
@@ -140,9 +211,9 @@ fn main() -> io::Result<()> {
     println!("5. Manual byte array conversion:");
     let test_packet = NetworkPacket {
         sequence: 100,
-        packet_type: LittleEndian::new(0xFF00),
-        payload_length: BigEndian::new(512),
-        timestamp: LittleEndian::new(999999),
+        packet_type: 0xFF00,
+        payload_length: 512,
+        timestamp: 999999,
     };
 
     // Convert to bytes

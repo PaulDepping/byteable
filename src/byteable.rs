@@ -104,12 +104,12 @@ pub trait ByteableRaw<Regular>: Byteable {
 /// # Example
 ///
 /// This is useful for types that need preprocessing before serialization, such as
-/// converting between different representations (e.g., IPv4 addresses as `u32` vs `[u8; 4]`).
+/// converting between different representations (e.g., IPv4 addresses as `u32` vs `[u8; 4]`) or setting a concrete endianness for members.
 pub trait ByteableRegular: Sized {
     /// The raw byteable type that represents this type in serialized form.
     type Raw: Byteable;
     /// Converts this type to its raw representation.
-    fn to_raw(self) -> Self::Raw;
+    fn to_raw(&self) -> Self::Raw;
     /// Constructs this type from its raw representation.
     fn from_raw(raw: Self::Raw) -> Self;
 }
@@ -225,7 +225,7 @@ mod tests {
     impl ByteableRegular for MyRegularStruct {
         type Raw = MyRawStruct;
 
-        fn to_raw(self) -> Self::Raw {
+        fn to_raw(&self) -> Self::Raw {
             MyRawStruct {
                 a: self.a,
                 b: LittleEndian::new(self.b),

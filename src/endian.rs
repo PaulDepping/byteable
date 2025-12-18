@@ -3,7 +3,7 @@
 //! This module provides the `Endianable` trait for types that support endianness conversion,
 //! along with `BigEndian` and `LittleEndian` wrapper types for explicit endianness control.
 
-use crate::Byteable;
+use crate::{Byteable, ByteableByteArray};
 use std::{fmt, hash::Hash};
 
 /// Trait for types that support endianness conversion.
@@ -12,14 +12,21 @@ use std::{fmt, hash::Hash};
 /// and big-endian (BE) byte orders. It is implemented for most primitive integer
 /// and floating-point types.
 pub trait Endianable: Copy {
+    // always a bytearray of [u8; std::mem::size_of::<Self>()]
+    type ByteArray: ByteableByteArray;
     /// Converts a value from its little-endian representation to the native endianness.
-    fn from_le(self) -> Self;
+    fn from_le(ba: Self::ByteArray) -> Self;
     /// Converts a value from its big-endian representation to the native endianness.
-    fn from_be(self) -> Self;
+    fn from_be(ba: Self::ByteArray) -> Self;
+    /// Converts a value from its native-endian representation to the native endianness.
+    fn from_ne(ba: Self::ByteArray) -> Self;
+
     /// Converts a value from the native endianness to its little-endian representation.
-    fn to_le(self) -> Self;
+    fn to_le(self) -> Self::ByteArray;
     /// Converts a value from the native endianness to its big-endian representation.
-    fn to_be(self) -> Self;
+    fn to_be(self) -> Self::ByteArray;
+    /// Converts a value from the native endianness to its binary representation.
+    fn to_ne(self) -> Self::ByteArray;
 }
 
 /// Macro to implement the `Endianable` trait for integer types.
@@ -37,69 +44,37 @@ macro_rules! impl_endianable {
     ($($type:ty),+) => {
         $(
             impl Endianable for $type {
-                fn from_le(self) -> Self {
-                    Self::from_le(self)
+                type ByteArray = [u8; std::mem::size_of::<$type>()];
+
+                fn from_le(ba: Self::ByteArray) -> Self {
+                    Self::from_le_bytes(ba)
                 }
 
-                fn from_be(self) -> Self {
-                    Self::from_be(self)
+                fn from_be(ba: Self::ByteArray) -> Self {
+                    Self::from_be_bytes(ba)
                 }
 
-                fn to_le(self) -> Self {
-                    Self::to_le(self)
+                fn from_ne(ba: Self::ByteArray) -> Self {
+                    Self::from_ne_bytes(ba)
                 }
 
-                fn to_be(self) -> Self {
-                    Self::to_be(self)
-                }
-            }
-        )+
-    };
-}
-
-/// Macro to implement the `Endianable` trait for floating-point types.
-///
-/// This macro generates an `Endianable` implementation for floating-point types
-/// by converting them to their integer bit representation, applying endianness
-/// conversion, and then converting back to the float type.
-///
-/// # Parameters
-///
-/// * `$ftype` - The floating-point type (e.g., `f32` or `f64`)
-/// * `$ntype` - The corresponding integer type for bit representation (e.g., `u32` for `f32`, `u64` for `f64`)
-///
-/// # Example
-///
-/// ```ignore
-/// impl_endianable_float!(f32, u32);
-/// // Expands to: impl Endianable for f32 { ... }
-/// ```
-macro_rules! impl_endianable_float {
-    ($($ftype:ty => $ntype:ty),+) => {
-        $(
-            impl Endianable for $ftype {
-                fn from_le(self) -> Self {
-                    Self::from_bits(<$ntype>::from_le(self.to_bits()))
+                fn to_ne(self) -> Self::ByteArray {
+                    Self::to_ne_bytes(self)
                 }
 
-                fn from_be(self) -> Self {
-                    Self::from_bits(<$ntype>::from_be(self.to_bits()))
+                fn to_le(self) -> Self::ByteArray {
+                    Self::to_le_bytes(self)
                 }
 
-                fn to_le(self) -> Self {
-                    Self::from_bits(<$ntype>::to_le(self.to_bits()))
-                }
-
-                fn to_be(self) -> Self {
-                    Self::from_bits(<$ntype>::to_be(self.to_bits()))
+                fn to_be(self) -> Self::ByteArray {
+                    Self::to_be_bytes(self)
                 }
             }
         )+
     };
 }
 
-impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
-impl_endianable_float!(f32 => u32, f64 => u64);
+impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
 /// A wrapper type that ensures the inner `Endianable` value is treated as Big-Endian.
 ///
@@ -108,7 +83,7 @@ impl_endianable_float!(f32 => u32, f64 => u64);
 /// to the native endianness.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct BigEndian<T: Endianable>(pub(crate) T);
+pub struct BigEndian<T: Endianable>(pub(crate) T::ByteArray);
 
 impl<T: fmt::Debug + Endianable> fmt::Debug for BigEndian<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -142,21 +117,6 @@ impl<T: Hash + Endianable> Hash for BigEndian<T> {
     }
 }
 
-crate::impl_byteable!(
-    BigEndian<u8>,
-    BigEndian<u16>,
-    BigEndian<u32>,
-    BigEndian<u64>,
-    BigEndian<u128>,
-    BigEndian<i8>,
-    BigEndian<i16>,
-    BigEndian<i32>,
-    BigEndian<i64>,
-    BigEndian<i128>,
-    BigEndian<f32>,
-    BigEndian<f64>
-);
-
 impl<T: Endianable> BigEndian<T> {
     /// Creates a new `BigEndian` instance from a value, converting it to big-endian.
     pub fn new(val: T) -> Self {
@@ -165,11 +125,10 @@ impl<T: Endianable> BigEndian<T> {
 
     /// Returns the inner value, converting it from big-endian to the native endianness.
     pub fn get(self) -> T {
-        self.get_raw().from_be()
+        T::from_be(self.0)
     }
 
-    /// Returns the underlying native representation without any endian conversion.
-    pub fn get_raw(self) -> T {
+    pub fn get_raw(self) -> T::ByteArray {
         self.0
     }
 }
@@ -180,6 +139,22 @@ impl<T: Endianable + Default> Default for BigEndian<T> {
     }
 }
 
+impl<T: Endianable> Byteable for BigEndian<T> {
+    type ByteArray = <T as Endianable>::ByteArray;
+
+    fn as_bytearray(self) -> Self::ByteArray {
+        self.0
+    }
+
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        Self(ba)
+    }
+
+    fn binary_size() -> usize {
+        std::mem::size_of::<Self::ByteArray>()
+    }
+}
+
 /// A wrapper type that ensures the inner `Endianable` value is treated as Little-Endian.
 ///
 /// When creating a `LittleEndian` instance, the value is converted to little-endian.
@@ -187,7 +162,7 @@ impl<T: Endianable + Default> Default for BigEndian<T> {
 /// to the native endianness.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct LittleEndian<T: Endianable>(pub(crate) T);
+pub struct LittleEndian<T: Endianable>(pub(crate) T::ByteArray);
 
 impl<T: fmt::Debug + Endianable> fmt::Debug for LittleEndian<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -221,21 +196,6 @@ impl<T: Hash + Endianable> Hash for LittleEndian<T> {
     }
 }
 
-crate::impl_byteable!(
-    LittleEndian<u8>,
-    LittleEndian<u16>,
-    LittleEndian<u32>,
-    LittleEndian<u64>,
-    LittleEndian<u128>,
-    LittleEndian<i8>,
-    LittleEndian<i16>,
-    LittleEndian<i32>,
-    LittleEndian<i64>,
-    LittleEndian<i128>,
-    LittleEndian<f32>,
-    LittleEndian<f64>
-);
-
 impl<T: Endianable> LittleEndian<T> {
     /// Creates a new `LittleEndian` instance from a value, converting it to little-endian.
     pub fn new(val: T) -> Self {
@@ -244,11 +204,10 @@ impl<T: Endianable> LittleEndian<T> {
 
     /// Returns the inner value, converting it from little-endian to the native endianness.
     pub fn get(self) -> T {
-        self.get_raw().from_le()
+        T::from_le(self.0)
     }
 
-    /// Returns the underlying native representation without any endian conversion.
-    pub fn get_raw(self) -> T {
+    pub fn get_raw(self) -> T::ByteArray {
         self.0
     }
 }
@@ -256,6 +215,22 @@ impl<T: Endianable> LittleEndian<T> {
 impl<T: Endianable + Default> Default for LittleEndian<T> {
     fn default() -> Self {
         Self::new(T::default())
+    }
+}
+
+impl<T: Endianable> Byteable for LittleEndian<T> {
+    type ByteArray = <T as Endianable>::ByteArray;
+
+    fn as_bytearray(self) -> Self::ByteArray {
+        self.0
+    }
+
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        Self(ba)
+    }
+
+    fn binary_size() -> usize {
+        std::mem::size_of::<Self::ByteArray>()
     }
 }
 
@@ -272,8 +247,8 @@ mod tests {
         // get converts from BE to native, so if we create it from a native value,
         // and then turn it back, it should be the original value.
         assert_eq!(be_val.get(), val);
-        assert_eq!(be_val.get_raw().to_ne_bytes(), [1, 2, 3, 4]);
-        assert_eq!(u32::from_be_bytes(be_val.get_raw().to_ne_bytes()), val);
+        assert_eq!(be_val.get_raw(), [1, 2, 3, 4]);
+        assert_eq!(u32::from_be_bytes(be_val.get_raw()), val);
     }
 
     #[test]
@@ -285,7 +260,7 @@ mod tests {
         // get converts from LE to native, so if we create it from a native value,
         // and then turn it back, it should be the original value.
         assert_eq!(le_val.get(), val);
-        assert_eq!(le_val.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
-        assert_eq!(u32::from_le_bytes(le_val.get_raw().to_ne_bytes()), val);
+        assert_eq!(le_val.get_raw(), [4, 3, 2, 1]);
+        assert_eq!(u32::from_le_bytes(le_val.get_raw()), val);
     }
 }

@@ -8,7 +8,7 @@
 /// This trait provides methods for creating zero-filled byte arrays and
 /// accessing them as mutable or immutable byte slices. It is primarily
 /// used as an associated type for the `Byteable` trait.
-pub trait ByteableByteArray {
+pub trait ByteableByteArray: Copy {
     /// Creates a new byte array filled with zeros.
     fn create_zeroed() -> Self;
     /// Returns a mutable slice reference to the underlying byte array.

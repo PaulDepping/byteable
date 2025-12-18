@@ -26,7 +26,7 @@ struct SensorReading {
 impl ByteableRegular for SensorReading {
     type Raw = SensorReadingRaw;
 
-    fn to_raw(self) -> Self::Raw {
+    fn to_raw(&self) -> Self::Raw {
         Self::Raw {
             sensor_id: self.sensor_id,
             temperature: LittleEndian::new(self.temperature),
@@ -46,7 +46,7 @@ impl ByteableRegular for SensorReading {
 }
 
 /// A compact RGB color structure
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(Byteable, Clone, Copy, Debug)]
 #[repr(C, packed)]
 struct RgbColorRaw {
     red: u8,
@@ -55,7 +55,6 @@ struct RgbColorRaw {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(C, packed)]
 struct RgbColor {
     red: u8,
     green: u8,
@@ -65,7 +64,7 @@ struct RgbColor {
 impl ByteableRegular for RgbColor {
     type Raw = RgbColorRaw;
 
-    fn to_raw(self) -> Self::Raw {
+    fn to_raw(&self) -> Self::Raw {
         Self::Raw {
             red: self.red,
             green: self.green,

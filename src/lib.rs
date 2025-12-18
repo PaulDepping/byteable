@@ -55,10 +55,10 @@
 //! use byteable::{BigEndian, LittleEndian, Endianable};
 //!
 //! let value_be = BigEndian::new(0x01020304u32);
-//! assert_eq!(value_be.get_raw().to_ne_bytes(), [1, 2, 3, 4]);
+//! assert_eq!(value_be.get_raw(), [1, 2, 3, 4]);
 //!
 //! let value_le = LittleEndian::new(0x01020304u32);
-//! assert_eq!(value_le.get_raw().to_ne_bytes(), [4, 3, 2, 1]);
+//! assert_eq!(value_le.get_raw(), [4, 3, 2, 1]);
 //! ```
 //!
 //! ### Asynchronous I/O (with `tokio` feature)

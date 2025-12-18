@@ -3,13 +3,13 @@
 //! This example shows how to work with in-memory buffers using Cursor,
 //! which is useful for network protocols, packet parsing, and testing.
 
-use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, WriteByteable};
+use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian, ReadByteable, WriteByteable};
 use std::io::Cursor;
 
 /// A simple message header for a network protocol
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(Byteable, Clone, Copy, Debug)]
 #[repr(C, packed)]
-struct MessageHeader {
+struct MessageHeaderRaw {
     magic: [u8; 4],                     // Protocol magic number
     version: u8,                        // Protocol version
     message_type: u8,                   // Message type identifier
@@ -17,23 +17,109 @@ struct MessageHeader {
     sequence_number: LittleEndian<u32>, // Message sequence number
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct MessageHeader {
+    magic: [u8; 4],       // Protocol magic number
+    version: u8,          // Protocol version
+    message_type: u8,     // Message type identifier
+    payload_length: u16,  // Length of payload in bytes
+    sequence_number: u32, // Message sequence number
+}
+
+impl ByteableRegular for MessageHeader {
+    type Raw = MessageHeaderRaw;
+
+    fn to_raw(&self) -> Self::Raw {
+        Self::Raw {
+            magic: self.magic,
+            version: self.version,
+            message_type: self.message_type,
+            payload_length: BigEndian::new(self.payload_length),
+            sequence_number: LittleEndian::new(self.sequence_number),
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            magic: raw.magic,
+            version: raw.version,
+            message_type: raw.message_type,
+            payload_length: raw.payload_length.get(),
+            sequence_number: raw.sequence_number.get(),
+        }
+    }
+}
+
 /// A login request message
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
-#[repr(C, packed)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct LoginRequest {
+    user_id: u32,
+    session_token: u64,
+    flags: u8,
+}
+
+#[derive(Byteable, Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct LoginRequestRaw {
     user_id: LittleEndian<u32>,
     session_token: LittleEndian<u64>,
     flags: u8,
     padding: [u8; 3], // Padding for alignment
 }
 
+impl ByteableRegular for LoginRequest {
+    type Raw = LoginRequestRaw;
+
+    fn to_raw(&self) -> Self::Raw {
+        Self::Raw {
+            user_id: LittleEndian::new(self.user_id),
+            session_token: LittleEndian::new(self.session_token),
+            flags: self.flags,
+            padding: [0; _],
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            user_id: raw.user_id.get(),
+            session_token: raw.session_token.get(),
+            flags: raw.flags,
+        }
+    }
+}
+
 /// A status response message
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(Byteable, Clone, Copy, Debug)]
 #[repr(C, packed)]
-struct StatusResponse {
+struct StatusResponseRaw {
     status_code: BigEndian<u16>,
     timestamp: LittleEndian<u64>,
     reserved: [u8; 6],
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct StatusResponse {
+    status_code: u16,
+    timestamp: u64,
+}
+
+impl ByteableRegular for StatusResponse {
+    type Raw = StatusResponseRaw;
+
+    fn to_raw(&self) -> Self::Raw {
+        Self::Raw {
+            status_code: BigEndian::new(self.status_code),
+            timestamp: LittleEndian::new(self.timestamp),
+            reserved: [0; _],
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            status_code: raw.status_code.get(),
+            timestamp: raw.timestamp.get(),
+        }
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -46,15 +132,14 @@ fn main() -> std::io::Result<()> {
         magic: *b"DEMO",
         version: 1,
         message_type: 0x01,
-        payload_length: BigEndian::new(16),
-        sequence_number: LittleEndian::new(1001),
+        payload_length: 16,
+        sequence_number: 1001,
     };
 
     let login = LoginRequest {
-        user_id: LittleEndian::new(42),
-        session_token: LittleEndian::new(0x1234567890ABCDEF),
+        user_id: 42,
+        session_token: 0x1234567890ABCDEF,
         flags: 0b00001111,
-        padding: [0; 3],
     };
 
     // Write to cursor
@@ -80,21 +165,12 @@ fn main() -> std::io::Result<()> {
     );
     println!("      Version: {}", read_header.version);
     println!("      Message Type: 0x{:02X}", read_header.message_type);
-    println!(
-        "      Payload Length: {} bytes",
-        read_header.payload_length.get()
-    );
-    println!(
-        "      Sequence Number: {}",
-        read_header.sequence_number.get()
-    );
+    println!("      Payload Length: {} bytes", read_header.payload_length);
+    println!("      Sequence Number: {}", read_header.sequence_number);
 
     println!("\n   Login Request:");
-    println!("      User ID: {}", read_login.user_id.get());
-    println!(
-        "      Session Token: 0x{:016X}",
-        read_login.session_token.get()
-    );
+    println!("      User ID: {}", read_login.user_id);
+    println!("      Session Token: 0x{:016X}", read_login.session_token);
     println!("      Flags: 0b{:08b}", read_login.flags);
 
     println!(
@@ -113,22 +189,22 @@ fn main() -> std::io::Result<()> {
             magic: *b"MSG1",
             version: 1,
             message_type: 0x10,
-            payload_length: BigEndian::new(16),
-            sequence_number: LittleEndian::new(100),
+            payload_length: 16,
+            sequence_number: 100,
         },
         MessageHeader {
             magic: *b"MSG2",
             version: 1,
             message_type: 0x20,
-            payload_length: BigEndian::new(16),
-            sequence_number: LittleEndian::new(101),
+            payload_length: 16,
+            sequence_number: 101,
         },
         MessageHeader {
             magic: *b"MSG3",
             version: 1,
             message_type: 0x30,
-            payload_length: BigEndian::new(16),
-            sequence_number: LittleEndian::new(102),
+            payload_length: 16,
+            sequence_number: 102,
         },
     ];
 
@@ -153,7 +229,7 @@ fn main() -> std::io::Result<()> {
             i + 1,
             std::str::from_utf8(&msg.magic).unwrap_or("???"),
             msg.message_type,
-            msg.sequence_number.get()
+            msg.sequence_number
         );
     }
 
@@ -161,9 +237,8 @@ fn main() -> std::io::Result<()> {
     println!("\n4. Status response example:");
 
     let status = StatusResponse {
-        status_code: BigEndian::new(200),
-        timestamp: LittleEndian::new(1700000000),
-        reserved: [0; 6],
+        status_code: 200,
+        timestamp: 1700000000,
     };
 
     let mut status_buffer = Cursor::new(Vec::new());
@@ -175,8 +250,8 @@ fn main() -> std::io::Result<()> {
     let mut status_reader = Cursor::new(status_bytes);
     let read_status: StatusResponse = status_reader.read_one()?;
 
-    println!("   Status Code: {}", read_status.status_code.get());
-    println!("   Timestamp: {}", read_status.timestamp.get());
+    println!("   Status Code: {}", read_status.status_code);
+    println!("   Timestamp: {}", read_status.timestamp);
     println!("   Matches original: {}", read_status == status);
 
     println!("\n=== Example completed successfully! ===");

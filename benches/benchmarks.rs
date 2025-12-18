@@ -24,7 +24,7 @@ struct MyStruct {
 impl ByteableRegular for MyStruct {
     type Raw = MyStructRaw;
 
-    fn to_raw(self) -> Self::Raw {
+    fn to_raw(&self) -> Self::Raw {
         Self::Raw {
             a: self.a,
             b: BigEndian::new(self.b),
