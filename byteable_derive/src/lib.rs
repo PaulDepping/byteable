@@ -60,6 +60,7 @@ pub fn byteable_derive_macro(input: proc_macro::TokenStream) -> proc_macro::Toke
     let input: DeriveInput = parse_macro_input!(input);
 
     let ident = &input.ident;
+
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
     quote! {
@@ -77,10 +78,6 @@ pub fn byteable_derive_macro(input: proc_macro::TokenStream) -> proc_macro::Toke
                 // and the size of Self matches the size of Self::ByteArray.
                 // The Byteable trait requires that the struct is `Copy`.
                 unsafe { ::std::mem::transmute(ba) }
-            }
-
-            fn binary_size() -> usize {
-                ::std::mem::size_of::<Self>()
             }
         }
     }

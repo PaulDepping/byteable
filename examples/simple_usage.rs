@@ -162,7 +162,7 @@ fn main() {
     }
 
     // Convert entire palette to bytes
-    let total_size = RgbColor::binary_size() * color_palette.len();
+    let total_size = RgbColor::BINARY_SIZE * color_palette.len();
     println!("   Total palette size: {} bytes", total_size);
 
     println!("\n=== Example completed! ===");

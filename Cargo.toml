@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -14,7 +14,7 @@ derive = ["dep:byteable_derive"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-byteable_derive = { version = "0.2.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.3.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 
 [dev-dependencies]

@@ -149,10 +149,6 @@ impl<T: Endianable> Byteable for BigEndian<T> {
     fn from_bytearray(ba: Self::ByteArray) -> Self {
         Self(ba)
     }
-
-    fn binary_size() -> usize {
-        std::mem::size_of::<Self::ByteArray>()
-    }
 }
 
 /// A wrapper type that ensures the inner `Endianable` value is treated as Little-Endian.
@@ -227,10 +223,6 @@ impl<T: Endianable> Byteable for LittleEndian<T> {
 
     fn from_bytearray(ba: Self::ByteArray) -> Self {
         Self(ba)
-    }
-
-    fn binary_size() -> usize {
-        std::mem::size_of::<Self::ByteArray>()
     }
 }
 

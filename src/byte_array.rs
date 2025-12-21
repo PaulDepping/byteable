@@ -9,6 +9,7 @@
 /// accessing them as mutable or immutable byte slices. It is primarily
 /// used as an associated type for the `Byteable` trait.
 pub trait ByteableByteArray: Copy {
+    const BINARY_SIZE: usize;
     /// Creates a new byte array filled with zeros.
     fn create_zeroed() -> Self;
     /// Returns a mutable slice reference to the underlying byte array.
@@ -19,6 +20,8 @@ pub trait ByteableByteArray: Copy {
 
 /// Implements `ByteableByteArray` for fixed-size arrays `[u8; SIZE]`.
 impl<const SIZE: usize> ByteableByteArray for [u8; SIZE] {
+    const BINARY_SIZE: usize = SIZE;
+
     fn create_zeroed() -> Self {
         [0; SIZE]
     }

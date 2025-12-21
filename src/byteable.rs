@@ -10,15 +10,13 @@ use crate::byte_array::ByteableByteArray;
 /// This trait is central to the `byteable` crate, enabling structured data
 /// to be easily serialized into and deserialized from byte arrays.
 pub trait Byteable: Copy {
+    const BINARY_SIZE: usize = Self::ByteArray::BINARY_SIZE;
     /// The associated byte array type that can represent `Self`.
     type ByteArray: ByteableByteArray;
     /// Converts `self` into its `ByteableByteArray` representation.
     fn as_bytearray(self) -> Self::ByteArray;
     /// Creates an instance of `Self` from a `ByteableByteArray`.
     fn from_bytearray(ba: Self::ByteArray) -> Self;
-
-    /// Returns the size in bytes of the binary representation of this type.
-    fn binary_size() -> usize;
 }
 
 /// Macro to implement the `Byteable` trait for types.
@@ -48,10 +46,6 @@ macro_rules! impl_byteable {
                     // The Byteable trait requires that the struct is `Copy`.
                     unsafe { std::mem::transmute(ba) }
                 }
-
-                fn binary_size() -> usize {
-                    std::mem::size_of::<Self>()
-                }
             }
         )+
     };
@@ -67,10 +61,6 @@ macro_rules! impl_byteable_primitive {
                 }
                 fn from_bytearray(ba: Self::ByteArray) -> Self {
                     <$type>::from_ne_bytes(ba)
-                }
-
-                fn binary_size() -> usize {
-                    std::mem::size_of::<Self>()
                 }
             }
         )+
@@ -141,10 +131,6 @@ where
 
     fn from_bytearray(ba: Self::ByteArray) -> Self {
         Self::from_raw(Raw::from_bytearray(ba))
-    }
-
-    fn binary_size() -> usize {
-        Raw::binary_size()
     }
 }
 
@@ -266,7 +252,7 @@ mod tests {
         assert_eq!(struct_from_bytes, my_struct);
 
         // Test binary_size
-        assert_eq!(MyRegularStruct::binary_size(), 9);
+        assert_eq!(MyRegularStruct::BINARY_SIZE, 9);
     }
 
     #[test]
