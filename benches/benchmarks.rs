@@ -1,8 +1,8 @@
-use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-#[derive(Clone, Copy, Debug, Byteable)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct MyStructRaw {
     a: u8,
@@ -21,20 +21,22 @@ struct MyStruct {
     e: u16,
 }
 
-impl ByteableRegular for MyStruct {
-    type Raw = MyStructRaw;
+impl Byteable for MyStruct {
+    type ByteArray = <MyStructRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
+    fn as_bytearray(self) -> Self::ByteArray {
+        MyStructRaw {
             a: self.a,
-            b: BigEndian::new(self.b),
-            c: LittleEndian::new(self.c),
-            d: LittleEndian::new(self.d),
-            e: BigEndian::new(self.e),
+            b: self.b.into(),
+            c: self.c.into(),
+            d: self.d.into(),
+            e: self.e.into(),
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = MyStructRaw::from_bytearray(ba);
         Self {
             a: raw.a,
             b: raw.b.get(),

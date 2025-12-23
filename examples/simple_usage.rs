@@ -1,12 +1,12 @@
-//! Simple example demonstrating basic usage of the `Byteable` derive macro.
+//! Simple example demonstrating basic usage of the `UnsafeByteable` derive macro.
 //!
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable};
 
 /// A simple sensor reading structure
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct SensorReadingRaw {
     sensor_id: u8,
@@ -23,19 +23,21 @@ struct SensorReading {
     pressure: u32,    // Pressure in Pascals
 }
 
-impl ByteableRegular for SensorReading {
-    type Raw = SensorReadingRaw;
+impl Byteable for SensorReading {
+    type ByteArray = <SensorReadingRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
+    fn as_bytearray(self) -> Self::ByteArray {
+        SensorReadingRaw {
             sensor_id: self.sensor_id,
             temperature: LittleEndian::new(self.temperature),
             humidity: LittleEndian::new(self.humidity),
             pressure: BigEndian::new(self.pressure),
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = SensorReadingRaw::from_bytearray(ba);
         Self {
             sensor_id: raw.sensor_id,
             temperature: raw.temperature.get(),
@@ -46,7 +48,7 @@ impl ByteableRegular for SensorReading {
 }
 
 /// A compact RGB color structure
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct RgbColorRaw {
     red: u8,
@@ -61,18 +63,20 @@ struct RgbColor {
     blue: u8,
 }
 
-impl ByteableRegular for RgbColor {
-    type Raw = RgbColorRaw;
+impl Byteable for RgbColor {
+    type ByteArray = <RgbColorRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
+    fn as_bytearray(self) -> Self::ByteArray {
+        RgbColorRaw {
             red: self.red,
             green: self.green,
             blue: self.blue,
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = RgbColorRaw::from_bytearray(ba);
         Self {
             red: raw.red,
             green: raw.green,

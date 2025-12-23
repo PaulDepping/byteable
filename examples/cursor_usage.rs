@@ -3,11 +3,11 @@
 //! This example shows how to work with in-memory buffers using Cursor,
 //! which is useful for network protocols, packet parsing, and testing.
 
-use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian, ReadByteable, WriteByteable};
+use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable};
 use std::io::Cursor;
 
 /// A simple message header for a network protocol
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct MessageHeaderRaw {
     magic: [u8; 4],                     // Protocol magic number
@@ -26,20 +26,22 @@ struct MessageHeader {
     sequence_number: u32, // Message sequence number
 }
 
-impl ByteableRegular for MessageHeader {
-    type Raw = MessageHeaderRaw;
+impl Byteable for MessageHeader {
+    type ByteArray = <MessageHeaderRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
+    fn as_bytearray(self) -> Self::ByteArray {
+        MessageHeaderRaw {
             magic: self.magic,
             version: self.version,
             message_type: self.message_type,
-            payload_length: BigEndian::new(self.payload_length),
-            sequence_number: LittleEndian::new(self.sequence_number),
+            payload_length: self.payload_length.into(),
+            sequence_number: self.sequence_number.into(),
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = MessageHeaderRaw::from_bytearray(ba);
         Self {
             magic: raw.magic,
             version: raw.version,
@@ -58,7 +60,7 @@ struct LoginRequest {
     flags: u8,
 }
 
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct LoginRequestRaw {
     user_id: LittleEndian<u32>,
@@ -67,19 +69,21 @@ struct LoginRequestRaw {
     padding: [u8; 3], // Padding for alignment
 }
 
-impl ByteableRegular for LoginRequest {
-    type Raw = LoginRequestRaw;
+impl Byteable for LoginRequest {
+    type ByteArray = <LoginRequestRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
-            user_id: LittleEndian::new(self.user_id),
-            session_token: LittleEndian::new(self.session_token),
+    fn as_bytearray(self) -> Self::ByteArray {
+        LoginRequestRaw {
+            user_id: self.user_id.into(),
+            session_token: self.session_token.into(),
             flags: self.flags,
             padding: [0; _],
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = LoginRequestRaw::from_bytearray(ba);
         Self {
             user_id: raw.user_id.get(),
             session_token: raw.session_token.get(),
@@ -89,7 +93,7 @@ impl ByteableRegular for LoginRequest {
 }
 
 /// A status response message
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct StatusResponseRaw {
     status_code: BigEndian<u16>,
@@ -103,18 +107,20 @@ struct StatusResponse {
     timestamp: u64,
 }
 
-impl ByteableRegular for StatusResponse {
-    type Raw = StatusResponseRaw;
+impl Byteable for StatusResponse {
+    type ByteArray = <StatusResponseRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
-            status_code: BigEndian::new(self.status_code),
-            timestamp: LittleEndian::new(self.timestamp),
+    fn as_bytearray(self) -> Self::ByteArray {
+        StatusResponseRaw {
+            status_code: self.status_code.into(),
+            timestamp: self.timestamp.into(),
             reserved: [0; _],
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = StatusResponseRaw::from_bytearray(ba);
         Self {
             status_code: raw.status_code.get(),
             timestamp: raw.timestamp.get(),

@@ -41,39 +41,66 @@ impl<T: Write> WriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
+    use byteable_derive::UnsafeByteable;
+
     use super::{ReadByteable, WriteByteable};
-    use crate::{BigEndian, Byteable, LittleEndian, impl_byteable};
+    use crate::{BigEndian, Byteable, LittleEndian};
     use std::io::Cursor;
 
-    #[derive(Clone, Copy, PartialEq, Debug)]
+    #[derive(Clone, Copy, Debug, UnsafeByteable)]
     #[repr(C, packed)]
-    struct TestPacket {
-        id: u16,
+    struct TestPacketRaw {
+        id: BigEndian<u16>,
         value: LittleEndian<u32>,
     }
-    impl_byteable!(TestPacket);
+
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    struct TestPacket {
+        id: u16,
+        value: u32,
+    }
+
+    impl Byteable for TestPacket {
+        type ByteArray = <TestPacketRaw as Byteable>::ByteArray;
+
+        fn as_bytearray(self) -> Self::ByteArray {
+            TestPacketRaw {
+                id: self.id.into(),
+                value: self.value.into(),
+            }
+            .as_bytearray()
+        }
+
+        fn from_bytearray(ba: Self::ByteArray) -> Self {
+            let raw = TestPacketRaw::from_bytearray(ba);
+            Self {
+                id: raw.id.get(),
+                value: raw.value.get(),
+            }
+        }
+    }
 
     #[test]
     fn test_write_one() {
         let packet = TestPacket {
             id: 123,
-            value: LittleEndian::new(0x01020304),
+            value: 0x01020304,
         };
 
         let mut buffer = Cursor::new(vec![]);
         buffer.write_one(packet).unwrap();
-        assert_eq!(buffer.into_inner(), vec![123, 0, 4, 3, 2, 1]);
+        assert_eq!(buffer.into_inner(), vec![0, 123, 4, 3, 2, 1]);
     }
 
     #[test]
     fn test_read_one() {
-        let data = vec![123, 0, 4, 3, 2, 1];
+        let data = vec![0, 123, 4, 3, 2, 1];
         let mut reader = Cursor::new(data);
         let packet: TestPacket = reader.read_one().unwrap();
 
         // Copy values to avoid packed field reference issues
         let id = packet.id;
-        let value = packet.value.get();
+        let value = packet.value;
         assert_eq!(id, 123);
         assert_eq!(value, 0x01020304);
     }
@@ -82,7 +109,7 @@ mod tests {
     fn test_write_read_roundtrip() {
         let original = TestPacket {
             id: 42,
-            value: LittleEndian::new(0xAABBCCDD),
+            value: 0xAABBCCDD,
         };
 
         let mut buffer = Cursor::new(vec![]);
@@ -102,5 +129,22 @@ mod tests {
         buffer.write_one(LittleEndian::new(0x0304u16)).unwrap();
 
         assert_eq!(buffer.into_inner(), vec![1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn test_write_many() {
+        let mut buffer = Cursor::new(vec![]);
+
+        buffer
+            .write_one([
+                TestPacket { id: 0, value: 1 },
+                TestPacket { id: 1, value: 2 },
+            ])
+            .unwrap();
+
+        assert_eq!(
+            buffer.into_inner(),
+            vec![0, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0]
+        );
     }
 }

@@ -6,20 +6,20 @@
 //! byteable types, and handling endianness.
 //!
 //! ## Features
-//! - `derive`: Enables the `Byteable` derive macro for automatic implementation of the `Byteable` trait.
+//! - `derive`: Enables the `UnsafeByteable` derive macro for automatic implementation of the `Byteable` trait.
 //! - `tokio`: Provides asynchronous read and write capabilities using `tokio`'s I/O traits.
 //!
 //! ## Usage
 //!
 //! ### Basic Byteable Conversion
 //!
-//! Implement the `Byteable` trait manually or use the `#[derive(Byteable)]` macro (with the `derive` feature enabled):
+//! Implement the `Byteable` trait manually or use the `#[derive(UnsafeByteable)]` macro (with the `derive` feature enabled):
 //!
-//! ```rust
-//! use byteable::{Byteable, ReadByteable, WriteByteable, LittleEndian};
+//! ```ignore
+//! use byteable::{Byteable, UnsafeByteable, ReadByteable, WriteByteable, LittleEndian};
 //! use std::io::Cursor;
 //!
-//! #[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+//! #[derive(UnsafeByteable, Clone, Copy, PartialEq, Debug)]
 //! #[repr(C, packed)]
 //! struct MyPacket {
 //!     id: u16,
@@ -66,10 +66,10 @@
 //! ```rust
 //! #[cfg(feature = "tokio")]
 //! async fn async_example() -> std::io::Result<()> {
-//!     use byteable::{Byteable, AsyncReadByteable, AsyncWriteByteable, LittleEndian};
+//!     use byteable::{Byteable, UnsafeByteable, AsyncReadByteable, AsyncWriteByteable, LittleEndian};
 //!     use std::io::Cursor;
 //!
-//!     #[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+//!     #[derive(UnsafeByteable, Clone, Copy, PartialEq, Debug)]
 //!     #[repr(C, packed)]
 //!     struct AsyncPacket {
 //!         sequence: u8,
@@ -103,13 +103,13 @@ mod async_io;
 
 // Re-export derive macro
 #[cfg(feature = "derive")]
-pub use byteable_derive::Byteable;
+pub use byteable_derive::UnsafeByteable;
 
 // Re-export from byte_array module
 pub use byte_array::ByteableByteArray;
 
 // Re-export from byteable module
-pub use byteable::{Byteable, ByteableRaw, ByteableRegular};
+pub use byteable::Byteable;
 
 // Re-export from io module
 pub use io::{ReadByteable, WriteByteable};

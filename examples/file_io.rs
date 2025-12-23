@@ -1,12 +1,12 @@
-//! Example demonstrating the `Byteable` derive macro with file I/O operations.
+//! Example demonstrating the `UnsafeByteable` derive macro with file I/O operations.
 //!
 //! This example shows how to:
-//! - Define a struct with the Byteable derive macro
+//! - Define a struct with the UnsafeByteable derive macro
 //! - Write byteable structs to a file
 //! - Read byteable structs from a file
 //! - Handle endianness with BigEndian and LittleEndian wrappers
 
-use byteable::{BigEndian, Byteable, ByteableRegular, LittleEndian, ReadByteable, WriteByteable};
+use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
@@ -27,7 +27,7 @@ struct NetworkPacket {
 /// - Must be `#[repr(C, packed)]` or `#[repr(C)]` for predictable memory layout
 /// - Must implement `Copy`
 /// - All fields must be Byteable (primitives, or types wrapped in BigEndian/LittleEndian)
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct NetworkPacketRaw {
     /// Packet sequence number (native endianness)
@@ -40,19 +40,21 @@ struct NetworkPacketRaw {
     timestamp: LittleEndian<u64>,
 }
 
-impl ByteableRegular for NetworkPacket {
-    type Raw = NetworkPacketRaw;
+impl Byteable for NetworkPacket {
+    type ByteArray = <NetworkPacketRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
+    fn as_bytearray(self) -> Self::ByteArray {
+        NetworkPacketRaw {
             sequence: self.sequence,
-            packet_type: LittleEndian::new(self.packet_type),
-            payload_length: BigEndian::new(self.payload_length),
-            timestamp: LittleEndian::new(self.timestamp),
+            packet_type: self.packet_type.into(),
+            payload_length: self.payload_length.into(),
+            timestamp: self.timestamp.into(),
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = NetworkPacketRaw::from_bytearray(ba);
         Self {
             sequence: raw.sequence,
             packet_type: raw.packet_type.get(),
@@ -77,7 +79,7 @@ struct DeviceConfig {
     calibration: f32,
 }
 
-#[derive(Byteable, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, UnsafeByteable)]
 #[repr(C, packed)]
 struct DeviceConfigRaw {
     /// Device ID (little-endian, common for x86 devices)
@@ -92,20 +94,22 @@ struct DeviceConfigRaw {
     calibration: LittleEndian<f32>,
 }
 
-impl ByteableRegular for DeviceConfig {
-    type Raw = DeviceConfigRaw;
+impl Byteable for DeviceConfig {
+    type ByteArray = <DeviceConfigRaw as Byteable>::ByteArray;
 
-    fn to_raw(&self) -> Self::Raw {
-        Self::Raw {
-            device_id: LittleEndian::new(self.device_id),
+    fn as_bytearray(self) -> Self::ByteArray {
+        DeviceConfigRaw {
+            device_id: self.device_id.into(),
             version: self.version,
             flags: self.flags,
-            port: BigEndian::new(self.port),
-            calibration: LittleEndian::new(self.calibration),
+            port: self.port.into(),
+            calibration: self.calibration.into(),
         }
+        .as_bytearray()
     }
 
-    fn from_raw(raw: Self::Raw) -> Self {
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        let raw = DeviceConfigRaw::from_bytearray(ba);
         Self {
             device_id: raw.device_id.get(),
             version: raw.version,

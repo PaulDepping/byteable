@@ -9,7 +9,7 @@ use crate::byte_array::ByteableByteArray;
 ///
 /// This trait is central to the `byteable` crate, enabling structured data
 /// to be easily serialized into and deserialized from byte arrays.
-pub trait Byteable: Copy {
+pub trait Byteable {
     const BINARY_SIZE: usize = Self::ByteArray::BINARY_SIZE;
     /// The associated byte array type that can represent `Self`.
     type ByteArray: ByteableByteArray;
@@ -17,6 +17,18 @@ pub trait Byteable: Copy {
     fn as_bytearray(self) -> Self::ByteArray;
     /// Creates an instance of `Self` from a `ByteableByteArray`.
     fn from_bytearray(ba: Self::ByteArray) -> Self;
+}
+
+impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
+    type ByteArray = [T::ByteArray; SIZE];
+
+    fn as_bytearray(self) -> Self::ByteArray {
+        self.map(T::as_bytearray)
+    }
+
+    fn from_bytearray(ba: Self::ByteArray) -> Self {
+        ba.map(T::from_bytearray)
+    }
 }
 
 /// Macro to implement the `Byteable` trait for types.
@@ -29,22 +41,22 @@ pub trait Byteable: Copy {
 /// The implementation assumes the type has `#[repr(C, packed)]` or similar
 /// to ensure a consistent memory layout for safe transmutation.
 #[macro_export]
-macro_rules! impl_byteable {
+macro_rules! unsafe_impl_directly_byteable {
     ($($type:ty),+) => {
         $(
-            impl Byteable for $type {
-                type ByteArray = [u8; std::mem::size_of::<Self>()];
+            impl $crate::Byteable for $type {
+                type ByteArray = [u8; ::std::mem::size_of::<Self>()];
                 fn as_bytearray(self) -> Self::ByteArray {
                     // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
                     // and the size of Self matches the size of Self::ByteArray.
                     // The Byteable trait requires that the struct is `Copy`.
-                    unsafe { std::mem::transmute(self) }
+                    unsafe { ::std::mem::transmute(self) }
                 }
                 fn from_bytearray(ba: Self::ByteArray) -> Self {
                     // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
                     // and the size of Self matches the size of Self::ByteArray.
                     // The Byteable trait requires that the struct is `Copy`.
-                    unsafe { std::mem::transmute(ba) }
+                    unsafe { ::std::mem::transmute(ba) }
                 }
             }
         )+
@@ -54,8 +66,8 @@ macro_rules! impl_byteable {
 macro_rules! impl_byteable_primitive {
     ($($type:ty),+) => {
         $(
-            impl Byteable for $type {
-                type ByteArray = [u8; std::mem::size_of::<Self>()];
+            impl $crate::Byteable for $type {
+                type ByteArray = [u8; ::std::mem::size_of::<Self>()];
                 fn as_bytearray(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)
                 }
@@ -69,83 +81,19 @@ macro_rules! impl_byteable_primitive {
 
 impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-/// Trait for types that have a raw byteable representation and can be converted to/from a regular form.
-///
-/// This trait is automatically implemented for types that implement `Byteable` when there is
-/// a corresponding `ByteableRegular` type that uses them as their raw representation.
-///
-/// This trait facilitates a pattern where you have a "raw" type (suitable for byte serialization)
-/// and a "regular" type (more convenient for application logic), and you need to convert between them.
-pub trait ByteableRaw<Regular>: Byteable {
-    /// Converts the raw representation to the regular form.
-    fn to_regular(self) -> Regular;
-    /// Converts the regular form to the raw representation.
-    fn from_regular(regular: Regular) -> Self;
-}
-
-/// Trait for types that can be represented in a raw byteable form.
-///
-/// This trait allows types to specify an associated raw type that implements `Byteable`,
-/// providing conversion methods between the regular type and its raw representation.
-///
-/// By implementing this trait, your type automatically gains a `Byteable` implementation
-/// that delegates to the raw type's implementation.
-///
-/// # Example
-///
-/// This is useful for types that need preprocessing before serialization, such as
-/// converting between different representations (e.g., IPv4 addresses as `u32` vs `[u8; 4]`) or setting a concrete endianness for members.
-pub trait ByteableRegular: Sized {
-    /// The raw byteable type that represents this type in serialized form.
-    type Raw: Byteable;
-    /// Converts this type to its raw representation.
-    fn to_raw(&self) -> Self::Raw;
-    /// Constructs this type from its raw representation.
-    fn from_raw(raw: Self::Raw) -> Self;
-}
-
-impl<Raw, Regular> ByteableRaw<Regular> for Raw
-where
-    Regular: ByteableRegular<Raw = Raw>,
-    Raw: Byteable,
-{
-    fn to_regular(self) -> Regular {
-        Regular::from_raw(self)
-    }
-
-    fn from_regular(regular: Regular) -> Self {
-        regular.to_raw()
-    }
-}
-
-impl<Raw, Regular> Byteable for Regular
-where
-    Regular: ByteableRegular<Raw = Raw> + Copy,
-    Raw: Byteable,
-{
-    type ByteArray = Raw::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        self.to_raw().as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        Self::from_raw(Raw::from_bytearray(ba))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use byteable_derive::UnsafeByteable;
+
     use crate::{BigEndian, Byteable, LittleEndian};
 
-    #[derive(Clone, Copy, PartialEq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
     #[repr(C, packed)]
     struct ABC {
         a: LittleEndian<u16>,
         b: LittleEndian<u16>,
         c: BigEndian<u16>,
     }
-    impl_byteable!(ABC);
 
     #[test]
     fn test_impl() {
@@ -183,11 +131,8 @@ mod tests {
         assert_eq!(read, a);
     }
 
-    // Test ByteableRegular trait
-    use super::{ByteableRaw, ByteableRegular};
-
     // Raw representation (suitable for byte serialization)
-    #[derive(Clone, Copy, PartialEq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
     #[repr(C, packed)]
     struct MyRawStruct {
         a: u8,
@@ -196,7 +141,6 @@ mod tests {
         d: u8,
         e: u8,
     }
-    impl_byteable!(MyRawStruct);
 
     // Regular representation (more convenient for application logic)
     #[derive(Clone, Copy, PartialEq, Debug)]
@@ -208,10 +152,10 @@ mod tests {
         e: u8,
     }
 
-    impl ByteableRegular for MyRegularStruct {
-        type Raw = MyRawStruct;
+    impl Byteable for MyRegularStruct {
+        type ByteArray = <MyRawStruct as Byteable>::ByteArray;
 
-        fn to_raw(&self) -> Self::Raw {
+        fn as_bytearray(self) -> Self::ByteArray {
             MyRawStruct {
                 a: self.a,
                 b: LittleEndian::new(self.b),
@@ -219,9 +163,11 @@ mod tests {
                 d: self.d,
                 e: self.e,
             }
+            .as_bytearray()
         }
 
-        fn from_raw(raw: Self::Raw) -> Self {
+        fn from_bytearray(ba: Self::ByteArray) -> Self {
+            let raw = MyRawStruct::from_bytearray(ba);
             MyRegularStruct {
                 a: raw.a,
                 b: raw.b.get(),
@@ -253,23 +199,5 @@ mod tests {
 
         // Test binary_size
         assert_eq!(MyRegularStruct::BINARY_SIZE, 9);
-    }
-
-    #[test]
-    fn test_byteable_raw_conversion() {
-        // Test the ByteableRaw trait for converting between raw and regular forms
-        let my_struct = MyRegularStruct {
-            a: 10,
-            b: 0,
-            c: 0,
-            d: 1,
-            e: 2,
-        };
-
-        let raw = MyRawStruct::from_regular(my_struct);
-        assert_eq!(raw.as_bytearray(), [10, 0, 0, 0, 0, 0, 0, 1, 2]);
-
-        let regular: MyRegularStruct = raw.to_regular();
-        assert_eq!(regular, my_struct);
     }
 }

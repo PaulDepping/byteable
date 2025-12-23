@@ -1,6 +1,6 @@
 # Byteable Examples
 
-This directory contains comprehensive examples demonstrating the usage of the `byteable` crate and its `Byteable` derive macro.
+This directory contains comprehensive examples demonstrating the usage of the `byteable` crate and its `UnsafeByteable` derive macro.
 
 ## Running the Examples
 
@@ -16,7 +16,7 @@ cargo run --example <example_name> --features derive
 
 **What it demonstrates:**
 
-- Creating simple structs with the `Byteable` derive macro
+- Creating simple structs with the `UnsafeByteable` derive macro
 - Converting structs to byte arrays
 - Reconstructing structs from byte arrays
 - Working with arrays of byteable structs
@@ -94,7 +94,7 @@ All examples demonstrate these important concepts:
 
 ### 1. Struct Requirements
 
-To use `#[derive(Byteable)]`, your struct must:
+To use `#[derive(UnsafeByteable)]`, your struct must:
 
 - Be annotated with `#[repr(C, packed)]` or `#[repr(C)]`
 - Implement `Copy`
@@ -103,7 +103,7 @@ To use `#[derive(Byteable)]`, your struct must:
 Example:
 
 ```rust
-#[derive(Byteable, Clone, Copy, PartialEq, Debug)]
+#[derive(UnsafeByteable, Clone, Copy, PartialEq, Debug)]
 #[repr(C, packed)]
 struct MyStruct {
     field1: u16,

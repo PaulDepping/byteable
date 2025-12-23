@@ -1,6 +1,6 @@
 [package]
 name = "byteable_derive"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Custom derive macros for the byteable crate."
 license = "MIT"
@@ -8,6 +8,7 @@ repository = "https://github.com/PaulDepping/byteable"
 readme = "README.md"
 
 [dependencies]
+proc-macro-crate = "3.4.0"
 proc-macro2 = "1.0.95"
 quote = "1.0.40"
 syn = "2.0.101"

@@ -59,17 +59,18 @@ impl<T: AsyncWriteExt> AsyncWriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
+    use byteable_derive::UnsafeByteable;
+
     use super::{AsyncReadByteable, AsyncWriteByteable};
-    use crate::{BigEndian, Byteable, LittleEndian, impl_byteable};
+    use crate::{BigEndian, LittleEndian};
     use std::io::Cursor;
 
-    #[derive(Clone, Copy, PartialEq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
     #[repr(C, packed)]
     struct AsyncTestPacket {
         id: u16,
         value: LittleEndian<u32>,
     }
-    impl_byteable!(AsyncTestPacket);
 
     #[tokio::test]
     async fn test_async_write_one() {

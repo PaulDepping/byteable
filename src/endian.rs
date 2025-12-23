@@ -43,8 +43,8 @@ pub trait Endianable: Copy {
 macro_rules! impl_endianable {
     ($($type:ty),+) => {
         $(
-            impl Endianable for $type {
-                type ByteArray = [u8; std::mem::size_of::<$type>()];
+            impl $crate::Endianable for $type {
+                type ByteArray = [u8; ::std::mem::size_of::<$type>()];
 
                 fn from_le(ba: Self::ByteArray) -> Self {
                     Self::from_le_bytes(ba)
@@ -151,6 +151,12 @@ impl<T: Endianable> Byteable for BigEndian<T> {
     }
 }
 
+impl<T: Endianable> From<T> for BigEndian<T> {
+    fn from(value: T) -> Self {
+        BigEndian::new(value)
+    }
+}
+
 /// A wrapper type that ensures the inner `Endianable` value is treated as Little-Endian.
 ///
 /// When creating a `LittleEndian` instance, the value is converted to little-endian.
@@ -158,7 +164,7 @@ impl<T: Endianable> Byteable for BigEndian<T> {
 /// to the native endianness.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct LittleEndian<T: Endianable>(pub(crate) T::ByteArray);
+pub struct LittleEndian<T: Endianable>(T::ByteArray);
 
 impl<T: fmt::Debug + Endianable> fmt::Debug for LittleEndian<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -223,6 +229,12 @@ impl<T: Endianable> Byteable for LittleEndian<T> {
 
     fn from_bytearray(ba: Self::ByteArray) -> Self {
         Self(ba)
+    }
+}
+
+impl<T: Endianable> From<T> for LittleEndian<T> {
+    fn from(value: T) -> Self {
+        LittleEndian::new(value)
     }
 }
 
