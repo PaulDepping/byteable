@@ -83,9 +83,8 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 
 #[cfg(test)]
 mod tests {
-    use byteable_derive::UnsafeByteable;
-
     use crate::{BigEndian, Byteable, LittleEndian};
+    use byteable_derive::UnsafeByteable;
 
     #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
     #[repr(C, packed)]

@@ -59,15 +59,15 @@ macro_rules! impl_endianable {
                 }
 
                 fn to_ne(self) -> Self::ByteArray {
-                    Self::to_ne_bytes(self)
+                    self.to_ne_bytes()
                 }
 
                 fn to_le(self) -> Self::ByteArray {
-                    Self::to_le_bytes(self)
+                    self.to_le_bytes()
                 }
 
                 fn to_be(self) -> Self::ByteArray {
-                    Self::to_be_bytes(self)
+                    self.to_be_bytes()
                 }
             }
         )+

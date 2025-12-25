@@ -43,7 +43,7 @@ unsafe impl<T: ByteableByteArray, const SIZE_OUTER: usize> ByteableByteArray for
     }
 
     fn as_byteslice_mut(&mut self) -> &mut [u8] {
-        assert_eq!(std::mem::size_of::<Self>(), Self::BINARY_SIZE);
+        debug_assert_eq!(std::mem::size_of::<Self>(), Self::BINARY_SIZE);
         unsafe {
             // Since ByteableByteArray is only implemented for [u8; _] types, this should be valid.
             std::slice::from_raw_parts_mut(self.as_mut_ptr() as _, std::mem::size_of::<Self>())
@@ -51,7 +51,7 @@ unsafe impl<T: ByteableByteArray, const SIZE_OUTER: usize> ByteableByteArray for
     }
 
     fn as_byteslice(&self) -> &[u8] {
-        assert_eq!(std::mem::size_of::<Self>(), Self::BINARY_SIZE);
+        debug_assert_eq!(std::mem::size_of::<Self>(), Self::BINARY_SIZE);
         unsafe {
             // Since ByteableByteArray is only implemented for [u8; _] types, this should be valid.
             std::slice::from_raw_parts(self.as_ptr() as _, std::mem::size_of::<Self>())
