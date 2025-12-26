@@ -5,7 +5,7 @@
 
 use byteable::{
     BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
-    impl_byteable_relay,
+    impl_byteable_via,
 };
 use std::io::Cursor;
 
@@ -52,7 +52,7 @@ impl From<MessageHeader> for MessageHeaderRaw {
     }
 }
 
-impl_byteable_relay!(MessageHeader => MessageHeaderRaw);
+impl_byteable_via!(MessageHeader => MessageHeaderRaw);
 
 /// A login request message
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -92,7 +92,7 @@ impl From<LoginRequest> for LoginRequestRaw {
     }
 }
 
-impl_byteable_relay!(LoginRequest => LoginRequestRaw);
+impl_byteable_via!(LoginRequest => LoginRequestRaw);
 
 /// A status response message
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -127,7 +127,7 @@ impl From<StatusResponse> for StatusResponseRaw {
     }
 }
 
-impl_byteable_relay!(StatusResponse => StatusResponseRaw);
+impl_byteable_via!(StatusResponse => StatusResponseRaw);
 
 fn main() -> std::io::Result<()> {
     println!("=== Cursor-based Byteable Example ===\n");
@@ -151,8 +151,8 @@ fn main() -> std::io::Result<()> {
 
     // Write to cursor
     let mut buffer = Cursor::new(Vec::new());
-    buffer.write_one(header)?;
-    buffer.write_one(login)?;
+    buffer.write_byteable(header)?;
+    buffer.write_byteable(login)?;
 
     let bytes = buffer.into_inner();
     println!("   Written {} bytes", bytes.len());
@@ -162,8 +162,8 @@ fn main() -> std::io::Result<()> {
     println!("2. Reading messages from the buffer:");
     let mut reader = Cursor::new(bytes.clone());
 
-    let read_header: MessageHeader = reader.read_one()?;
-    let read_login: LoginRequest = reader.read_one()?;
+    let read_header: MessageHeader = reader.read_byteable()?;
+    let read_login: LoginRequest = reader.read_byteable()?;
 
     println!("   Header:");
     println!(
@@ -216,7 +216,7 @@ fn main() -> std::io::Result<()> {
     ];
 
     for header in &headers {
-        packet.write_one(*header)?;
+        packet.write_byteable(*header)?;
     }
 
     let packet_bytes = packet.into_inner();
@@ -230,7 +230,7 @@ fn main() -> std::io::Result<()> {
     let mut reader = Cursor::new(packet_bytes);
     println!("\n   Reading messages:");
     for i in 0..3 {
-        let msg: MessageHeader = reader.read_one()?;
+        let msg: MessageHeader = reader.read_byteable()?;
         println!(
             "      Message {}: {} (type: 0x{:02X}, seq: {})",
             i + 1,
@@ -249,13 +249,13 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut status_buffer = Cursor::new(Vec::new());
-    status_buffer.write_one(status)?;
+    status_buffer.write_byteable(status)?;
 
     let status_bytes = status_buffer.into_inner();
     println!("   Status response bytes: {:?}", status_bytes);
 
     let mut status_reader = Cursor::new(status_bytes);
-    let read_status: StatusResponse = status_reader.read_one()?;
+    let read_status: StatusResponse = status_reader.read_byteable()?;
 
     println!("   Status Code: {}", read_status.status_code);
     println!("   Timestamp: {}", read_status.timestamp);

@@ -1,4 +1,4 @@
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_relay};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_via};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -45,7 +45,7 @@ impl From<MyStruct> for MyStructRaw {
     }
 }
 
-impl_byteable_relay!(MyStruct => MyStructRaw);
+impl_byteable_via!(MyStruct => MyStructRaw);
 
 fn benchmarks(c: &mut Criterion) {
     c.bench_function("as_bytearray_mystruct", |b| {
@@ -57,7 +57,7 @@ fn benchmarks(c: &mut Criterion) {
                 d: 4.0,
                 e: 5,
             })
-            .as_bytearray()
+            .as_byte_array()
         })
     });
 }

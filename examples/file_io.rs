@@ -8,7 +8,7 @@
 
 use byteable::{
     BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
-    impl_byteable_relay,
+    impl_byteable_via,
 };
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
@@ -65,7 +65,7 @@ impl From<NetworkPacketRaw> for NetworkPacket {
     }
 }
 
-impl_byteable_relay!(NetworkPacket => NetworkPacketRaw);
+impl_byteable_via!(NetworkPacket => NetworkPacketRaw);
 
 /// A configuration structure demonstrating mixed endianness.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -121,7 +121,7 @@ impl From<DeviceConfigRaw> for DeviceConfig {
     }
 }
 
-impl_byteable_relay!(DeviceConfig => DeviceConfigRaw);
+impl_byteable_via!(DeviceConfig => DeviceConfigRaw);
 
 fn main() -> io::Result<()> {
     println!("=== Byteable Derive Macro Example ===\n");
@@ -142,7 +142,7 @@ fn main() -> io::Result<()> {
     println!("   Timestamp: {}", packet.timestamp);
 
     // Convert to byte array
-    let bytes = packet.as_bytearray();
+    let bytes = packet.as_byte_array();
     println!("   As bytes: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
@@ -151,7 +151,7 @@ fn main() -> io::Result<()> {
     let mut file = File::create("example_data.bin")?;
 
     // Write multiple packets
-    file.write_one(packet)?;
+    file.write_byteable(packet)?;
 
     let packet2 = NetworkPacket {
         sequence: 43,
@@ -159,7 +159,7 @@ fn main() -> io::Result<()> {
         payload_length: 2048,
         timestamp: 1638360001,
     };
-    file.write_one(packet2)?;
+    file.write_byteable(packet2)?;
 
     // Write a device config
     let config = DeviceConfig {
@@ -169,7 +169,7 @@ fn main() -> io::Result<()> {
         port: 8080,
         calibration: 3.14159,
     };
-    file.write_one(config)?;
+    file.write_byteable(config)?;
 
     println!("   Written 2 NetworkPackets and 1 DeviceConfig to 'example_data.bin'");
     println!(
@@ -182,9 +182,9 @@ fn main() -> io::Result<()> {
     let mut file = File::open("example_data.bin")?;
 
     // Read the packets back
-    let read_packet1: NetworkPacket = file.read_one()?;
-    let read_packet2: NetworkPacket = file.read_one()?;
-    let read_config: DeviceConfig = file.read_one()?;
+    let read_packet1: NetworkPacket = file.read_byteable()?;
+    let read_packet2: NetworkPacket = file.read_byteable()?;
+    let read_config: DeviceConfig = file.read_byteable()?;
 
     println!("   First packet: {:?}", read_packet1);
     println!("   Matches original: {}", read_packet1 == packet);
@@ -205,12 +205,12 @@ fn main() -> io::Result<()> {
     // Example 4: Random access with seek
     println!("4. Random access with seek:");
     file.seek(SeekFrom::Start(0))?;
-    let first: NetworkPacket = file.read_one()?;
+    let first: NetworkPacket = file.read_byteable()?;
     println!("   Read first packet again: sequence = {}", first.sequence);
 
     // Seek to the second packet
     file.seek(SeekFrom::Start(std::mem::size_of::<NetworkPacket>() as u64))?;
-    let second: NetworkPacket = file.read_one()?;
+    let second: NetworkPacket = file.read_byteable()?;
     println!("   Seeked to second packet: sequence = {}", second.sequence);
     println!();
 
@@ -224,12 +224,12 @@ fn main() -> io::Result<()> {
     };
 
     // Convert to bytes
-    let byte_array = test_packet.as_bytearray();
+    let byte_array = test_packet.as_byte_array();
     println!("   Original packet: {:?}", test_packet);
     println!("   Byte array: {:?}", byte_array);
 
     // Convert back from bytes
-    let reconstructed = NetworkPacket::from_bytearray(byte_array);
+    let reconstructed = NetworkPacket::from_byte_array(byte_array);
     println!("   Reconstructed: {:?}", reconstructed);
     println!("   Round-trip successful: {}", test_packet == reconstructed);
 

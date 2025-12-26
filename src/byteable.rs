@@ -1,62 +1,35 @@
-//! Core Byteable trait and related functionality.
-//!
-//! This module defines the core `Byteable` trait along with supporting traits
-//! and macros for converting types to and from byte arrays.
+use crate::byte_array::ByteArray;
 
-use crate::byte_array::ByteableByteArray;
-
-/// Trait for types that can be converted to and from a byte array.
-///
-/// This trait is central to the `byteable` crate, enabling structured data
-/// to be easily serialized into and deserialized from byte arrays.
 pub trait Byteable {
-    const BINARY_SIZE: usize = Self::ByteArray::BINARY_SIZE;
-    /// The associated byte array type that can represent `Self`.
-    type ByteArray: ByteableByteArray;
-    /// Converts `self` into its `ByteableByteArray` representation.
-    fn as_bytearray(self) -> Self::ByteArray;
-    /// Creates an instance of `Self` from a `ByteableByteArray`.
-    fn from_bytearray(ba: Self::ByteArray) -> Self;
+    const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
+    type ByteArray: ByteArray;
+    fn as_byte_array(self) -> Self::ByteArray;
+    fn from_byte_array(byte_array: Self::ByteArray) -> Self;
 }
 
 impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
     type ByteArray = [T::ByteArray; SIZE];
 
-    fn as_bytearray(self) -> Self::ByteArray {
-        self.map(T::as_bytearray)
+    fn as_byte_array(self) -> Self::ByteArray {
+        self.map(T::as_byte_array)
     }
 
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        ba.map(T::from_bytearray)
+    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+        byte_array.map(T::from_byte_array)
     }
 }
 
-/// Macro to implement the `Byteable` trait for types.
-///
-/// This macro generates a `Byteable` implementation using `std::mem::transmute`
-/// to convert between the type and its byte array representation.
-///
-/// # Safety
-///
-/// The implementation assumes the type has `#[repr(C, packed)]` or similar
-/// to ensure a consistent memory layout for safe transmutation.
 #[macro_export]
-macro_rules! unsafe_impl_directly_byteable {
+macro_rules! unsafe_byteable_transmute {
     ($($type:ty),+) => {
         $(
             impl $crate::Byteable for $type {
                 type ByteArray = [u8; ::std::mem::size_of::<Self>()];
-                fn as_bytearray(self) -> Self::ByteArray {
-                    // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                    // and the size of Self matches the size of Self::ByteArray.
-                    // The Byteable trait requires that the struct is `Copy`.
+                fn as_byte_array(self) -> Self::ByteArray {
                     unsafe { ::std::mem::transmute(self) }
                 }
-                fn from_bytearray(ba: Self::ByteArray) -> Self {
-                    // Safety: This is safe because #[repr(C, packed)] ensures consistent memory layout
-                    // and the size of Self matches the size of Self::ByteArray.
-                    // The Byteable trait requires that the struct is `Copy`.
-                    unsafe { ::std::mem::transmute(ba) }
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    unsafe { ::std::mem::transmute(byte_array) }
                 }
             }
         )+
@@ -64,18 +37,18 @@ macro_rules! unsafe_impl_directly_byteable {
 }
 
 #[macro_export]
-macro_rules! impl_byteable_relay {
+macro_rules! impl_byteable_via {
     ($regular_type:ty => $raw_type:ty) => {
         impl $crate::Byteable for $regular_type {
             type ByteArray = <$raw_type as Byteable>::ByteArray;
 
-            fn as_bytearray(self) -> Self::ByteArray {
+            fn as_byte_array(self) -> Self::ByteArray {
                 let raw: $raw_type = self.into();
-                raw.as_bytearray()
+                raw.as_byte_array()
             }
 
-            fn from_bytearray(ba: Self::ByteArray) -> Self {
-                let raw = <$raw_type>::from_bytearray(ba);
+            fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                let raw = <$raw_type>::from_byte_array(byte_array);
                 raw.into()
             }
         }
@@ -88,12 +61,12 @@ macro_rules! impl_byteable_primitive {
             impl $crate::Byteable for $type {
                 type ByteArray = [u8; ::std::mem::size_of::<Self>()];
 
-                fn as_bytearray(self) -> Self::ByteArray {
+                fn as_byte_array(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)
                 }
 
-                fn from_bytearray(ba: Self::ByteArray) -> Self {
-                    <$type>::from_ne_bytes(ba)
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    <$type>::from_ne_bytes(byte_array)
                 }
             }
         )+
@@ -124,9 +97,9 @@ mod tests {
         };
 
         let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.as_bytearray(), expected_bytes);
+        assert_eq!(a.as_byte_array(), expected_bytes);
 
-        let read_a = ABC::from_bytearray(expected_bytes);
+        let read_a = ABC::from_byte_array(expected_bytes);
         assert_eq!(read_a.a.get(), 1);
         assert_eq!(read_a.b.get(), 2);
         assert_eq!(read_a.c.get(), 3);
@@ -142,16 +115,15 @@ mod tests {
         };
 
         let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.as_bytearray(), expected_bytes);
+        assert_eq!(a.as_byte_array(), expected_bytes);
 
-        let read = ABC::from_bytearray(expected_bytes);
+        let read = ABC::from_byte_array(expected_bytes);
         assert_eq!(read.a.get(), 1);
         assert_eq!(read.b.get(), 2);
         assert_eq!(read.c.get(), 3);
         assert_eq!(read, a);
     }
 
-    // Raw representation (suitable for byte serialization)
     #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
     #[repr(C, packed)]
     struct MyRawStruct {
@@ -162,7 +134,6 @@ mod tests {
         e: u8,
     }
 
-    // Regular representation (more convenient for application logic)
     #[derive(Clone, Copy, PartialEq, Debug)]
     struct MyRegularStruct {
         a: u8,
@@ -196,11 +167,10 @@ mod tests {
         }
     }
 
-    impl_byteable_relay!(MyRegularStruct => MyRawStruct);
+    impl_byteable_via!(MyRegularStruct => MyRawStruct);
 
     #[test]
     fn test_byteable_regular() {
-        // Create a regular IPv4 address
         let my_struct = MyRegularStruct {
             a: 192,
             b: 168,
@@ -209,15 +179,12 @@ mod tests {
             e: 2,
         };
 
-        // Test that ByteableRegular automatically implements Byteable
-        let bytes = my_struct.as_bytearray();
+        let bytes = my_struct.as_byte_array();
         assert_eq!(bytes, [192, 168, 0, 0, 0, 1, 0, 1, 2]);
 
-        // Test conversion back
-        let struct_from_bytes = MyRegularStruct::from_bytearray([192, 168, 0, 0, 0, 1, 0, 1, 2]);
+        let struct_from_bytes = MyRegularStruct::from_byte_array([192, 168, 0, 0, 0, 1, 0, 1, 2]);
         assert_eq!(struct_from_bytes, my_struct);
 
-        // Test binary_size
-        assert_eq!(MyRegularStruct::BINARY_SIZE, 9);
+        assert_eq!(MyRegularStruct::BYTE_SIZE, 9);
     }
 }

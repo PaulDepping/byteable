@@ -3,7 +3,7 @@
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_relay};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_via};
 
 /// A simple sensor reading structure
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -45,7 +45,7 @@ impl From<SensorReadingRaw> for SensorReading {
     }
 }
 
-impl_byteable_relay!(SensorReading => SensorReadingRaw);
+impl_byteable_via!(SensorReading => SensorReadingRaw);
 
 /// A compact RGB color structure
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -83,7 +83,7 @@ impl From<RgbColorRaw> for RgbColor {
     }
 }
 
-impl_byteable_relay!(RgbColor => RgbColorRaw);
+impl_byteable_via!(RgbColor => RgbColorRaw);
 
 fn main() {
     println!("=== Simple Byteable Usage Example ===\n");
@@ -106,13 +106,13 @@ fn main() {
     println!("   Pressure: {} Pa", reading.pressure);
 
     // Convert to bytes
-    let bytes = reading.as_bytearray();
+    let bytes = reading.as_byte_array();
     println!("   Byte representation: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
     // Example 2: Reconstruct from bytes
     println!("2. Reconstructing from bytes:");
-    let reconstructed = SensorReading::from_bytearray(bytes);
+    let reconstructed = SensorReading::from_byte_array(bytes);
     println!("   Reconstructed: {:?}", reconstructed);
     println!("   Matches original: {}\n", reconstructed == reading);
 
@@ -125,7 +125,7 @@ fn main() {
     };
 
     println!("   Color: RGB({}, {}, {})", cyan.red, cyan.green, cyan.blue);
-    let color_bytes = cyan.as_bytearray();
+    let color_bytes = cyan.as_byte_array();
     println!("   Bytes: {:?}", color_bytes);
     println!(
         "   Hex representation: #{:02X}{:02X}{:02X}\n",
@@ -154,7 +154,7 @@ fn main() {
 
     println!("   Color palette:");
     for (i, color) in color_palette.iter().enumerate() {
-        let bytes = color.as_bytearray();
+        let bytes = color.as_byte_array();
         println!(
             "   Color {}: RGB({:3}, {:3}, {:3}) = {:?}",
             i + 1,
@@ -166,7 +166,7 @@ fn main() {
     }
 
     // Convert entire palette to bytes
-    let total_size = RgbColor::BINARY_SIZE * color_palette.len();
+    let total_size = RgbColor::BYTE_SIZE * color_palette.len();
     println!("   Total palette size: {} bytes", total_size);
 
     println!("\n=== Example completed! ===");
