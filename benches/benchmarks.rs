@@ -1,4 +1,4 @@
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_relay};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -21,31 +21,31 @@ struct MyStruct {
     e: u16,
 }
 
-impl Byteable for MyStruct {
-    type ByteArray = <MyStructRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        MyStructRaw {
-            a: self.a,
-            b: self.b.into(),
-            c: self.c.into(),
-            d: self.d.into(),
-            e: self.e.into(),
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = MyStructRaw::from_bytearray(ba);
+impl From<MyStructRaw> for MyStruct {
+    fn from(value: MyStructRaw) -> Self {
         Self {
-            a: raw.a,
-            b: raw.b.get(),
-            c: raw.c.get(),
-            d: raw.d.get(),
-            e: raw.e.get(),
+            a: value.a,
+            b: value.b.get(),
+            c: value.c.get(),
+            d: value.d.get(),
+            e: value.e.get(),
         }
     }
 }
+
+impl From<MyStruct> for MyStructRaw {
+    fn from(value: MyStruct) -> Self {
+        Self {
+            a: value.a,
+            b: value.b.into(),
+            c: value.c.into(),
+            d: value.d.into(),
+            e: value.e.into(),
+        }
+    }
+}
+
+impl_byteable_relay!(MyStruct => MyStructRaw);
 
 fn benchmarks(c: &mut Criterion) {
     c.bench_function("as_bytearray_mystruct", |b| {

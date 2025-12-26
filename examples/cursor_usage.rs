@@ -3,7 +3,10 @@
 //! This example shows how to work with in-memory buffers using Cursor,
 //! which is useful for network protocols, packet parsing, and testing.
 
-use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable};
+use byteable::{
+    BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
+    impl_byteable_relay,
+};
 use std::io::Cursor;
 
 /// A simple message header for a network protocol
@@ -26,31 +29,30 @@ struct MessageHeader {
     sequence_number: u32, // Message sequence number
 }
 
-impl Byteable for MessageHeader {
-    type ByteArray = <MessageHeaderRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        MessageHeaderRaw {
-            magic: self.magic,
-            version: self.version,
-            message_type: self.message_type,
-            payload_length: self.payload_length.into(),
-            sequence_number: self.sequence_number.into(),
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = MessageHeaderRaw::from_bytearray(ba);
+impl From<MessageHeaderRaw> for MessageHeader {
+    fn from(value: MessageHeaderRaw) -> Self {
         Self {
-            magic: raw.magic,
-            version: raw.version,
-            message_type: raw.message_type,
-            payload_length: raw.payload_length.get(),
-            sequence_number: raw.sequence_number.get(),
+            magic: value.magic,
+            version: value.version,
+            message_type: value.message_type,
+            payload_length: value.payload_length.get(),
+            sequence_number: value.sequence_number.get(),
         }
     }
 }
+impl From<MessageHeader> for MessageHeaderRaw {
+    fn from(value: MessageHeader) -> Self {
+        Self {
+            magic: value.magic,
+            version: value.version,
+            message_type: value.message_type,
+            payload_length: value.payload_length.into(),
+            sequence_number: value.sequence_number.into(),
+        }
+    }
+}
+
+impl_byteable_relay!(MessageHeader => MessageHeaderRaw);
 
 /// A login request message
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -69,28 +71,28 @@ struct LoginRequestRaw {
     padding: [u8; 3], // Padding for alignment
 }
 
-impl Byteable for LoginRequest {
-    type ByteArray = <LoginRequestRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        LoginRequestRaw {
-            user_id: self.user_id.into(),
-            session_token: self.session_token.into(),
-            flags: self.flags,
-            padding: [0; _],
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = LoginRequestRaw::from_bytearray(ba);
+impl From<LoginRequestRaw> for LoginRequest {
+    fn from(value: LoginRequestRaw) -> Self {
         Self {
-            user_id: raw.user_id.get(),
-            session_token: raw.session_token.get(),
-            flags: raw.flags,
+            user_id: value.user_id.get(),
+            session_token: value.session_token.get(),
+            flags: value.flags,
         }
     }
 }
+
+impl From<LoginRequest> for LoginRequestRaw {
+    fn from(value: LoginRequest) -> Self {
+        Self {
+            user_id: value.user_id.into(),
+            session_token: value.session_token.into(),
+            flags: value.flags,
+            padding: [0; _],
+        }
+    }
+}
+
+impl_byteable_relay!(LoginRequest => LoginRequestRaw);
 
 /// A status response message
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -107,26 +109,25 @@ struct StatusResponse {
     timestamp: u64,
 }
 
-impl Byteable for StatusResponse {
-    type ByteArray = <StatusResponseRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        StatusResponseRaw {
-            status_code: self.status_code.into(),
-            timestamp: self.timestamp.into(),
-            reserved: [0; _],
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = StatusResponseRaw::from_bytearray(ba);
+impl From<StatusResponseRaw> for StatusResponse {
+    fn from(value: StatusResponseRaw) -> Self {
         Self {
-            status_code: raw.status_code.get(),
-            timestamp: raw.timestamp.get(),
+            status_code: value.status_code.get(),
+            timestamp: value.timestamp.get(),
         }
     }
 }
+impl From<StatusResponse> for StatusResponseRaw {
+    fn from(value: StatusResponse) -> Self {
+        Self {
+            status_code: value.status_code.into(),
+            timestamp: value.timestamp.into(),
+            reserved: [0; _],
+        }
+    }
+}
+
+impl_byteable_relay!(StatusResponse => StatusResponseRaw);
 
 fn main() -> std::io::Result<()> {
     println!("=== Cursor-based Byteable Example ===\n");

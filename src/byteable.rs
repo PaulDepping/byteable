@@ -63,14 +63,35 @@ macro_rules! unsafe_impl_directly_byteable {
     };
 }
 
+#[macro_export]
+macro_rules! impl_byteable_relay {
+    ($regular_type:ty => $raw_type:ty) => {
+        impl $crate::Byteable for $regular_type {
+            type ByteArray = <$raw_type as Byteable>::ByteArray;
+
+            fn as_bytearray(self) -> Self::ByteArray {
+                let raw: $raw_type = self.into();
+                raw.as_bytearray()
+            }
+
+            fn from_bytearray(ba: Self::ByteArray) -> Self {
+                let raw = <$raw_type>::from_bytearray(ba);
+                raw.into()
+            }
+        }
+    };
+}
+
 macro_rules! impl_byteable_primitive {
     ($($type:ty),+) => {
         $(
             impl $crate::Byteable for $type {
                 type ByteArray = [u8; ::std::mem::size_of::<Self>()];
+
                 fn as_bytearray(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)
                 }
+
                 fn from_bytearray(ba: Self::ByteArray) -> Self {
                     <$type>::from_ne_bytes(ba)
                 }
@@ -151,31 +172,31 @@ mod tests {
         e: u8,
     }
 
-    impl Byteable for MyRegularStruct {
-        type ByteArray = <MyRawStruct as Byteable>::ByteArray;
-
-        fn as_bytearray(self) -> Self::ByteArray {
-            MyRawStruct {
-                a: self.a,
-                b: LittleEndian::new(self.b),
-                c: LittleEndian::new(self.c),
-                d: self.d,
-                e: self.e,
-            }
-            .as_bytearray()
-        }
-
-        fn from_bytearray(ba: Self::ByteArray) -> Self {
-            let raw = MyRawStruct::from_bytearray(ba);
-            MyRegularStruct {
-                a: raw.a,
-                b: raw.b.get(),
-                c: raw.c.get(),
-                d: raw.d,
-                e: raw.e,
+    impl From<MyRawStruct> for MyRegularStruct {
+        fn from(value: MyRawStruct) -> Self {
+            Self {
+                a: value.a,
+                b: value.b.get(),
+                c: value.c.get(),
+                d: value.d,
+                e: value.e,
             }
         }
     }
+
+    impl From<MyRegularStruct> for MyRawStruct {
+        fn from(value: MyRegularStruct) -> Self {
+            Self {
+                a: value.a,
+                b: value.b.into(),
+                c: value.c.into(),
+                d: value.d,
+                e: value.e,
+            }
+        }
+    }
+
+    impl_byteable_relay!(MyRegularStruct => MyRawStruct);
 
     #[test]
     fn test_byteable_regular() {

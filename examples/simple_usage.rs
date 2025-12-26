@@ -3,7 +3,7 @@
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_relay};
 
 /// A simple sensor reading structure
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -23,29 +23,29 @@ struct SensorReading {
     pressure: u32,    // Pressure in Pascals
 }
 
-impl Byteable for SensorReading {
-    type ByteArray = <SensorReadingRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        SensorReadingRaw {
-            sensor_id: self.sensor_id,
-            temperature: LittleEndian::new(self.temperature),
-            humidity: LittleEndian::new(self.humidity),
-            pressure: BigEndian::new(self.pressure),
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = SensorReadingRaw::from_bytearray(ba);
+impl From<SensorReading> for SensorReadingRaw {
+    fn from(value: SensorReading) -> Self {
         Self {
-            sensor_id: raw.sensor_id,
-            temperature: raw.temperature.get(),
-            humidity: raw.humidity.get(),
-            pressure: raw.pressure.get(),
+            sensor_id: value.sensor_id,
+            temperature: LittleEndian::new(value.temperature),
+            humidity: LittleEndian::new(value.humidity),
+            pressure: BigEndian::new(value.pressure),
         }
     }
 }
+
+impl From<SensorReadingRaw> for SensorReading {
+    fn from(value: SensorReadingRaw) -> Self {
+        Self {
+            sensor_id: value.sensor_id,
+            temperature: value.temperature.get(),
+            humidity: value.humidity.get(),
+            pressure: value.pressure.get(),
+        }
+    }
+}
+
+impl_byteable_relay!(SensorReading => SensorReadingRaw);
 
 /// A compact RGB color structure
 #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -63,27 +63,27 @@ struct RgbColor {
     blue: u8,
 }
 
-impl Byteable for RgbColor {
-    type ByteArray = <RgbColorRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        RgbColorRaw {
-            red: self.red,
-            green: self.green,
-            blue: self.blue,
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = RgbColorRaw::from_bytearray(ba);
+impl From<RgbColor> for RgbColorRaw {
+    fn from(value: RgbColor) -> Self {
         Self {
-            red: raw.red,
-            green: raw.green,
-            blue: raw.blue,
+            red: value.red,
+            green: value.green,
+            blue: value.blue,
         }
     }
 }
+
+impl From<RgbColorRaw> for RgbColor {
+    fn from(value: RgbColorRaw) -> Self {
+        Self {
+            red: value.red,
+            green: value.green,
+            blue: value.blue,
+        }
+    }
+}
+
+impl_byteable_relay!(RgbColor => RgbColorRaw);
 
 fn main() {
     println!("=== Simple Byteable Usage Example ===\n");

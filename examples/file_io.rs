@@ -6,7 +6,10 @@
 //! - Read byteable structs from a file
 //! - Handle endianness with BigEndian and LittleEndian wrappers
 
-use byteable::{BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable};
+use byteable::{
+    BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
+    impl_byteable_relay,
+};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
@@ -40,29 +43,29 @@ struct NetworkPacketRaw {
     timestamp: LittleEndian<u64>,
 }
 
-impl Byteable for NetworkPacket {
-    type ByteArray = <NetworkPacketRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        NetworkPacketRaw {
-            sequence: self.sequence,
-            packet_type: self.packet_type.into(),
-            payload_length: self.payload_length.into(),
-            timestamp: self.timestamp.into(),
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = NetworkPacketRaw::from_bytearray(ba);
+impl From<NetworkPacket> for NetworkPacketRaw {
+    fn from(value: NetworkPacket) -> Self {
         Self {
-            sequence: raw.sequence,
-            packet_type: raw.packet_type.get(),
-            payload_length: raw.payload_length.get(),
-            timestamp: raw.timestamp.get(),
+            sequence: value.sequence,
+            packet_type: value.packet_type.into(),
+            payload_length: value.payload_length.into(),
+            timestamp: value.timestamp.into(),
         }
     }
 }
+
+impl From<NetworkPacketRaw> for NetworkPacket {
+    fn from(value: NetworkPacketRaw) -> Self {
+        Self {
+            sequence: value.sequence,
+            packet_type: value.packet_type.get(),
+            payload_length: value.payload_length.get(),
+            timestamp: value.timestamp.get(),
+        }
+    }
+}
+
+impl_byteable_relay!(NetworkPacket => NetworkPacketRaw);
 
 /// A configuration structure demonstrating mixed endianness.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -94,31 +97,31 @@ struct DeviceConfigRaw {
     calibration: LittleEndian<f32>,
 }
 
-impl Byteable for DeviceConfig {
-    type ByteArray = <DeviceConfigRaw as Byteable>::ByteArray;
-
-    fn as_bytearray(self) -> Self::ByteArray {
-        DeviceConfigRaw {
-            device_id: self.device_id.into(),
-            version: self.version,
-            flags: self.flags,
-            port: self.port.into(),
-            calibration: self.calibration.into(),
-        }
-        .as_bytearray()
-    }
-
-    fn from_bytearray(ba: Self::ByteArray) -> Self {
-        let raw = DeviceConfigRaw::from_bytearray(ba);
+impl From<DeviceConfig> for DeviceConfigRaw {
+    fn from(value: DeviceConfig) -> Self {
         Self {
-            device_id: raw.device_id.get(),
-            version: raw.version,
-            flags: raw.flags,
-            port: raw.port.get(),
-            calibration: raw.calibration.get(),
+            device_id: value.device_id.into(),
+            version: value.version,
+            flags: value.flags,
+            port: value.port.into(),
+            calibration: value.calibration.into(),
         }
     }
 }
+
+impl From<DeviceConfigRaw> for DeviceConfig {
+    fn from(value: DeviceConfigRaw) -> Self {
+        Self {
+            device_id: value.device_id.get(),
+            version: value.version,
+            flags: value.flags,
+            port: value.port.get(),
+            calibration: value.calibration.get(),
+        }
+    }
+}
+
+impl_byteable_relay!(DeviceConfig => DeviceConfigRaw);
 
 fn main() -> io::Result<()> {
     println!("=== Byteable Derive Macro Example ===\n");

@@ -44,7 +44,7 @@ mod tests {
     use byteable_derive::UnsafeByteable;
 
     use super::{ReadByteable, WriteByteable};
-    use crate::{BigEndian, Byteable, LittleEndian};
+    use crate::{BigEndian, Byteable, LittleEndian, impl_byteable_relay};
     use std::io::Cursor;
 
     #[derive(Clone, Copy, Debug, UnsafeByteable)]
@@ -60,25 +60,25 @@ mod tests {
         value: u32,
     }
 
-    impl Byteable for TestPacket {
-        type ByteArray = <TestPacketRaw as Byteable>::ByteArray;
-
-        fn as_bytearray(self) -> Self::ByteArray {
-            TestPacketRaw {
-                id: self.id.into(),
-                value: self.value.into(),
-            }
-            .as_bytearray()
-        }
-
-        fn from_bytearray(ba: Self::ByteArray) -> Self {
-            let raw = TestPacketRaw::from_bytearray(ba);
+    impl From<TestPacket> for TestPacketRaw {
+        fn from(value: TestPacket) -> Self {
             Self {
-                id: raw.id.get(),
-                value: raw.value.get(),
+                id: value.id.into(),
+                value: value.value.into(),
             }
         }
     }
+
+    impl From<TestPacketRaw> for TestPacket {
+        fn from(value: TestPacketRaw) -> Self {
+            Self {
+                id: value.id.get(),
+                value: value.value.get(),
+            }
+        }
+    }
+
+    impl_byteable_relay!(TestPacket => TestPacketRaw);
 
     #[test]
     fn test_write_one() {
