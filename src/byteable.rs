@@ -1,24 +1,204 @@
+//! Core trait for byte-oriented serialization and deserialization.
+//!
+//! This module contains the `Byteable` trait, which is the foundation of the crate's
+//! serialization capabilities, along with helper macros for implementing it.
+
 use crate::byte_array::ByteArray;
 
+/// A trait for types that can be converted to and from a byte array.
+///
+/// The `Byteable` trait provides a zero-overhead, zero-copy conversion between Rust types
+/// and their byte representations. This is particularly useful for:
+/// - Binary file I/O
+/// - Network protocols
+/// - Low-level system programming
+/// - Memory-mapped files
+/// - Interfacing with C libraries
+///
+/// # Associated Types
+///
+/// - `ByteArray`: The type of the byte array representation. Usually `[u8; N]` where `N`
+///   is the size of the type in bytes.
+///
+/// # Associated Constants
+///
+/// - `BYTE_SIZE`: The size of the type in bytes. This is automatically derived from
+///   `ByteArray::BYTE_SIZE`.
+///
+/// # Methods
+///
+/// - `as_byte_array`: Converts the value into its byte array representation
+/// - `from_byte_array`: Constructs a value from its byte array representation
+///
+/// # Safety
+///
+/// While the trait itself is safe, implementations often use `unsafe` code internally
+/// (particularly via the `#[derive(UnsafeByteable)]` macro). Implementers using that derive macro must ensure:
+///
+/// 1. The type has a well-defined memory layout (e.g., `#[repr(C)]` or `#[repr(transparent)]`)
+/// 2. All byte patterns are valid for the type
+/// 3. No padding bytes contain uninitialized memory when converting to bytes
+///
+/// # Implementations
+///
+/// The trait is implemented for:
+/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
+/// - Fixed-size arrays of `Byteable` types
+/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
+/// - Custom types via `#[derive(UnsafeByteable)]` or manual implementation
+///
+/// # Examples
+///
+/// ## Using primitive types
+///
+/// ```
+/// use byteable::Byteable;
+///
+/// let value: u32 = 0x12345678;
+/// let bytes = value.as_byte_array();
+///
+/// // On little-endian systems
+/// #[cfg(target_endian = "little")]
+/// assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
+///
+/// let restored = u32::from_byte_array(bytes);
+/// assert_eq!(restored, value);
+/// ```
+///
+/// ## Using with custom types
+///
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::{Byteable, UnsafeByteable};
+///
+/// # #[cfg(feature = "derive")]
+/// #[derive(UnsafeByteable, Debug, PartialEq)]
+/// #[repr(C, packed)]
+/// struct Color {
+///     r: u8,
+///     g: u8,
+///     b: u8,
+///     a: u8,
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// let color = Color { r: 255, g: 128, b: 64, a: 255 };
+/// let bytes = color.as_byte_array();
+/// assert_eq!(bytes, [255, 128, 64, 255]);
+///
+/// let restored = Color::from_byte_array(bytes);
+/// assert_eq!(restored, color);
+/// # }
+/// ```
+///
+/// ## Using with arrays
+///
+/// ```
+/// use byteable::Byteable;
+///
+/// let values: [u16; 3] = [1, 2, 3];
+/// let byte_array = values.as_byte_array();
+///
+/// // byte_array is [[u8; 2]; 3] - array of byte arrays
+/// let restored = <[u16; 3]>::from_byte_array(byte_array);
+/// assert_eq!(restored, values);
+/// ```
 pub trait Byteable {
+    /// The size of this type in bytes.
+    ///
+    /// This is automatically computed from the associated `ByteArray` type.
     const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
+
+    /// The byte array type used to represent this type.
+    ///
+    /// Typically this is `[u8; N]` where N is `size_of::<Self>()`.
     type ByteArray: ByteArray;
+
+    /// Converts this value into a byte array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use byteable::Byteable;
+    ///
+    /// let value: u16 = 0x1234;
+    /// let bytes = value.as_byte_array();
+    /// ```
     fn as_byte_array(self) -> Self::ByteArray;
+
+    /// Constructs a value from a byte array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use byteable::Byteable;
+    ///
+    /// let bytes = [0x34, 0x12];
+    /// let value = u16::from_byte_array(bytes);
+    /// #[cfg(target_endian = "little")]
+    /// assert_eq!(value, 0x1234);
+    /// ```
     fn from_byte_array(byte_array: Self::ByteArray) -> Self;
 }
 
+// Implementation of Byteable for fixed-size arrays of Byteable types
+// This allows [T; N] to be Byteable if T is Byteable
 impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
+    // The byte array is an array of the element's byte arrays
     type ByteArray = [T::ByteArray; SIZE];
 
     fn as_byte_array(self) -> Self::ByteArray {
+        // Convert each element to its byte array representation
         self.map(T::as_byte_array)
     }
 
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+        // Convert each byte array back to its element type
         byte_array.map(T::from_byte_array)
     }
 }
 
+/// Implements `Byteable` for one or more types using `transmute`.
+///
+/// This macro provides a quick way to implement `Byteable` for types that can be
+/// safely transmuted to/from byte arrays. This is useful for `#[repr(C)]` or
+/// `#[repr(transparent)]` types.
+///
+/// # Safety
+///
+/// This macro uses `unsafe` code (`std::mem::transmute`). You must ensure:
+/// - The type has a well-defined memory layout
+/// - All byte patterns are valid for the type
+/// - The type has no padding bytes with uninitialized memory
+///
+/// # Examples
+///
+/// ```
+/// use byteable::{Byteable, unsafe_byteable_transmute};
+///
+/// #[repr(transparent)]
+/// struct MyU32(u32);
+///
+/// unsafe_byteable_transmute!(MyU32);
+///
+/// let value = MyU32(0x12345678);
+/// let bytes = value.as_byte_array();
+/// ```
+///
+/// Multiple types can be implemented at once:
+///
+/// ```
+/// use byteable::unsafe_byteable_transmute;
+///
+/// #[repr(transparent)]
+/// struct TypeA(u16);
+///
+/// #[repr(transparent)]
+/// struct TypeB(u32);
+///
+/// unsafe_byteable_transmute!(TypeA, TypeB);
+/// ```
 #[macro_export]
 macro_rules! unsafe_byteable_transmute {
     ($($type:ty),+) => {
@@ -36,6 +216,79 @@ macro_rules! unsafe_byteable_transmute {
     };
 }
 
+/// Implements `Byteable` for a type by delegating to another type.
+///
+/// This macro is useful when you have a "user-friendly" type and a "raw" type that
+/// can be converted between each other. The raw type must already implement `Byteable`,
+/// and both types must implement `From` for converting between them.
+///
+/// This pattern is common when you want to separate concerns:
+/// - The raw type handles byte layout (with endianness markers, packed representation)
+/// - The user-facing type provides a convenient API (with native types, methods)
+///
+/// # Requirements
+///
+/// - `$raw_type` must implement `Byteable`
+/// - `$regular_type` must implement `From<$raw_type>`
+/// - `$raw_type` must implement `From<$regular_type>`
+///
+/// # Examples
+///
+/// ```
+/// use byteable::{Byteable, LittleEndian, impl_byteable_via};
+///
+/// # #[cfg(feature = "derive")]
+/// use byteable::UnsafeByteable;
+///
+/// // Raw type with explicit byte layout
+/// # #[cfg(feature = "derive")]
+/// #[derive(UnsafeByteable)]
+/// #[repr(C, packed)]
+/// struct PointRaw {
+///     x: LittleEndian<i32>,
+///     y: LittleEndian<i32>,
+/// }
+///
+/// // User-friendly type
+/// #[derive(Debug, PartialEq)]
+/// struct Point {
+///     x: i32,
+///     y: i32,
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// // Implement conversions
+/// impl From<Point> for PointRaw {
+///     fn from(p: Point) -> Self {
+///         Self {
+///             x: p.x.into(),
+///             y: p.y.into(),
+///         }
+///     }
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// impl From<PointRaw> for Point {
+///     fn from(raw: PointRaw) -> Self {
+///         Self {
+///             x: raw.x.get(),
+///             y: raw.y.get(),
+///         }
+///     }
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// // Now Point implements Byteable via PointRaw
+/// impl_byteable_via!(Point => PointRaw);
+///
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// let point = Point { x: 100, y: 200 };
+/// let bytes = point.as_byte_array();
+/// let restored = Point::from_byte_array(bytes);
+/// assert_eq!(restored, point);
+/// # }
+/// ```
 #[macro_export]
 macro_rules! impl_byteable_via {
     ($regular_type:ty => $raw_type:ty) => {

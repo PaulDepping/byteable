@@ -7,7 +7,7 @@ _A Rust crate for convenient serialization and deserialization of byte-oriented 
 - **`Byteable` Trait**: The core trait for types that can be converted to and from a byte array.
 - **`ReadByteable` & `WriteByteable` Traits**: Extension traits for `std::io::Read` and `std::io::Write`, enabling convenient reading and writing of `Byteable` types.
 - **`AsyncReadByteable` & `AsyncWriteByteable` Traits (with `tokio` feature)**: Asynchronous counterparts to `ReadByteable` and `WriteByteable`, designed for use with `tokio`'s async I/O.
-- **`Endianable` Trait & Wrappers**: Provides methods for converting primitive types between different endianness (little-endian and big-endian), along with `BigEndian<T>` and `LittleEndian<T>` wrapper types.
+- **`EndianConvert` Trait & Wrappers**: Provides methods for converting primitive types between different endianness (little-endian and big-endian), along with `BigEndian<T>` and `LittleEndian<T>` wrapper types.
 - **`#[derive(UnsafeByteable)]` (with `derive` feature)**: A procedural macro that automatically implements the `Byteable` trait for structs, significantly simplifying boilerplate.
 
 ## Installation
@@ -46,7 +46,7 @@ fn main() -> std::io::Result<()> {
     // Create a packet
     let packet = Packet {
         id: 42,
-        length: LittleEndian::new(1024),
+        length: 1024.into(),
         data: [0xDE, 0xAD, 0xBE, 0xEF],
     };
 
