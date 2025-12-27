@@ -6,7 +6,7 @@ use byteable::Byteable;
 
 // This should compile - all fields are safe types
 #[derive(Clone, Copy, Byteable)]
-struct SafePacket {
+pub struct SafePacket {
     id: u8,
     #[byteable(little_endian)]
     length: u16,

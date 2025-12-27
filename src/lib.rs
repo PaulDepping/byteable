@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! # Byteable
 //!
 //! A Rust crate for convenient serialization and deserialization of byte-oriented data.
@@ -37,7 +39,8 @@
 //!
 //! ### Example: File I/O
 //!
-//! ```no_run
+//! ```no_run,ignore
+//! # #![cfg(feature = "std")]
 //! use byteable::{Byteable, ReadByteable, WriteByteable};
 //! use std::fs::File;
 //!
@@ -89,7 +92,8 @@
 //!
 //! ### Example: Working with TCP Streams
 //!
-//! ```no_run
+//! ```no_run,ignore
+//! # #![cfg(feature = "std")]
 //! use byteable::{Byteable, ReadByteable, WriteByteable};
 //! use std::net::TcpStream;
 //!
@@ -232,6 +236,8 @@ mod byte_array;
 mod byteable_trait;
 mod derive_safety_helpers;
 mod endian;
+
+#[cfg(feature = "std")]
 mod io;
 
 extern crate self as byteable; // used to resolve derive macros in examples etc.
@@ -242,15 +248,11 @@ mod async_io;
 #[cfg(feature = "derive")]
 pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 
-// Deprecated aliases for backwards compatibility
-#[cfg(feature = "derive")]
-#[deprecated(since = "0.17.0", note = "Use `UnsafeByteableTransmute` instead")]
-pub use byteable_derive::UnsafeByteableTransmute as UnsafeByteable;
-
 pub use byte_array::ByteArray;
 
 pub use byteable_trait::{Byteable, ByteableRaw};
 
+#[cfg(feature = "std")]
 pub use io::{ReadByteable, WriteByteable};
 
 #[cfg(feature = "tokio")]

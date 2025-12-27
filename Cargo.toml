@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -8,18 +8,27 @@ description = "A Rust crate for convenient serialization and deserialization of 
 readme = "README.md"
 
 [features]
-all = ["derive", "tokio"]
-default = ["derive"]
+all = ["derive", "tokio", "std"]
+default = ["derive", "std"]
 derive = ["dep:byteable_derive"]
-tokio = ["dep:tokio"]
+std = []
+tokio = ["dep:tokio", "std"]
 
 [dependencies]
-byteable_derive = { version = "0.8.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.9.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 criterion = { version = "0.8", features = ["html_reports"] }
+
+[[example]]
+name = "cursor_usage"
+required-features = ["std"]
+
+[[example]]
+name = "file_io"
+required-features = ["std"]
 
 [[bench]]
 name = "benchmarks"

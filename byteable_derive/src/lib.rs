@@ -377,6 +377,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     // Parse the input
     let input: DeriveInput = parse_macro_input!(input);
     let original_name = &input.ident;
+    let vis = &input.vis; // Capture the visibility of the original struct
 
     // Create the raw struct name by appending "Raw"
     let raw_name = Ident::new(
@@ -547,7 +548,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             #[repr(C, packed)]
             #[doc(hidden)]
             #[allow(non_camel_case_types)]
-            struct #raw_name(#(#raw_fields),*);
+            #vis struct #raw_name(#(#raw_fields),*);
 
             // Automatic ValidBytecastMarker impl for the raw struct
             // This is safe because all fields implement ValidBytecastMarker
@@ -586,7 +587,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             #[repr(C, packed)]
             #[doc(hidden)]
             #[allow(non_camel_case_types)]
-            pub struct #raw_name {
+            #vis struct #raw_name {
                 #(#raw_fields),*
             }
 
