@@ -127,7 +127,7 @@ let native = le_value.get();
 
 ```rust
 // Convert to bytes
-let bytes = my_struct.as_byte_array();
+let bytes = my_struct.to_byte_array();
 
 // Convert from bytes
 let reconstructed = MyStruct::from_byte_array(bytes);

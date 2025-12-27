@@ -111,7 +111,7 @@ let header = TcpHeader {
 };
 
 // Convert to bytes for transmission
-let bytes = header.as_byte_array();
+let bytes = header.to_byte_array();
 ```
 
 ### Async I/O with Tokio

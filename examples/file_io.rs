@@ -63,7 +63,7 @@ fn main() -> io::Result<()> {
     println!("   Timestamp: {}", packet.timestamp);
 
     // Convert to byte array
-    let bytes = packet.as_byte_array();
+    let bytes = packet.to_byte_array();
     println!("   As bytes: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
@@ -145,7 +145,7 @@ fn main() -> io::Result<()> {
     };
 
     // Convert to bytes
-    let byte_array = test_packet.as_byte_array();
+    let byte_array = test_packet.to_byte_array();
     println!("   Original packet: {:?}", test_packet);
     println!("   Byte array: {:?}", byte_array);
 

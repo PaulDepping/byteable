@@ -65,7 +65,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 /// # #[cfg(feature = "derive")]
 /// # fn example() {
 /// let color = Color { r: 255, g: 128, b: 64, a: 255 };
-/// let bytes = color.as_byte_array();
+/// let bytes = color.to_byte_array();
 /// assert_eq!(bytes, [255, 128, 64, 255]);
 ///
 /// let restored = Color::from_byte_array(bytes);
@@ -100,7 +100,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 ///     data: [0; 16],
 /// };
 ///
-/// let bytes = packet.as_byte_array();
+/// let bytes = packet.to_byte_array();
 /// // magic is big-endian: [0x12, 0x34, 0x56, 0x78]
 /// // payload_len is little-endian: [100, 0]
 /// # }
@@ -113,7 +113,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 /// use byteable::{Byteable, UnsafeByteableTransmute};
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable, Debug, Clone, Copy)]
+/// #[derive(UnsafeByteableTransmute, Debug, Clone, Copy)]
 /// #[repr(C, packed)]
 /// struct Point {
 ///     x: i32,
@@ -121,7 +121,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 /// }
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable, Debug)]
+/// #[derive(UnsafeByteableTransmute, Debug)]
 /// #[repr(C, packed)]
 /// struct Line {
 ///     start: Point,
@@ -135,34 +135,8 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 ///     end: Point { x: 10, y: 20 },
 /// };
 ///
-/// let bytes = line.as_byte_array();
+/// let bytes = line.to_byte_array();
 /// assert_eq!(bytes.len(), 16); // 4 i32s × 4 bytes each
-/// # }
-/// ```
-///
-/// ## With generics (requires bounds)
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, UnsafeByteableTransmute};
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute, Debug)]
-/// #[repr(C, packed)]
-/// struct Pair<T: Byteable> {
-///     first: T,
-///     second: T,
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let pair = Pair {
-///     first: 100u32,
-///     second: 200u32,
-/// };
-///
-/// let bytes = pair.as_byte_array();
-/// assert_eq!(bytes.len(), 8);
 /// # }
 /// ```
 ///
@@ -273,7 +247,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
             type ByteArray = [u8; ::std::mem::size_of::<Self>()];
 
             // Convert the struct to bytes using transmute (unsafe but zero-cost)
-            fn as_byte_array(self) -> Self::ByteArray {
+            fn to_byte_array(self) -> Self::ByteArray {
                 unsafe { ::std::mem::transmute(self) }
             }
 
@@ -343,7 +317,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 /// };
 ///
 /// // Byteable is automatically implemented
-/// let bytes = packet.as_byte_array();
+/// let bytes = packet.to_byte_array();
 /// let restored = Packet::from_byte_array(bytes);
 /// # }
 /// ```
@@ -353,7 +327,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 /// The above example generates approximately:
 ///
 /// ```ignore
-/// #[derive(Clone, Copy, Debug, UnsafeByteable)]
+/// #[derive(Clone, Copy, Debug, UnsafeByteableTransmute)]
 /// #[repr(C, packed)]
 /// struct PacketRaw {
 ///     id: u8,
@@ -405,7 +379,10 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     let original_name = &input.ident;
 
     // Create the raw struct name by appending "Raw"
-    let raw_name = Ident::new(&format!("{}Raw", original_name), original_name.span());
+    let raw_name = Ident::new(
+        &format!("__byteable_raw_{}", original_name),
+        original_name.span(),
+    );
 
     // Extract fields from the struct and determine if it's a tuple struct or named struct
     let (fields, is_tuple_struct) = match &input.data {
@@ -477,14 +454,15 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 Some("transparent") => {
-                    let raw_ty = quote! { <#field_type as #byteable_crate::Byteable>::ByteArray };
+                    // Use the ByteableRaw::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
                     from_original_conversions.push(quote! {
-                        #byteable_crate::Byteable::as_byte_array(value.#idx)
+                        value.#idx.into()
                     });
                     from_raw_conversions.push(quote! {
-                        <#field_type as #byteable_crate::Byteable>::from_byte_array(value.#idx)
+                        value.#idx.into()
                     });
                 }
                 _ => {
@@ -531,16 +509,17 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 Some("transparent") => {
-                    let raw_ty = quote! { <#field_type as #byteable_crate::Byteable>::ByteArray };
+                    // Use the ByteableRaw::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
                     });
                     raw_field_types.push(raw_ty);
                     from_original_conversions.push(quote! {
-                        #field_name: #byteable_crate::Byteable::as_byte_array(value.#field_name)
+                        #field_name: value.#field_name.into()
                     });
                     from_raw_conversions.push(quote! {
-                        #field_name: <#field_type as #byteable_crate::Byteable>::from_byte_array(value.#field_name)
+                        #field_name: value.#field_name.into()
                     });
                 }
                 _ => {
@@ -560,101 +539,87 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         }
     }
 
-    // Create a unique module name for this type to avoid clashes when multiple types
-    // in the same module derive Byteable
-    let private_module_name = Ident::new(
-        &format!(
-            "__byteable_private_{}",
-            original_name.to_string().to_lowercase()
-        ),
-        original_name.span(),
-    );
-
     // Generate the output code
     let output = if is_tuple_struct {
         quote! {
-            // Private module to hide the raw struct implementation
+            // Generate the raw struct (tuple struct)
+            #[derive(Clone, Copy, Debug)]
+            #[repr(C, packed)]
             #[doc(hidden)]
-            mod #private_module_name {
-                use super::*;
+            struct #raw_name(#(#raw_fields),*);
 
-                // Generate the raw struct (tuple struct)
-                #[derive(Clone, Copy, Debug)]
-                #[repr(C, packed)]
-                pub(super) struct #raw_name(#(pub(super) #raw_fields),*);
+            // Automatic ValidBytecastMarker impl for the raw struct
+            // This is safe because all fields implement ValidBytecastMarker
+            unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+            where
+                #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+            {}
 
-                // Automatic ValidBytecastMarker impl for the raw struct
-                // This is safe because all fields implement ValidBytecastMarker
-                unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
-                where
-                    #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
-                {}
+            #byteable_crate::unsafe_byteable_transmute!(#raw_name);
 
-                #byteable_crate::unsafe_byteable_transmute!(#raw_name);
-
-                // From original to raw
-                impl From<#original_name> for #raw_name {
-                    fn from(value: #original_name) -> Self {
-                        Self(#(#from_original_conversions),*)
-                    }
+            // From original to raw
+            impl From<#original_name> for #raw_name {
+                fn from(value: #original_name) -> Self {
+                    Self(#(#from_original_conversions),*)
                 }
             }
 
             // From raw to original
-            impl From<#private_module_name::#raw_name> for #original_name {
-                fn from(value: #private_module_name::#raw_name) -> Self {
+            impl From<#raw_name> for #original_name {
+                fn from(value: #raw_name) -> Self {
                     Self(#(#from_raw_conversions),*)
                 }
             }
 
             // Implement Byteable for the original struct via the raw struct
-            #byteable_crate::impl_byteable_via!(#original_name => #private_module_name::#raw_name);
+            #byteable_crate::impl_byteable_via!(#original_name => #raw_name);
+
+            // Implement ByteableRaw to expose the raw type
+            impl #byteable_crate::ByteableRaw for #original_name {
+                type Raw = #raw_name;
+            }
         }
     } else {
         quote! {
-            // Private module to hide the raw struct implementation
+            #[derive(Clone, Copy, Debug)]
+            #[repr(C, packed)]
             #[doc(hidden)]
-            mod #private_module_name {
-                use super::*;
-
-                // Generate the raw struct (named fields)
-                #[derive(Clone, Copy, Debug)]
-                #[repr(C, packed)]
-                pub(super) struct #raw_name {
-                    #(pub(super) #raw_fields),*
-                }
-
-                // Automatic ValidBytecastMarker impl for the raw struct
-                // This is safe because all fields implement ValidBytecastMarker
-                unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
-                where
-                    #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
-                {}
-
-                #byteable_crate::unsafe_byteable_transmute!(#raw_name);
-
-                // From original to raw
-                impl From<#original_name> for #raw_name {
-                    fn from(value: #original_name) -> Self {
-                        Self {
-                            #(#from_original_conversions),*
-                        }
-                    }
-                }
-
+            pub struct #raw_name {
+                #(#raw_fields),*
             }
 
-            // From raw to original
-           impl From<#private_module_name::#raw_name> for #original_name {
-                fn from(value: #private_module_name::#raw_name) -> Self {
+            // Automatic ValidBytecastMarker impl for the raw struct
+            // This is safe because all fields implement ValidBytecastMarker
+            unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+            where
+                #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+            {}
+
+            #byteable_crate::unsafe_byteable_transmute!(#raw_name);
+
+            // From original to raw
+            impl From<#original_name> for #raw_name {
+                fn from(value: #original_name) -> Self {
+                    Self {
+                        #(#from_original_conversions),*
+                    }
+                }
+            }
+
+            impl From<#raw_name> for #original_name {
+                fn from(value: #raw_name) -> Self {
                     Self {
                         #(#from_raw_conversions),*
                     }
                 }
             }
 
-            // Implement Byteable for the original struct via the raw struct
-            #byteable_crate::impl_byteable_via!(#original_name => #private_module_name::#raw_name);
+            #byteable_crate::impl_byteable_via!(#original_name => #raw_name);
+
+            // Implement ByteableRaw to expose the raw type
+            impl #byteable_crate::ByteableRaw for #original_name {
+                type Raw = #raw_name;
+            }
         }
     };
     output.into()

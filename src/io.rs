@@ -212,7 +212,7 @@ pub trait WriteByteable: Write {
     /// ```
     fn write_byteable<T: Byteable>(&mut self, data: T) -> std::io::Result<()> {
         // Convert the data into its byte array representation
-        let byte_array = data.as_byte_array();
+        let byte_array = data.to_byte_array();
 
         // Write all bytes to the writer
         self.write_all(byte_array.as_byte_slice())

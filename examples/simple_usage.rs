@@ -46,7 +46,7 @@ fn main() {
     println!("   Pressure: {} Pa", reading.pressure);
 
     // Convert to bytes
-    let bytes = reading.as_byte_array();
+    let bytes = reading.to_byte_array();
     println!("   Byte representation: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
@@ -65,7 +65,7 @@ fn main() {
     };
 
     println!("   Color: RGB({}, {}, {})", cyan.red, cyan.green, cyan.blue);
-    let color_bytes = cyan.as_byte_array();
+    let color_bytes = cyan.to_byte_array();
     println!("   Bytes: {:?}", color_bytes);
     println!(
         "   Hex representation: #{:02X}{:02X}{:02X}\n",
@@ -94,7 +94,7 @@ fn main() {
 
     println!("   Color palette:");
     for (i, color) in color_palette.iter().enumerate() {
-        let bytes = color.as_byte_array();
+        let bytes = color.to_byte_array();
         println!(
             "   Color {}: RGB({:3}, {:3}, {:3}) = {:?}",
             i + 1,

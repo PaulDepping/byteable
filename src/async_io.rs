@@ -244,7 +244,7 @@ pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt {
     {
         async move {
             // Convert the data into its byte array representation
-            let byte_array = data.as_byte_array();
+            let byte_array = data.to_byte_array();
 
             // Asynchronously write all bytes to the writer
             self.write_all(byte_array.as_byte_slice()).await

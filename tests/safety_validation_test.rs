@@ -42,7 +42,7 @@ fn test_safe_types_compile() {
         data: [1, 2, 3, 4],
     };
 
-    let bytes = packet.as_byte_array();
+    let bytes = packet.to_byte_array();
     let restored = SafePacket::from_byte_array(bytes);
 
     assert_eq!(packet.id, restored.id);
@@ -59,7 +59,7 @@ fn test_nested_safe_types_compile() {
         bottom_right: Point { x: 100, y: 200 },
     };
 
-    let bytes = shape.as_byte_array();
+    let bytes = shape.to_byte_array();
     let restored = Shape::from_byte_array(bytes);
 
     assert_eq!(shape.id, restored.id);

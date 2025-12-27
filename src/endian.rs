@@ -269,7 +269,7 @@ impl<T: EndianConvert + Default> Default for BigEndian<T> {
 impl<T: EndianConvert> Byteable for BigEndian<T> {
     type ByteArray = <T as EndianConvert>::ByteArray;
 
-    fn as_byte_array(self) -> Self::ByteArray {
+    fn to_byte_array(self) -> Self::ByteArray {
         // Return the stored big-endian bytes directly (no conversion needed)
         self.0
     }
@@ -477,7 +477,7 @@ impl<T: EndianConvert + Default> Default for LittleEndian<T> {
 impl<T: EndianConvert> Byteable for LittleEndian<T> {
     type ByteArray = <T as EndianConvert>::ByteArray;
 
-    fn as_byte_array(self) -> Self::ByteArray {
+    fn to_byte_array(self) -> Self::ByteArray {
         // Return the stored little-endian bytes directly (no conversion needed)
         self.0
     }

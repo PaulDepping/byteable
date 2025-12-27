@@ -208,7 +208,7 @@
 //!
 //! # fn main() {
 //! let point = Point { x: 10, y: 20 };
-//! let bytes = point.as_byte_array();
+//! let bytes = point.to_byte_array();
 //! let restored = Point::from_byte_array(bytes);
 //! assert_eq!(point, restored);
 //! # }
@@ -225,7 +225,7 @@
 //! ## Performance
 //!
 //! This crate is designed for zero-copy, zero-overhead serialization. Operations like
-//! `as_byte_array` and `from_byte_array` typically compile down to simple memory operations
+//! `to_byte_array` and `from_byte_array` typically compile down to simple memory operations
 //! or even no-ops when possible.
 
 mod byte_array;
@@ -249,7 +249,7 @@ pub use byteable_derive::UnsafeByteableTransmute as UnsafeByteable;
 
 pub use byte_array::ByteArray;
 
-pub use byteable_trait::Byteable;
+pub use byteable_trait::{Byteable, ByteableRaw};
 
 pub use io::{ReadByteable, WriteByteable};
 

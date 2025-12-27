@@ -21,7 +21,7 @@ fn test_delegate_macro() {
     };
 
     // Test conversion to bytes
-    let bytes = test.as_byte_array();
+    let bytes = test.to_byte_array();
     println!("TestStruct as bytes: {:?}", bytes);
     println!("Byte array length: {}", bytes.len());
 

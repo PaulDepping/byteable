@@ -57,7 +57,7 @@ fn benchmarks(c: &mut Criterion) {
                 d: 4.0,
                 e: 5,
             })
-            .as_byte_array()
+            .to_byte_array()
         })
     });
 }
