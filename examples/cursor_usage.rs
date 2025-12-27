@@ -131,7 +131,7 @@ fn main() -> std::io::Result<()> {
     println!("   Packet size: {} bytes", packet_bytes.len());
     println!(
         "   Messages per packet: {}",
-        packet_bytes.len() / std::mem::size_of::<MessageHeader>()
+        packet_bytes.len() / core::mem::size_of::<MessageHeader>()
     );
 
     // Read them back

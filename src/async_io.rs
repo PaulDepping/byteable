@@ -7,7 +7,7 @@
 
 use crate::Byteable;
 use crate::byte_array::ByteArray;
-use std::future::Future;
+use core::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Extension trait for `AsyncRead` that adds methods for reading `Byteable` types asynchronously.

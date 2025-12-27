@@ -11,12 +11,12 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 /// Derives the `Byteable` trait for a struct using `transmute`.
 ///
 /// This procedural macro automatically implements the `Byteable` trait for structs by using
-/// `std::mem::transmute` to convert between the struct and a byte array. This provides
+/// `core::mem::transmute` to convert between the struct and a byte array. This provides
 /// zero-overhead serialization but requires careful attention to memory layout and safety.
 ///
 /// # Safety
 ///
-/// This macro generates `unsafe` code using `std::mem::transmute`. You **must** ensure:
+/// This macro generates `unsafe` code using `core::mem::transmute`. You **must** ensure:
 ///
 /// 1. **The struct has an explicit memory layout**: Use `#[repr(C)]`, `#[repr(C, packed)]`,
 ///    or `#[repr(transparent)]` to ensure a well-defined layout.
@@ -244,16 +244,16 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
     quote! {
         impl #impl_generics #byteable for #ident #type_generics #extended_where_clause {
             // The byte array type is a fixed-size array matching the struct size
-            type ByteArray = [u8; ::std::mem::size_of::<Self>()];
+            type ByteArray = [u8; ::core::mem::size_of::<Self>()];
 
             // Convert the struct to bytes using transmute (unsafe but zero-cost)
             fn to_byte_array(self) -> Self::ByteArray {
-                unsafe { ::std::mem::transmute(self) }
+                unsafe { ::core::mem::transmute(self) }
             }
 
             // Convert bytes back to the struct using transmute (unsafe but zero-cost)
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                unsafe { ::std::mem::transmute(byte_array) }
+                unsafe { ::core::mem::transmute(byte_array) }
             }
         }
     }

@@ -95,7 +95,7 @@ fn main() -> io::Result<()> {
     println!("   Written 2 NetworkPackets and 1 DeviceConfig to 'example_data.bin'");
     println!(
         "   File size: {} bytes\n",
-        std::mem::size_of::<NetworkPacket>() * 2 + std::mem::size_of::<DeviceConfig>()
+        core::mem::size_of::<NetworkPacket>() * 2 + core::mem::size_of::<DeviceConfig>()
     );
 
     // Example 3: Reading from a file
@@ -130,7 +130,7 @@ fn main() -> io::Result<()> {
     println!("   Read first packet again: sequence = {}", first.sequence);
 
     // Seek to the second packet
-    file.seek(SeekFrom::Start(std::mem::size_of::<NetworkPacket>() as u64))?;
+    file.seek(SeekFrom::Start(core::mem::size_of::<NetworkPacket>() as u64))?;
     let second: NetworkPacket = file.read_byteable()?;
     println!("   Seeked to second packet: sequence = {}", second.sequence);
     println!();

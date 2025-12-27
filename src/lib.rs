@@ -178,7 +178,7 @@
 //!
 //! ## Safety Considerations
 //!
-//! The `#[derive(Byteable)]` macro uses `std::mem::transmute` internally, which is unsafe.
+//! The `#[derive(Byteable)]` macro uses `core::mem::transmute` internally, which is unsafe.
 //! When using this macro, ensure that:
 //!
 //! 1. All fields are primitive types or have endianness attributes (`#[byteable(big_endian)]`, `#[byteable(little_endian)]`)

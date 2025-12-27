@@ -1,62 +1,40 @@
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteableTransmute, impl_byteable_via};
+use byteable::Byteable;
+use core::f32;
+use core::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
 
-#[derive(Clone, Copy, Debug, UnsafeByteableTransmute)]
-#[repr(C, packed)]
-struct MyStructRaw {
-    a: u8,
-    b: BigEndian<u32>,
-    c: LittleEndian<u16>,
-    d: LittleEndian<f32>,
-    e: BigEndian<u16>,
-}
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Byteable)]
 struct MyStruct {
     a: u8,
+    #[byteable(little_endian)]
     b: u32,
+    #[byteable(big_endian)]
     c: u16,
+    #[byteable(big_endian)]
     d: f32,
-    e: u16,
+    #[byteable(little_endian)]
+    e: u128,
 }
-
-impl From<MyStructRaw> for MyStruct {
-    fn from(value: MyStructRaw) -> Self {
-        Self {
-            a: value.a,
-            b: value.b.get(),
-            c: value.c.get(),
-            d: value.d.get(),
-            e: value.e.get(),
-        }
-    }
-}
-
-impl From<MyStruct> for MyStructRaw {
-    fn from(value: MyStruct) -> Self {
-        Self {
-            a: value.a,
-            b: value.b.into(),
-            c: value.c.into(),
-            d: value.d.into(),
-            e: value.e.into(),
-        }
-    }
-}
-
-impl_byteable_via!(MyStruct => MyStructRaw);
 
 fn benchmarks(c: &mut Criterion) {
     c.bench_function("as_bytearray_mystruct", |b| {
         b.iter(|| {
-            black_box(MyStruct {
-                a: 1,
-                b: 2,
-                c: 3,
-                d: 4.0,
-                e: 5,
-            })
+            black_box([
+                MyStruct {
+                    a: 1,
+                    b: 2,
+                    c: 3,
+                    d: 4.0,
+                    e: 5,
+                },
+                MyStruct {
+                    a: 2,
+                    b: 67,
+                    c: 128,
+                    d: f32::consts::PI,
+                    e: 0,
+                },
+            ])
             .to_byte_array()
         })
     });

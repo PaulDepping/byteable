@@ -139,22 +139,22 @@ unsafe impl<T: ByteArray, const SIZE_OUTER: usize> ByteArray for [T; SIZE_OUTER]
 
     fn as_byte_slice_mut(&mut self) -> &mut [u8] {
         // Verify that our computed BYTE_SIZE matches the actual memory size
-        debug_assert_eq!(std::mem::size_of::<Self>(), Self::BYTE_SIZE);
+        debug_assert_eq!(core::mem::size_of::<Self>(), Self::BYTE_SIZE);
 
         // Reinterpret the array of T as a flat byte slice
         // SAFETY: ByteArray guarantees contiguous memory layout
         unsafe {
-            std::slice::from_raw_parts_mut(self.as_mut_ptr() as _, std::mem::size_of::<Self>())
+            core::slice::from_raw_parts_mut(self.as_mut_ptr() as _, core::mem::size_of::<Self>())
         }
     }
 
     fn as_byte_slice(&self) -> &[u8] {
         // Verify that our computed BYTE_SIZE matches the actual memory size
-        debug_assert_eq!(std::mem::size_of::<Self>(), Self::BYTE_SIZE);
+        debug_assert_eq!(core::mem::size_of::<Self>(), Self::BYTE_SIZE);
 
         // Reinterpret the array of T as a flat byte slice
         // SAFETY: ByteArray guarantees contiguous memory layout
-        unsafe { std::slice::from_raw_parts(self.as_ptr() as _, std::mem::size_of::<Self>()) }
+        unsafe { core::slice::from_raw_parts(self.as_ptr() as _, core::mem::size_of::<Self>()) }
     }
 }
 

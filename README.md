@@ -183,7 +183,7 @@ let checksum: u32 = reader.read_byteable()?;
 
 ## Safety Considerations
 
-The `#[derive(Byteable)]` macro uses `unsafe` code (`std::mem::transmute`) internally. When using it, you **must** ensure:
+The `#[derive(Byteable)]` macro uses `unsafe` code (`core::mem::transmute`) internally. When using it, you **must** ensure:
 
 ### Safe to Use With:
 

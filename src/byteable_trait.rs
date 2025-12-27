@@ -209,7 +209,7 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 ///
 /// # Safety
 ///
-/// This macro uses `unsafe` code (`std::mem::transmute`). You must ensure:
+/// This macro uses `unsafe` code (`core::mem::transmute`). You must ensure:
 /// - The type has a well-defined memory layout
 /// - All byte patterns are valid for the type
 /// - The type has no padding bytes with uninitialized memory
@@ -249,12 +249,12 @@ macro_rules! unsafe_byteable_transmute {
     ($($type:ty),+) => {
         $(
             impl $crate::Byteable for $type {
-                type ByteArray = [u8; ::std::mem::size_of::<Self>()];
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
                 fn to_byte_array(self) -> Self::ByteArray {
-                    unsafe { ::std::mem::transmute(self) }
+                    unsafe { ::core::mem::transmute(self) }
                 }
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                    unsafe { ::std::mem::transmute(byte_array) }
+                    unsafe { ::core::mem::transmute(byte_array) }
                 }
             }
         )+
@@ -357,7 +357,7 @@ macro_rules! impl_byteable_primitive {
     ($($type:ty),+) => {
         $(
             impl $crate::Byteable for $type {
-                type ByteArray = [u8; ::std::mem::size_of::<Self>()];
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
 
                 fn to_byte_array(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)

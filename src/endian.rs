@@ -6,7 +6,7 @@
 //! values are stored in a specific byte order regardless of the system's native endianness.
 
 use crate::{ByteArray, Byteable};
-use std::{fmt, hash::Hash};
+use core::{fmt, hash::Hash};
 
 /// A trait for types that can be converted between different byte orders (endianness).
 ///
@@ -64,7 +64,7 @@ macro_rules! impl_endianable {
     ($($type:ty),+) => {
         $(
             impl $crate::EndianConvert for $type {
-                type ByteArray = [u8; ::std::mem::size_of::<$type>()];
+                type ByteArray = [u8; ::core::mem::size_of::<$type>()];
 
                 fn from_le_bytes(byte_array: Self::ByteArray) -> Self {
                     <$type>::from_le_bytes(byte_array)
@@ -189,19 +189,19 @@ impl<T: PartialEq + EndianConvert> PartialEq for BigEndian<T> {
 impl<T: Eq + EndianConvert> Eq for BigEndian<T> {}
 
 impl<T: PartialOrd + EndianConvert> PartialOrd for BigEndian<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         self.get().partial_cmp(&other.get())
     }
 }
 
 impl<T: Ord + EndianConvert> Ord for BigEndian<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.get().cmp(&other.get())
     }
 }
 
 impl<T: Hash + EndianConvert> Hash for BigEndian<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
 }
@@ -397,19 +397,19 @@ impl<T: PartialEq + EndianConvert> PartialEq for LittleEndian<T> {
 impl<T: Eq + EndianConvert> Eq for LittleEndian<T> {}
 
 impl<T: PartialOrd + EndianConvert> PartialOrd for LittleEndian<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         self.get().partial_cmp(&other.get())
     }
 }
 
 impl<T: Ord + EndianConvert> Ord for LittleEndian<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.get().cmp(&other.get())
     }
 }
 
 impl<T: Hash + EndianConvert> Hash for LittleEndian<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
 }
