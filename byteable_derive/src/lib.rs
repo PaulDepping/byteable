@@ -546,6 +546,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             #[derive(Clone, Copy, Debug)]
             #[repr(C, packed)]
             #[doc(hidden)]
+            #[allow(non_camel_case_types)]
             struct #raw_name(#(#raw_fields),*);
 
             // Automatic ValidBytecastMarker impl for the raw struct
@@ -584,6 +585,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             #[derive(Clone, Copy, Debug)]
             #[repr(C, packed)]
             #[doc(hidden)]
+            #[allow(non_camel_case_types)]
             pub struct #raw_name {
                 #(#raw_fields),*
             }
