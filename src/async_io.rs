@@ -5,8 +5,8 @@
 //!
 //! This module is only available when the `tokio` feature is enabled.
 
+use crate::Byteable;
 use crate::byte_array::ByteArray;
-use crate::byteable::Byteable;
 use std::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -20,21 +20,20 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// ## Reading from an async file
 ///
 /// ```no_run
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
+/// # #![cfg(all(feature = "tokio", feature = "derive"))]
 /// use byteable::{Byteable, AsyncReadByteable};
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
 /// use tokio::fs::File;
 ///
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
-/// #[derive(byteable::UnsafeByteable, Debug)]
-/// #[repr(C, packed)]
+/// #[derive(Byteable, Clone, Copy, Debug)]
 /// struct Header {
+///     #[byteable(little_endian)]
 ///     magic: u32,
+///     #[byteable(little_endian)]
 ///     version: u16,
+///     #[byteable(little_endian)]
 ///     flags: u16,
 /// }
 ///
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut file = File::open("data.bin").await?;
@@ -42,56 +41,45 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// println!("Header: {:?}", header);
 /// # Ok(())
 /// # }
-/// # #[cfg(not(all(feature = "tokio", feature = "derive")))]
-/// # fn main() {}
 /// ```
 ///
 /// ## Reading from an async TCP stream
 ///
 /// ```no_run
-/// # #[cfg(feature = "tokio")]
-/// use byteable::AsyncReadByteable;
-/// # #[cfg(feature = "tokio")]
+/// # #![cfg(feature = "tokio")]
+/// use byteable::{AsyncReadByteable, LittleEndian};
 /// use tokio::net::TcpStream;
 ///
-/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 ///
 /// // Read a u32 length prefix
-/// let length: u32 = stream.read_byteable().await?;
-/// println!("Message length: {}", length);
+/// let length: LittleEndian<u32> = stream.read_byteable().await?;
+/// println!("Message length: {}", length.get());
 /// # Ok(())
 /// # }
-/// # #[cfg(not(feature = "tokio"))]
-/// # fn main() {}
 /// ```
 ///
 /// ## Reading multiple values sequentially
 ///
 /// ```no_run
-/// # #[cfg(feature = "tokio")]
-/// use byteable::AsyncReadByteable;
-/// # #[cfg(feature = "tokio")]
+/// # #![cfg(feature = "tokio")]
+/// use byteable::{AsyncReadByteable, LittleEndian};
 /// use std::io::Cursor;
 ///
-/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let data = vec![1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0];
 /// let mut cursor = Cursor::new(data);
 ///
-/// let a: u32 = cursor.read_byteable().await?;
-/// let b: u32 = cursor.read_byteable().await?;
-/// let c: u32 = cursor.read_byteable().await?;
+/// let a: LittleEndian<u32> = cursor.read_byteable().await?;
+/// let b: LittleEndian<u32> = cursor.read_byteable().await?;
+/// let c: LittleEndian<u32> = cursor.read_byteable().await?;
 ///
-/// #[cfg(target_endian = "little")]
-/// assert_eq!((a, b, c), (1, 2, 3));
+/// assert_eq!((a.get(), b.get(), c.get()), (1, 2, 3));
 /// # Ok(())
 /// # }
-/// # #[cfg(not(feature = "tokio"))]
-/// # fn main() {}
 /// ```
 pub trait AsyncReadByteable: tokio::io::AsyncReadExt {
     /// Asynchronously reads a `Byteable` type from this reader.
@@ -114,7 +102,7 @@ pub trait AsyncReadByteable: tokio::io::AsyncReadExt {
     /// use std::io::Cursor;
     ///
     /// # #[cfg(feature = "tokio")]
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> std::io::Result<()> {
     /// let data = vec![0x12, 0x34, 0x56, 0x78];
     /// let mut cursor = Cursor::new(data);
@@ -157,21 +145,20 @@ impl<T: AsyncReadExt> AsyncReadByteable for T {}
 /// ## Writing to an async file
 ///
 /// ```no_run
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
+/// # #![cfg(all(feature = "tokio", feature = "derive"))]
 /// use byteable::{Byteable, AsyncWriteByteable};
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
 /// use tokio::fs::File;
 ///
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
-/// #[derive(byteable::UnsafeByteable)]
-/// #[repr(C, packed)]
+/// #[derive(Byteable, Clone, Copy)]
 /// struct Header {
+///     #[byteable(little_endian)]
 ///     magic: u32,
+///     #[byteable(little_endian)]
 ///     version: u16,
+///     #[byteable(little_endian)]
 ///     flags: u16,
 /// }
 ///
-/// # #[cfg(all(feature = "tokio", feature = "derive"))]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let header = Header {
@@ -184,57 +171,46 @@ impl<T: AsyncReadExt> AsyncReadByteable for T {}
 /// file.write_byteable(header).await?;
 /// # Ok(())
 /// # }
-/// # #[cfg(not(all(feature = "tokio", feature = "derive")))]
-/// # fn main() {}
 /// ```
 ///
 /// ## Writing to an async TCP stream
 ///
 /// ```no_run
-/// # #[cfg(feature = "tokio")]
-/// use byteable::AsyncWriteByteable;
-/// # #[cfg(feature = "tokio")]
+/// # #![cfg(feature = "tokio")]
+/// use byteable::{AsyncWriteByteable, LittleEndian};
 /// use tokio::net::TcpStream;
 ///
-/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 ///
 /// // Write a u32 length prefix
-/// stream.write_byteable(42u32).await?;
+/// stream.write_byteable(LittleEndian::new(42u32)).await?;
 /// # Ok(())
 /// # }
-/// # #[cfg(not(feature = "tokio"))]
-/// # fn main() {}
 /// ```
 ///
 /// ## Writing multiple values
 ///
 /// ```no_run
-/// # #[cfg(feature = "tokio")]
-/// use byteable::AsyncWriteByteable;
-/// # #[cfg(feature = "tokio")]
+/// # #![cfg(feature = "tokio")]
+/// use byteable::{AsyncWriteByteable, LittleEndian};
 /// use std::io::Cursor;
 ///
-/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut buffer = Cursor::new(Vec::new());
 ///
-/// buffer.write_byteable(1u32).await?;
-/// buffer.write_byteable(2u32).await?;
-/// buffer.write_byteable(3u32).await?;
+/// buffer.write_byteable(LittleEndian::new(1u32)).await?;
+/// buffer.write_byteable(LittleEndian::new(2u32)).await?;
+/// buffer.write_byteable(LittleEndian::new(3u32)).await?;
 ///
-/// #[cfg(target_endian = "little")]
 /// assert_eq!(
 ///     buffer.into_inner(),
 ///     vec![1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]
 /// );
 /// # Ok(())
 /// # }
-/// # #[cfg(not(feature = "tokio"))]
-/// # fn main() {}
 /// ```
 pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt {
     /// Asynchronously writes a `Byteable` type to this writer.
@@ -249,23 +225,18 @@ pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt {
     /// # Examples
     ///
     /// ```no_run
-    /// # #[cfg(feature = "tokio")]
-    /// use byteable::{Byteable, AsyncWriteByteable};
-    /// # #[cfg(feature = "tokio")]
+    /// # #![cfg(feature = "tokio")]
+    /// use byteable::{Byteable, AsyncWriteByteable, LittleEndian};
     /// use std::io::Cursor;
     ///
-    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let mut buffer = Cursor::new(Vec::new());
-    /// buffer.write_byteable(0x12345678u32).await?;
+    /// buffer.write_byteable(LittleEndian::new(0x12345678u32)).await?;
     ///
-    /// #[cfg(target_endian = "little")]
     /// assert_eq!(buffer.into_inner(), vec![0x78, 0x56, 0x34, 0x12]);
     /// # Ok(())
     /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
     /// ```
     fn write_byteable<T: Byteable>(&mut self, data: T) -> impl Future<Output = std::io::Result<()>>
     where
@@ -286,24 +257,23 @@ impl<T: AsyncWriteExt> AsyncWriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
-    use byteable_derive::UnsafeByteable;
-
     use super::{AsyncReadByteable, AsyncWriteByteable};
-    use crate::{BigEndian, LittleEndian};
+    use crate::{BigEndian, Byteable, LittleEndian};
     use std::io::Cursor;
 
-    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
-    #[repr(C, packed)]
+    #[derive(Clone, Copy, PartialEq, Debug, Byteable)]
     struct AsyncTestPacket {
+        #[byteable(little_endian)]
         id: u16,
-        value: LittleEndian<u32>,
+        #[byteable(little_endian)]
+        value: u32,
     }
 
     #[tokio::test]
     async fn test_async_write_one() {
         let packet = AsyncTestPacket {
             id: 123,
-            value: LittleEndian::new(0x01020304),
+            value: 0x01020304,
         };
 
         let mut buffer = Cursor::new(vec![]);
@@ -318,7 +288,7 @@ mod tests {
         let packet: AsyncTestPacket = reader.read_byteable().await.unwrap();
 
         let id = packet.id;
-        let value = packet.value.get();
+        let value = packet.value;
         assert_eq!(id, 123);
         assert_eq!(value, 0x01020304);
     }
@@ -327,7 +297,7 @@ mod tests {
     async fn test_async_write_read_roundtrip() {
         let original = AsyncTestPacket {
             id: 42,
-            value: LittleEndian::new(0xAABBCCDD),
+            value: 0xAABBCCDD,
         };
 
         let mut buffer = Cursor::new(vec![]);

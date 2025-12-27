@@ -1,89 +1,29 @@
-//! Simple example demonstrating basic usage of the `UnsafeByteable` derive macro.
+//! Simple example demonstrating basic usage of the `Byteable` derive macro.
 //!
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_via};
+use byteable::Byteable;
 
 /// A simple sensor reading structure
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct SensorReadingRaw {
-    sensor_id: u8,
-    temperature: LittleEndian<u16>, // Temperature in 0.01°C units
-    humidity: LittleEndian<u16>,    // Humidity in 0.01% units
-    pressure: BigEndian<u32>,       // Pressure in Pascals
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Byteable)]
 struct SensorReading {
     sensor_id: u8,
+    #[byteable(little_endian)]
     temperature: u16, // Temperature in 0.01°C units
-    humidity: u16,    // Humidity in 0.01% units
-    pressure: u32,    // Pressure in Pascals
+    #[byteable(little_endian)]
+    humidity: u16, // Humidity in 0.01% units
+    #[byteable(big_endian)]
+    pressure: u32, // Pressure in Pascals
 }
-
-impl From<SensorReading> for SensorReadingRaw {
-    fn from(value: SensorReading) -> Self {
-        Self {
-            sensor_id: value.sensor_id,
-            temperature: LittleEndian::new(value.temperature),
-            humidity: LittleEndian::new(value.humidity),
-            pressure: BigEndian::new(value.pressure),
-        }
-    }
-}
-
-impl From<SensorReadingRaw> for SensorReading {
-    fn from(value: SensorReadingRaw) -> Self {
-        Self {
-            sensor_id: value.sensor_id,
-            temperature: value.temperature.get(),
-            humidity: value.humidity.get(),
-            pressure: value.pressure.get(),
-        }
-    }
-}
-
-impl_byteable_via!(SensorReading => SensorReadingRaw);
 
 /// A compact RGB color structure
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct RgbColorRaw {
-    red: u8,
-    green: u8,
-    blue: u8,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Byteable)]
 struct RgbColor {
     red: u8,
     green: u8,
     blue: u8,
 }
-
-impl From<RgbColor> for RgbColorRaw {
-    fn from(value: RgbColor) -> Self {
-        Self {
-            red: value.red,
-            green: value.green,
-            blue: value.blue,
-        }
-    }
-}
-
-impl From<RgbColorRaw> for RgbColor {
-    fn from(value: RgbColorRaw) -> Self {
-        Self {
-            red: value.red,
-            green: value.green,
-            blue: value.blue,
-        }
-    }
-}
-
-impl_byteable_via!(RgbColor => RgbColorRaw);
 
 fn main() {
     println!("=== Simple Byteable Usage Example ===\n");

@@ -3,8 +3,8 @@
 //! This module provides extension traits for `std::io::Read` and `std::io::Write` that
 //! enable convenient reading and writing of types implementing the `Byteable` trait.
 
+use crate::Byteable;
 use crate::byte_array::ByteArray;
-use crate::byteable::Byteable;
 use std::io::{Read, Write};
 
 /// Extension trait for `Read` that adds methods for reading `Byteable` types.
@@ -21,11 +21,13 @@ use std::io::{Read, Write};
 /// use std::fs::File;
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(byteable::UnsafeByteable, Debug)]
-/// #[repr(C, packed)]
+/// #[derive(byteable::Byteable, Debug)]
 /// struct Header {
+///     #[byteable(big_endian)]
 ///     magic: u32,
+///     #[byteable(little_endian)]
 ///     version: u16,
+///     #[byteable(little_endian)]
 ///     flags: u16,
 /// }
 ///
@@ -128,11 +130,13 @@ impl<T: Read> ReadByteable for T {}
 /// use std::fs::File;
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(byteable::UnsafeByteable)]
-/// #[repr(C, packed)]
+/// #[derive(byteable::Byteable)]
 /// struct Header {
+///     #[byteable(big_endian)]
 ///     magic: u32,
+///     #[byteable(little_endian)]
 ///     version: u16,
+///     #[byteable(little_endian)]
 ///     flags: u16,
 /// }
 ///
@@ -220,13 +224,13 @@ impl<T: Write> WriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
-    use byteable_derive::UnsafeByteable;
+    use byteable_derive::UnsafeByteableTransmute;
 
     use super::{ReadByteable, WriteByteable};
     use crate::{BigEndian, Byteable, LittleEndian, impl_byteable_via};
     use std::io::Cursor;
 
-    #[derive(Clone, Copy, Debug, UnsafeByteable)]
+    #[derive(Clone, Copy, Debug, UnsafeByteableTransmute)]
     #[repr(C, packed)]
     struct TestPacketRaw {
         id: BigEndian<u16>,

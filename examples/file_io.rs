@@ -1,127 +1,48 @@
-//! Example demonstrating the `UnsafeByteable` derive macro with file I/O operations.
+//! Example demonstrating the `Byteable` derive macro with file I/O operations.
 //!
 //! This example shows how to:
-//! - Define a struct with the UnsafeByteable derive macro
+//! - Define a struct with the Byteable derive macro
 //! - Write byteable structs to a file
 //! - Read byteable structs from a file
-//! - Handle endianness with BigEndian and LittleEndian wrappers
+//! - Handle endianness with #[byteable(little_endian)] and #[byteable(big_endian)] attributes
 
-use byteable::{
-    BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
-    impl_byteable_via,
-};
+use byteable::{Byteable, ReadByteable, WriteByteable};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
 /// A simple network packet structure.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Byteable)]
 struct NetworkPacket {
-    /// Packet sequence number
-    sequence: u8,
-    /// Packet type identifier
-    packet_type: u16,
-    /// Payload length
-    payload_length: u32,
-    /// Timestamp
-    timestamp: u64,
-}
-
-/// Requirements for deriving Byteable:
-/// - Must be `#[repr(C, packed)]` or `#[repr(C)]` for predictable memory layout
-/// - Must implement `Copy`
-/// - All fields must be Byteable (primitives, or types wrapped in BigEndian/LittleEndian)
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct NetworkPacketRaw {
     /// Packet sequence number (native endianness)
     sequence: u8,
     /// Packet type identifier (little-endian)
-    packet_type: LittleEndian<u16>,
+    #[byteable(little_endian)]
+    packet_type: u16,
     /// Payload length (big-endian)
-    payload_length: BigEndian<u32>,
+    #[byteable(big_endian)]
+    payload_length: u32,
     /// Timestamp (little-endian)
-    timestamp: LittleEndian<u64>,
+    #[byteable(little_endian)]
+    timestamp: u64,
 }
-
-impl From<NetworkPacket> for NetworkPacketRaw {
-    fn from(value: NetworkPacket) -> Self {
-        Self {
-            sequence: value.sequence,
-            packet_type: value.packet_type.into(),
-            payload_length: value.payload_length.into(),
-            timestamp: value.timestamp.into(),
-        }
-    }
-}
-
-impl From<NetworkPacketRaw> for NetworkPacket {
-    fn from(value: NetworkPacketRaw) -> Self {
-        Self {
-            sequence: value.sequence,
-            packet_type: value.packet_type.get(),
-            payload_length: value.payload_length.get(),
-            timestamp: value.timestamp.get(),
-        }
-    }
-}
-
-impl_byteable_via!(NetworkPacket => NetworkPacketRaw);
 
 /// A configuration structure demonstrating mixed endianness.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Byteable)]
 struct DeviceConfig {
-    /// Device ID
-    device_id: u32,
-    /// Protocol version
-    version: u8,
-    /// Flags bitfield
-    flags: u8,
-    /// Network port
-    port: u16,
-    /// Calibration factor
-    calibration: f32,
-}
-
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct DeviceConfigRaw {
     /// Device ID (little-endian, common for x86 devices)
-    device_id: LittleEndian<u32>,
+    #[byteable(little_endian)]
+    device_id: u32,
     /// Protocol version (native endianness for single-byte values)
     version: u8,
     /// Flags bitfield
     flags: u8,
     /// Network port (big-endian, standard for network byte order)
-    port: BigEndian<u16>,
+    #[byteable(big_endian)]
+    port: u16,
     /// Calibration factor (little-endian float)
-    calibration: LittleEndian<f32>,
+    #[byteable(little_endian)]
+    calibration: f32,
 }
-
-impl From<DeviceConfig> for DeviceConfigRaw {
-    fn from(value: DeviceConfig) -> Self {
-        Self {
-            device_id: value.device_id.into(),
-            version: value.version,
-            flags: value.flags,
-            port: value.port.into(),
-            calibration: value.calibration.into(),
-        }
-    }
-}
-
-impl From<DeviceConfigRaw> for DeviceConfig {
-    fn from(value: DeviceConfigRaw) -> Self {
-        Self {
-            device_id: value.device_id.get(),
-            version: value.version,
-            flags: value.flags,
-            port: value.port.get(),
-            calibration: value.calibration.get(),
-        }
-    }
-}
-
-impl_byteable_via!(DeviceConfig => DeviceConfigRaw);
 
 fn main() -> io::Result<()> {
     println!("=== Byteable Derive Macro Example ===\n");

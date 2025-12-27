@@ -33,11 +33,12 @@ use crate::byte_array::ByteArray;
 /// # Safety
 ///
 /// While the trait itself is safe, implementations often use `unsafe` code internally
-/// (particularly via the `#[derive(UnsafeByteable)]` macro). Implementers using that derive macro must ensure:
+/// (particularly via the `#[derive(Byteable)]` macro). The derive macro automatically handles
+/// memory layout and endianness conversion. Users must ensure:
 ///
-/// 1. The type has a well-defined memory layout (e.g., `#[repr(C)]` or `#[repr(transparent)]`)
-/// 2. All byte patterns are valid for the type
-/// 3. No padding bytes contain uninitialized memory when converting to bytes
+/// 1. All fields are primitive types or use endianness attributes
+/// 2. All byte patterns are valid for the field types
+/// 3. No types with invalid bit patterns are used (e.g., `bool`, `char`, enums)
 ///
 /// # Implementations
 ///
@@ -45,7 +46,7 @@ use crate::byte_array::ByteArray;
 /// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
 /// - Fixed-size arrays of `Byteable` types
 /// - `BigEndian<T>` and `LittleEndian<T>` wrappers
-/// - Custom types via `#[derive(UnsafeByteable)]` or manual implementation
+/// - Custom types via `#[derive(Byteable)]` with automatic endianness handling
 ///
 /// # Examples
 ///
@@ -68,12 +69,10 @@ use crate::byte_array::ByteArray;
 /// ## Using with custom types
 ///
 /// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, UnsafeByteable};
+/// # #![cfg(feature = "derive")]
+/// use byteable::Byteable;
 ///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable, Debug, PartialEq)]
-/// #[repr(C, packed)]
+/// #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
 /// struct Color {
 ///     r: u8,
 ///     g: u8,
@@ -81,8 +80,7 @@ use crate::byte_array::ByteArray;
 ///     a: u8,
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
+/// # fn main() {
 /// let color = Color { r: 255, g: 128, b: 64, a: 255 };
 /// let bytes = color.as_byte_array();
 /// assert_eq!(bytes, [255, 128, 64, 255]);
@@ -177,6 +175,7 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 /// ```
 /// use byteable::{Byteable, unsafe_byteable_transmute};
 ///
+/// #[derive(Clone, Copy)]
 /// #[repr(transparent)]
 /// struct MyU32(u32);
 ///
@@ -191,9 +190,11 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 /// ```
 /// use byteable::unsafe_byteable_transmute;
 ///
+/// #[derive(Clone, Copy)]
 /// #[repr(transparent)]
 /// struct TypeA(u16);
 ///
+/// #[derive(Clone, Copy)]
 /// #[repr(transparent)]
 /// struct TypeB(u32);
 ///
@@ -238,11 +239,11 @@ macro_rules! unsafe_byteable_transmute {
 /// use byteable::{Byteable, LittleEndian, impl_byteable_via};
 ///
 /// # #[cfg(feature = "derive")]
-/// use byteable::UnsafeByteable;
+/// use byteable::UnsafeByteableTransmute;
 ///
 /// // Raw type with explicit byte layout
 /// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable)]
+/// #[derive(byteable::UnsafeByteableTransmute, Clone, Copy)]
 /// #[repr(C, packed)]
 /// struct PointRaw {
 ///     x: LittleEndian<i32>,
@@ -250,7 +251,7 @@ macro_rules! unsafe_byteable_transmute {
 /// }
 ///
 /// // User-friendly type
-/// #[derive(Debug, PartialEq)]
+/// #[derive(Debug, PartialEq, Clone, Copy)]
 /// struct Point {
 ///     x: i32,
 ///     y: i32,
@@ -331,9 +332,9 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 #[cfg(test)]
 mod tests {
     use crate::{BigEndian, Byteable, LittleEndian};
-    use byteable_derive::UnsafeByteable;
+    use byteable_derive::UnsafeByteableTransmute;
 
-    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
+    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]
     #[repr(C, packed)]
     struct ABC {
         a: LittleEndian<u16>,
@@ -377,7 +378,7 @@ mod tests {
         assert_eq!(read, a);
     }
 
-    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteable)]
+    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]
     #[repr(C, packed)]
     struct MyRawStruct {
         a: u8,

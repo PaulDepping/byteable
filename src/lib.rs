@@ -16,7 +16,7 @@
 //! - **`EndianConvert` Trait & Wrappers**: Provides methods for converting primitive types between
 //!   different endianness (little-endian and big-endian), along with `BigEndian<T>` and
 //!   `LittleEndian<T>` wrapper types.
-//! - **`#[derive(UnsafeByteable)]`** (with `derive` feature): A procedural macro that automatically
+//! - **`#[derive(UnsafeByteableTransmute)]`** (with `derive` feature): A procedural macro that automatically
 //!   implements the `Byteable` trait for structs, significantly simplifying boilerplate.
 //!
 //! ## Quick Start
@@ -38,25 +38,22 @@
 //! ### Example: File I/O
 //!
 //! ```no_run
-//! use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
+//! use byteable::{Byteable, ReadByteable, WriteByteable};
 //! use std::fs::File;
 //!
-//! #[derive(Debug, PartialEq)]
-//! # #[cfg(feature = "derive")]
-//! #[derive(byteable::UnsafeByteable)]
-//! #[repr(C, packed)]
+//! #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
 //! struct Packet {
 //!     id: u8,
-//!     length: LittleEndian<u16>,
+//!     #[byteable(little_endian)]
+//!     length: u16,
 //!     data: [u8; 4],
 //! }
 //!
 //! # fn main() -> std::io::Result<()> {
-//! # #[cfg(feature = "derive")] {
 //! // Create a packet
 //! let packet = Packet {
 //!     id: 42,
-//!     length: 1024.into(),
+//!     length: 1024,
 //!     data: [0xDE, 0xAD, 0xBE, 0xEF],
 //! };
 //!
@@ -69,45 +66,40 @@
 //! let restored: Packet = file.read_byteable()?;
 //!
 //! assert_eq!(packet, restored);
-//! # }
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! ### Example: Network Protocol
 //!
-//! ```
-//! use byteable::{Byteable, BigEndian, LittleEndian};
-//! # #[cfg(feature = "derive")]
-//! use byteable::UnsafeByteable;
+//! ```no_run
+//! use byteable::Byteable;
 //!
-//! # #[cfg(feature = "derive")]
-//! #[derive(UnsafeByteable, Debug, Clone, Copy)]
-//! #[repr(C, packed)]
+//! #[derive(Byteable, Debug, Clone, Copy)]
 //! struct NetworkHeader {
-//!     magic: BigEndian<u32>,      // Network byte order (big-endian)
+//!     #[byteable(big_endian)]
+//!     magic: u32,       // Network byte order (big-endian)
 //!     version: u8,
 //!     flags: u8,
-//!     payload_len: LittleEndian<u16>,  // Little-endian for payload
+//!     #[byteable(little_endian)]
+//!     payload_len: u16, // Little-endian for payload
 //! }
+//! # fn main() {}
 //! ```
 //!
 //! ### Example: Working with TCP Streams
 //!
 //! ```no_run
-//! use byteable::{ReadByteable, WriteByteable, Byteable};
+//! use byteable::{Byteable, ReadByteable, WriteByteable};
 //! use std::net::TcpStream;
 //!
-//! # #[cfg(feature = "derive")]
-//! #[derive(byteable::UnsafeByteable, Debug)]
-//! #[repr(C, packed)]
+//! #[derive(Byteable, Debug, Clone, Copy)]
 //! struct Message {
 //!     msg_type: u8,
 //!     data: [u8; 16],
 //! }
 //!
 //! # fn main() -> std::io::Result<()> {
-//! # #[cfg(feature = "derive")] {
 //! let mut stream = TcpStream::connect("127.0.0.1:8080")?;
 //!
 //! // Write message
@@ -119,7 +111,6 @@
 //!
 //! // Read response
 //! let response: Message = stream.read_byteable()?;
-//! # }
 //! # Ok(())
 //! # }
 //! ```
@@ -138,21 +129,18 @@
 //!
 //! ```no_run
 //! # #[cfg(feature = "tokio")]
+//! {
 //! use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable};
-//! # #[cfg(feature = "tokio")]
 //! use tokio::net::TcpStream;
 //!
-//! # #[cfg(all(feature = "derive", feature = "tokio"))]
-//! #[derive(byteable::UnsafeByteable, Debug)]
-//! #[repr(C, packed)]
+//! #[derive(Byteable, Debug, Clone, Copy)]
 //! struct AsyncPacket {
+//!     #[byteable(little_endian)]
 //!     id: u32,
 //!     data: [u8; 8],
 //! }
 //!
-//! # #[cfg(all(feature = "derive", feature = "tokio"))]
-//! # #[tokio::main]
-//! # async fn main() -> std::io::Result<()> {
+//! # async fn example() -> std::io::Result<()> {
 //! let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 //!
 //! let packet = AsyncPacket {
@@ -164,8 +152,8 @@
 //! let response: AsyncPacket = stream.read_byteable().await?;
 //! # Ok(())
 //! # }
-//! # #[cfg(not(all(feature = "derive", feature = "tokio")))]
 //! # fn main() {}
+//! # }
 //! ```
 //!
 //! ## Endianness Handling
@@ -190,73 +178,48 @@
 //!
 //! ## Safety Considerations
 //!
-//! The `#[derive(UnsafeByteable)]` macro uses `std::mem::transmute` internally, which is unsafe.
+//! The `#[derive(Byteable)]` macro uses `std::mem::transmute` internally, which is unsafe.
 //! When using this macro, ensure that:
 //!
-//! 1. Your struct has `#[repr(C, packed)]` or another explicit layout
-//! 2. All fields in the struct implement `Byteable`
-//! 3. The struct doesn't contain padding bytes with undefined values
-//! 4. Reading arbitrary bytes into your struct won't violate invariants
+//! 1. All fields are primitive types or have endianness attributes (`#[byteable(big_endian)]`, `#[byteable(little_endian)]`)
+//! 2. The struct doesn't contain types with invalid bit patterns (e.g., `bool`, `char`, enums)
 //!
 //! For types with complex invariants (like `String`, `Vec`, references, etc.), do **not** use
-//! `UnsafeByteable`. Use only with plain old data (POD) types.
+//! the `Byteable` derive macro. Use only with plain old data (POD) types.
 //!
 //! ## Advanced Usage
 //!
 //! ### Custom `Byteable` Implementation
 //!
-//! You can implement `Byteable` manually for types that need special handling:
+//! The `#[derive(Byteable)]` macro handles most use cases automatically, including
+//! endianness conversion via attributes:
 //!
 //! ```
-//! use byteable::{Byteable, impl_byteable_via};
+//! #![cfg(feature = "derive")]
+//! use byteable::Byteable;
 //!
-//! # #[cfg(feature = "derive")]
-//! use byteable::{LittleEndian, UnsafeByteable};
-//!
-//! // Raw representation suitable for byte conversion
-//! # #[cfg(feature = "derive")]
-//! #[derive(UnsafeByteable)]
-//! #[repr(C, packed)]
-//! struct PointRaw {
-//!     x: LittleEndian<i32>,
-//!     y: LittleEndian<i32>,
-//! }
-//!
-//! // User-friendly representation
-//! #[derive(Debug, PartialEq)]
+//! #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
 //! struct Point {
+//!     #[byteable(little_endian)]
 //!     x: i32,
+//!     #[byteable(little_endian)]
 //!     y: i32,
 //! }
 //!
-//! # #[cfg(feature = "derive")]
-//! impl From<Point> for PointRaw {
-//!     fn from(p: Point) -> Self {
-//!         Self {
-//!             x: p.x.into(),
-//!             y: p.y.into(),
-//!         }
-//!     }
-//! }
-//!
-//! # #[cfg(feature = "derive")]
-//! impl From<PointRaw> for Point {
-//!     fn from(raw: PointRaw) -> Self {
-//!         Self {
-//!             x: raw.x.get(),
-//!             y: raw.y.get(),
-//!         }
-//!     }
-//! }
-//!
-//! // Implement Byteable via the raw type
-//! # #[cfg(feature = "derive")]
-//! impl_byteable_via!(Point => PointRaw);
+//! # fn main() {
+//! let point = Point { x: 10, y: 20 };
+//! let bytes = point.as_byte_array();
+//! let restored = Point::from_byte_array(bytes);
+//! assert_eq!(point, restored);
+//! # }
 //! ```
+//!
+//! For advanced cases, you can still use the `impl_byteable_via!` macro with manual
+//! implementations. See the trait documentation for details.
 //!
 //! ## Feature Flags
 //!
-//! - `derive`: Enables the `#[derive(UnsafeByteable)]` procedural macro (default: enabled)
+//! - `derive`: Enables the `#[derive(Byteable)]` procedural macro (default: enabled)
 //! - `tokio`: Enables async I/O traits for use with tokio (default: disabled)
 //!
 //! ## Performance
@@ -266,19 +229,27 @@
 //! or even no-ops when possible.
 
 mod byte_array;
-mod byteable;
+mod byteable_trait;
+mod derive_safety_helpers;
 mod endian;
 mod io;
+
+extern crate self as byteable; // used to resolve derive macros in examples etc.
 
 #[cfg(feature = "tokio")]
 mod async_io;
 
 #[cfg(feature = "derive")]
-pub use byteable_derive::UnsafeByteable;
+pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
+
+// Deprecated aliases for backwards compatibility
+#[cfg(feature = "derive")]
+#[deprecated(since = "0.17.0", note = "Use `UnsafeByteableTransmute` instead")]
+pub use byteable_derive::UnsafeByteableTransmute as UnsafeByteable;
 
 pub use byte_array::ByteArray;
 
-pub use byteable::Byteable;
+pub use byteable_trait::Byteable;
 
 pub use io::{ReadByteable, WriteByteable};
 
@@ -286,3 +257,5 @@ pub use io::{ReadByteable, WriteByteable};
 pub use async_io::{AsyncReadByteable, AsyncWriteByteable};
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
+
+pub use derive_safety_helpers::ValidBytecastMarker;

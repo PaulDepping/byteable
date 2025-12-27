@@ -14,7 +14,7 @@ _A Rust crate for zero-overhead, zero-copy serialization and deserialization of 
 - **`ReadByteable` & `WriteByteable`**: Extension traits for `std::io::Read` and `std::io::Write`
 - **`AsyncReadByteable` & `AsyncWriteByteable`**: Async I/O support with tokio (optional)
 - **Endianness Support**: `BigEndian<T>` and `LittleEndian<T>` wrappers for explicit byte order
-- **`#[derive(UnsafeByteable)]`**: Procedural macro for automatic trait implementation (optional)
+- **`#[derive(Byteable)]`**: Procedural macro for automatic trait implementation with endianness support (optional)
 - **Extensive Documentation**: Every function, trait, and type is thoroughly documented with examples
 - **Inline Comments**: All implementations include detailed explanatory comments
 - **Zero Overhead**: Compiles down to simple memory operations with no runtime cost
@@ -33,17 +33,17 @@ Add `byteable` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-byteable = "0.14"  # Check crates.io for the latest version
+byteable = "0.16"  # Or latest version
 ```
 
 ### Optional Features
 
 ```toml
 [dependencies]
-byteable = { version = "0.14", features = ["derive", "tokio"] }
+byteable = { version = "0.16", features = ["derive", "tokio"] }
 ```
 
-- **`derive`** (default): Enables the `#[derive(UnsafeByteable)]` procedural macro
+- **`derive`** (default): Enables the `#[derive(UnsafeByteableTransmute)]` procedural macro
 - **`tokio`**: Enables async I/O traits for use with tokio
 
 ## Quick Start
@@ -54,11 +54,11 @@ byteable = { version = "0.14", features = ["derive", "tokio"] }
 use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
 use std::fs::File;
 
-#[derive(byteable::UnsafeByteable, Debug, PartialEq)]
-#[repr(C, packed)]
+#[derive(Byteable, Debug, PartialEq)]
 struct Packet {
     id: u8,
-    length: LittleEndian<u16>,
+    #[byteable(little_endian)]
+    length: u16,
     data: [u8; 4],
 }
 
@@ -89,22 +89,25 @@ fn main() -> std::io::Result<()> {
 ### Network Protocol Example
 
 ```rust
-use byteable::{Byteable, BigEndian, UnsafeByteable};
+use byteable::Byteable;
 
-#[derive(UnsafeByteable, Debug)]
-#[repr(C, packed)]
+#[derive(Byteable, Debug, Clone, Copy)]
 struct TcpHeader {
-    source_port: BigEndian<u16>,      // Network byte order (big-endian)
-    dest_port: BigEndian<u16>,
-    sequence_num: BigEndian<u32>,
-    ack_num: BigEndian<u32>,
+    #[byteable(big_endian)]
+    source_port: u16,      // Network byte order (big-endian)
+    #[byteable(big_endian)]
+    dest_port: u16,
+    #[byteable(big_endian)]
+    sequence_num: u32,
+    #[byteable(big_endian)]
+    ack_num: u32,
 }
 
 let header = TcpHeader {
-    source_port: 80.into(),
-    dest_port: 8080.into(),
-    sequence_num: 12345.into(),
-    ack_num: 67890.into(),
+    source_port: 80,
+    dest_port: 8080,
+    sequence_num: 12345,
+    ack_num: 67890,
 };
 
 // Convert to bytes for transmission
@@ -114,11 +117,10 @@ let bytes = header.as_byte_array();
 ### Async I/O with Tokio
 
 ```rust
-use byteable::{AsyncReadByteable, AsyncWriteByteable, UnsafeByteable};
+use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable};
 use tokio::net::TcpStream;
 
-#[derive(UnsafeByteable, Debug)]
-#[repr(C, packed)]
+#[derive(Byteable, Debug, Clone, Copy)]
 struct Message {
     msg_type: u8,
     payload: [u8; 64],
@@ -148,16 +150,17 @@ async fn main() -> std::io::Result<()> {
 ### Working with Different Endianness
 
 ```rust
-use byteable::{BigEndian, LittleEndian, UnsafeByteable};
+use byteable::Byteable;
 
-#[derive(UnsafeByteable)]
-#[repr(C, packed)]
+#[derive(Byteable, Clone, Copy)]
 struct MixedEndianData {
     // Network protocols often use big-endian
-    network_value: BigEndian<u32>,
+    #[byteable(big_endian)]
+    network_value: u32,
 
     // File formats often use little-endian
-    file_value: LittleEndian<u32>,
+    #[byteable(little_endian)]
+    file_value: u32,
 
     // Native endianness (matches system)
     native_value: u32,
@@ -178,48 +181,9 @@ let length: u16 = reader.read_byteable()?;
 let checksum: u32 = reader.read_byteable()?;
 ```
 
-### Custom Byteable Implementation
-
-For types that need special handling, you can use the `impl_byteable_via!` macro:
-
-```rust
-use byteable::{Byteable, LittleEndian, UnsafeByteable, impl_byteable_via};
-
-// Raw representation (for byte conversion)
-#[derive(UnsafeByteable)]
-#[repr(C, packed)]
-struct PointRaw {
-    x: LittleEndian<i32>,
-    y: LittleEndian<i32>,
-}
-
-// User-friendly representation
-#[derive(Debug, PartialEq)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-// Implement conversions
-impl From<Point> for PointRaw {
-    fn from(p: Point) -> Self {
-        Self { x: p.x.into(), y: p.y.into() }
-    }
-}
-
-impl From<PointRaw> for Point {
-    fn from(raw: PointRaw) -> Self {
-        Self { x: raw.x.get(), y: raw.y.get() }
-    }
-}
-
-// Now Point implements Byteable via PointRaw
-impl_byteable_via!(Point => PointRaw);
-```
-
 ## Safety Considerations
 
-The `#[derive(UnsafeByteable)]` macro uses `unsafe` code (`std::mem::transmute`) internally. When using it, you **must** ensure:
+The `#[derive(Byteable)]` macro uses `unsafe` code (`std::mem::transmute`) internally. When using it, you **must** ensure:
 
 ### Safe to Use With:
 

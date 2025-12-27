@@ -1,8 +1,8 @@
-use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteable, impl_byteable_via};
+use byteable::{BigEndian, Byteable, LittleEndian, UnsafeByteableTransmute, impl_byteable_via};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
+#[derive(Clone, Copy, Debug, UnsafeByteableTransmute)]
 #[repr(C, packed)]
 struct MyStructRaw {
     a: u8,

@@ -1,13 +1,13 @@
 # Byteable Examples
 
-This directory contains comprehensive examples demonstrating the usage of the `byteable` crate and its `UnsafeByteable` derive macro.
+This directory contains comprehensive examples demonstrating the usage of the `byteable` crate and its `UnsafeByteableTransmute` derive macro.
 
 ## Running the Examples
 
 To run any example, use:
 
 ```bash
-cargo run --example <example_name> --features derive
+cargo run --example <example_name>
 ```
 
 ## Available Examples
@@ -16,7 +16,7 @@ cargo run --example <example_name> --features derive
 
 **What it demonstrates:**
 
-- Creating simple structs with the `UnsafeByteable` derive macro
+- Creating simple structs with the `UnsafeByteableTransmute` derive macro
 - Converting structs to byte arrays
 - Reconstructing structs from byte arrays
 - Working with arrays of byteable structs
@@ -31,7 +31,7 @@ cargo run --example <example_name> --features derive
 **Run with:**
 
 ```bash
-cargo run --example simple_usage --features derive
+cargo run --example simple_usage
 ```
 
 ---
@@ -56,7 +56,7 @@ cargo run --example simple_usage --features derive
 **Run with:**
 
 ```bash
-cargo run --example file_io --features derive
+cargo run --example file_io
 ```
 
 **Note:** This example creates a file called `example_data.bin` in the current directory.
@@ -83,7 +83,7 @@ cargo run --example file_io --features derive
 **Run with:**
 
 ```bash
-cargo run --example cursor_usage --features derive
+cargo run --example cursor_usage
 ```
 
 ---
@@ -94,7 +94,7 @@ All examples demonstrate these important concepts:
 
 ### 1. Struct Requirements
 
-To use `#[derive(UnsafeByteable)]`, your struct must:
+To use `#[derive(UnsafeByteableTransmute)]`, your struct must:
 
 - Be annotated with `#[repr(C, packed)]` or `#[repr(C)]`
 - Implement `Copy`
@@ -127,10 +127,10 @@ let native = le_value.get();
 
 ```rust
 // Convert to bytes
-let bytes = my_struct.as_bytearray();
+let bytes = my_struct.as_byte_array();
 
 // Convert from bytes
-let reconstructed = MyStruct::from_bytearray(bytes);
+let reconstructed = MyStruct::from_byte_array(bytes);
 ```
 
 ### 4. I/O Operations
@@ -139,10 +139,10 @@ let reconstructed = MyStruct::from_bytearray(bytes);
 use byteable::{ReadByteable, WriteByteable};
 
 // Write to any Writer (File, Cursor, TcpStream, etc.)
-writer.write_one(my_struct)?;
+writer.write_byteable(my_struct)?;
 
 // Read from any Reader
-let my_struct: MyStruct = reader.read_one()?;
+let my_struct: MyStruct = reader.read_byteable()?;
 ```
 
 ## Use Cases
@@ -166,10 +166,10 @@ With the `tokio` feature enabled, you can use async I/O:
 use byteable::{AsyncReadByteable, AsyncWriteByteable};
 
 // Async read
-let my_struct: MyStruct = async_reader.read_one().await?;
+let my_struct: MyStruct = async_reader.read_byteable().await?;
 
 // Async write
-async_writer.write_one(my_struct).await?;
+async_writer.write_byteable(my_struct).await?;
 ```
 
 ## Tips and Best Practices

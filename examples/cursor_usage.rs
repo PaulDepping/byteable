@@ -3,131 +3,39 @@
 //! This example shows how to work with in-memory buffers using Cursor,
 //! which is useful for network protocols, packet parsing, and testing.
 
-use byteable::{
-    BigEndian, Byteable, LittleEndian, ReadByteable, UnsafeByteable, WriteByteable,
-    impl_byteable_via,
-};
+use byteable::{Byteable, ReadByteable, WriteByteable};
 use std::io::Cursor;
 
 /// A simple message header for a network protocol
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct MessageHeaderRaw {
-    magic: [u8; 4],                     // Protocol magic number
-    version: u8,                        // Protocol version
-    message_type: u8,                   // Message type identifier
-    payload_length: BigEndian<u16>,     // Length of payload in bytes
-    sequence_number: LittleEndian<u32>, // Message sequence number
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Byteable)]
 struct MessageHeader {
-    magic: [u8; 4],       // Protocol magic number
-    version: u8,          // Protocol version
-    message_type: u8,     // Message type identifier
-    payload_length: u16,  // Length of payload in bytes
+    magic: [u8; 4],   // Protocol magic number
+    version: u8,      // Protocol version
+    message_type: u8, // Message type identifier
+    #[byteable(big_endian)]
+    payload_length: u16, // Length of payload in bytes
+    #[byteable(little_endian)]
     sequence_number: u32, // Message sequence number
 }
 
-impl From<MessageHeaderRaw> for MessageHeader {
-    fn from(value: MessageHeaderRaw) -> Self {
-        Self {
-            magic: value.magic,
-            version: value.version,
-            message_type: value.message_type,
-            payload_length: value.payload_length.get(),
-            sequence_number: value.sequence_number.get(),
-        }
-    }
-}
-impl From<MessageHeader> for MessageHeaderRaw {
-    fn from(value: MessageHeader) -> Self {
-        Self {
-            magic: value.magic,
-            version: value.version,
-            message_type: value.message_type,
-            payload_length: value.payload_length.into(),
-            sequence_number: value.sequence_number.into(),
-        }
-    }
-}
-
-impl_byteable_via!(MessageHeader => MessageHeaderRaw);
-
 /// A login request message
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Byteable)]
 struct LoginRequest {
+    #[byteable(little_endian)]
     user_id: u32,
+    #[byteable(little_endian)]
     session_token: u64,
     flags: u8,
 }
 
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct LoginRequestRaw {
-    user_id: LittleEndian<u32>,
-    session_token: LittleEndian<u64>,
-    flags: u8,
-    padding: [u8; 3], // Padding for alignment
-}
-
-impl From<LoginRequestRaw> for LoginRequest {
-    fn from(value: LoginRequestRaw) -> Self {
-        Self {
-            user_id: value.user_id.get(),
-            session_token: value.session_token.get(),
-            flags: value.flags,
-        }
-    }
-}
-
-impl From<LoginRequest> for LoginRequestRaw {
-    fn from(value: LoginRequest) -> Self {
-        Self {
-            user_id: value.user_id.into(),
-            session_token: value.session_token.into(),
-            flags: value.flags,
-            padding: [0; _],
-        }
-    }
-}
-
-impl_byteable_via!(LoginRequest => LoginRequestRaw);
-
 /// A status response message
-#[derive(Clone, Copy, Debug, UnsafeByteable)]
-#[repr(C, packed)]
-struct StatusResponseRaw {
-    status_code: BigEndian<u16>,
-    timestamp: LittleEndian<u64>,
-    reserved: [u8; 6],
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Byteable)]
 struct StatusResponse {
+    #[byteable(big_endian)]
     status_code: u16,
+    #[byteable(little_endian)]
     timestamp: u64,
 }
-
-impl From<StatusResponseRaw> for StatusResponse {
-    fn from(value: StatusResponseRaw) -> Self {
-        Self {
-            status_code: value.status_code.get(),
-            timestamp: value.timestamp.get(),
-        }
-    }
-}
-impl From<StatusResponse> for StatusResponseRaw {
-    fn from(value: StatusResponse) -> Self {
-        Self {
-            status_code: value.status_code.into(),
-            timestamp: value.timestamp.into(),
-            reserved: [0; _],
-        }
-    }
-}
-
-impl_byteable_via!(StatusResponse => StatusResponseRaw);
 
 fn main() -> std::io::Result<()> {
     println!("=== Cursor-based Byteable Example ===\n");
@@ -139,7 +47,7 @@ fn main() -> std::io::Result<()> {
         magic: *b"DEMO",
         version: 1,
         message_type: 0x01,
-        payload_length: 16,
+        payload_length: 13,
         sequence_number: 1001,
     };
 
@@ -196,21 +104,21 @@ fn main() -> std::io::Result<()> {
             magic: *b"MSG1",
             version: 1,
             message_type: 0x10,
-            payload_length: 16,
+            payload_length: 0,
             sequence_number: 100,
         },
         MessageHeader {
             magic: *b"MSG2",
             version: 1,
             message_type: 0x20,
-            payload_length: 16,
+            payload_length: 0,
             sequence_number: 101,
         },
         MessageHeader {
             magic: *b"MSG3",
             version: 1,
             message_type: 0x30,
-            payload_length: 16,
+            payload_length: 0,
             sequence_number: 102,
         },
     ];

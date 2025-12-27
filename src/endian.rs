@@ -134,7 +134,7 @@ impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 /// use byteable::{BigEndian, UnsafeByteable};
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable, Debug)]
+/// #[derive(byteable::UnsafeByteableTransmute, Debug)]
 /// #[repr(C, packed)]
 /// struct TcpHeader {
 ///     source_port: BigEndian<u16>,      // Network byte order
@@ -326,12 +326,12 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 /// use byteable::{LittleEndian, UnsafeByteable};
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteable, Debug)]
+/// #[derive(byteable::UnsafeByteableTransmute, Debug)]
 /// #[repr(C, packed)]
 /// struct BmpHeader {
 ///     signature: [u8; 2],               // "BM"
 ///     file_size: LittleEndian<u32>,     // Little-endian
-///     reserved: u32,
+///     reserved: [u8; 4],                // Reserved bytes
 ///     data_offset: LittleEndian<u32>,   // Little-endian
 /// }
 ///
@@ -340,7 +340,7 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 /// let header = BmpHeader {
 ///     signature: *b"BM",
 ///     file_size: 1024.into(),
-///     reserved: 0,
+///     reserved: [0; 4],
 ///     data_offset: 54.into(),
 /// };
 /// # }
