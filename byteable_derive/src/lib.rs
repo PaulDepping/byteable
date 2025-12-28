@@ -8,6 +8,19 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Ident, Meta, parse_macro_input};
 
+/// Represents the type of byteable attribute applied to a field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttributeType {
+    /// Field should use little-endian byte order
+    LittleEndian,
+    /// Field should use big-endian byte order
+    BigEndian,
+    /// Field should be stored as its ByteArray representation
+    Transparent,
+    /// No special attribute applied
+    None,
+}
+
 /// Derives the `Byteable` trait for a struct using `transmute`.
 ///
 /// This procedural macro automatically implements the `Byteable` trait for structs by using
@@ -405,18 +418,18 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         let field_type = &field.ty;
 
         // Check for byteable attributes
-        let mut attribute_type = None;
+        let mut attribute_type = AttributeType::None;
         for attr in &field.attrs {
             if attr.path().is_ident("byteable") {
                 if let Meta::List(meta_list) = &attr.meta {
                     let tokens = &meta_list.tokens;
                     let tokens_str = tokens.to_string();
                     if tokens_str == "little_endian" {
-                        attribute_type = Some("little");
+                        attribute_type = AttributeType::LittleEndian;
                     } else if tokens_str == "big_endian" {
-                        attribute_type = Some("big");
+                        attribute_type = AttributeType::BigEndian;
                     } else if tokens_str == "transparent" {
-                        attribute_type = Some("transparent");
+                        attribute_type = AttributeType::Transparent;
                     } else {
                         panic!(
                             "Unknown byteable attribute: {}. Valid attributes are: little_endian, big_endian, transparent",
@@ -432,7 +445,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             let idx = syn::Index::from(index);
 
             match attribute_type {
-                Some("little") => {
+                AttributeType::LittleEndian => {
                     let raw_ty = quote! { #byteable_crate::LittleEndian<#field_type> };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
@@ -443,7 +456,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         value.#idx.get()
                     });
                 }
-                Some("big") => {
+                AttributeType::BigEndian => {
                     let raw_ty = quote! { #byteable_crate::BigEndian<#field_type> };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
@@ -454,7 +467,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         value.#idx.get()
                     });
                 }
-                Some("transparent") => {
+                AttributeType::Transparent => {
                     // Use the ByteableRaw::Raw type directly for better type safety
                     let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
                     raw_fields.push(raw_ty.clone());
@@ -466,7 +479,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         value.#idx.into()
                     });
                 }
-                _ => {
+                AttributeType::None => {
                     let raw_ty = quote! { #field_type };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
@@ -483,7 +496,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             let field_name = field.ident.as_ref().unwrap();
 
             match attribute_type {
-                Some("little") => {
+                AttributeType::LittleEndian => {
                     let raw_ty = quote! { #byteable_crate::LittleEndian<#field_type> };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
@@ -496,7 +509,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         #field_name: value.#field_name.get()
                     });
                 }
-                Some("big") => {
+                AttributeType::BigEndian => {
                     let raw_ty = quote! { #byteable_crate::BigEndian<#field_type> };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
@@ -509,7 +522,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         #field_name: value.#field_name.get()
                     });
                 }
-                Some("transparent") => {
+                AttributeType::Transparent => {
                     // Use the ByteableRaw::Raw type directly for better type safety
                     let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
                     raw_fields.push(quote! {
@@ -523,7 +536,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                         #field_name: value.#field_name.into()
                     });
                 }
-                _ => {
+                AttributeType::None => {
                     let raw_ty = quote! { #field_type };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
