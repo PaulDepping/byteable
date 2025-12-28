@@ -18,8 +18,10 @@
 //! - **`EndianConvert` Trait & Wrappers**: Provides methods for converting primitive types between
 //!   different endianness (little-endian and big-endian), along with `BigEndian<T>` and
 //!   `LittleEndian<T>` wrapper types.
-//! - **`#[derive(UnsafeByteableTransmute)]`** (with `derive` feature): A procedural macro that automatically
-//!   implements the `Byteable` trait for structs, significantly simplifying boilerplate.
+//! - **`#[derive(Byteable)]`** (with `derive` feature): A procedural macro that automatically
+//!   implements the `Byteable` trait for structs, significantly simplifying boilerplate. For
+//!   advanced use cases, `#[derive(UnsafeByteableTransmute)]` is also available for manual
+//!   transmute-based implementations.
 //!
 //! ## Quick Start
 //!

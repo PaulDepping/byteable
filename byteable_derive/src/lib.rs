@@ -291,7 +291,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 ///
 /// - `#[byteable(little_endian)]` - Wraps the field in `LittleEndian<T>`
 /// - `#[byteable(big_endian)]` - Wraps the field in `BigEndian<T>`
-/// - `#[byteable(transparent)]` - Stores the field as its `ByteArray` representation (for nested `Byteable` types)
+/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `ByteableRaw`)
 /// - No attribute - Keeps the field type as-is
 ///
 /// # Requirements

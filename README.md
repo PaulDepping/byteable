@@ -33,17 +33,17 @@ Add `byteable` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-byteable = "0.16"  # Or latest version
+byteable = "0.19"  # Or latest version
 ```
 
 ### Optional Features
 
 ```toml
 [dependencies]
-byteable = { version = "0.16", features = ["derive", "tokio"] }
+byteable = { version = "0.19", features = ["derive", "tokio"] }
 ```
 
-- **`derive`** (default): Enables the `#[derive(UnsafeByteableTransmute)]` procedural macro
+- **`derive`** (default): Enables the `#[derive(Byteable)]` procedural macro
 - **`tokio`**: Enables async I/O traits for use with tokio
 
 ## Quick Start
