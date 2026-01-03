@@ -398,15 +398,45 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         original_name.span(),
     );
 
-    // Extract fields from the struct and determine if it's a tuple struct or named struct
-    let (fields, is_tuple_struct) = match &input.data {
+    // Extract fields from the struct and determine if it's a tuple struct, named struct, or unit struct
+    let field_info = match &input.data {
         Data::Struct(data) => match &data.fields {
-            Fields::Named(fields) => (&fields.named, false),
-            Fields::Unnamed(fields) => (&fields.unnamed, true),
-            Fields::Unit => panic!("Byteable does not support unit structs"),
+            Fields::Named(fields) => Some((&fields.named, false)),
+            Fields::Unnamed(fields) => Some((&fields.unnamed, true)),
+            Fields::Unit => None, // Unit structs have no fields
         },
         _ => panic!("Byteable only supports structs"),
     };
+
+    // Handle unit structs separately - they have zero size and need a direct implementation
+    if field_info.is_none() {
+        let output = quote! {
+            // Direct Byteable implementation for unit struct (zero-sized type)
+            impl #byteable_crate::Byteable for #original_name {
+                type ByteArray = [u8; 0];
+
+                fn to_byte_array(self) -> Self::ByteArray {
+                    []
+                }
+
+                fn from_byte_array(_byte_array: Self::ByteArray) -> Self {
+                    #original_name
+                }
+            }
+
+            // Implement ByteableRaw for unit struct (raw type is itself)
+            impl #byteable_crate::ByteableRaw for #original_name {
+                type Raw = Self;
+            }
+
+            // Automatic ValidBytecastMarker impl for unit struct
+            // Unit structs are always safe as they have no data
+            unsafe impl #byteable_crate::ValidBytecastMarker for #original_name {}
+        };
+        return output.into();
+    }
+
+    let (fields, is_tuple_struct) = field_info.unwrap();
 
     // Process each field to determine its type in the raw struct and conversion logic
     let mut raw_fields = Vec::new();
