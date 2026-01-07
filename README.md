@@ -10,7 +10,11 @@ _A Rust crate for zero-overhead, zero-copy serialization and deserialization of 
 
 ## Features
 
-- **`Byteable` Trait**: Core trait for types that can be converted to/from byte arrays
+- **Byte Conversion Traits**: Modular trait system for byte array conversion:
+  - `AssociatedByteArray`: Associates a type with its byte array representation
+  - `IntoByteArray`: Converts values into byte arrays
+  - `FromByteArray`: Constructs values from byte arrays
+  - `TryIntoByteArray` & `TryFromByteArray`: Fallible conversion variants
 - **`ReadByteable` & `WriteByteable`**: Extension traits for `std::io::Read` and `std::io::Write`
 - **`AsyncReadByteable` & `AsyncWriteByteable`**: Async I/O support with tokio (optional)
 - **Endianness Support**: `BigEndian<T>` and `LittleEndian<T>` wrappers for explicit byte order
@@ -111,7 +115,7 @@ let header = TcpHeader {
 };
 
 // Convert to bytes for transmission
-let bytes = header.to_byte_array();
+let bytes = header.into_byte_array();
 ```
 
 ### Async I/O with Tokio

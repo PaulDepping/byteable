@@ -1,4 +1,4 @@
-use byteable::Byteable;
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 #[derive(Clone, Copy, Byteable)]
 struct TestStruct {
@@ -21,7 +21,7 @@ fn test_delegate_macro() {
     };
 
     // Test conversion to bytes
-    let bytes = test.to_byte_array();
+    let bytes = test.into_byte_array();
     println!("TestStruct as bytes: {:?}", bytes);
     println!("Byte array length: {}", bytes.len());
 

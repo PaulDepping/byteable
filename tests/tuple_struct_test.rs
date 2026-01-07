@@ -1,4 +1,4 @@
-use byteable::Byteable;
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // Simple tuple struct with basic types
 #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
@@ -44,7 +44,7 @@ fn test_simple_tuple_struct() {
     );
 
     // Test conversion to bytes
-    let bytes = tuple.to_byte_array();
+    let bytes = tuple.into_byte_array();
     println!("Bytes: {:?}", bytes);
     println!("Size: {} bytes", bytes.len());
 
@@ -74,7 +74,7 @@ fn test_endian_tuple_struct() {
     );
 
     // Test conversion to bytes
-    let bytes = tuple.to_byte_array();
+    let bytes = tuple.into_byte_array();
     println!("Bytes: {:?}", bytes);
     println!("Size: {} bytes", bytes.len());
 
@@ -133,7 +133,7 @@ fn test_nested_tuple_struct() {
     let inner = InnerTuple(10, 0x1234);
     println!("InnerTuple: ({}, 0x{:04x})", inner.0, inner.1);
 
-    let inner_bytes = inner.to_byte_array();
+    let inner_bytes = inner.into_byte_array();
     println!("Inner bytes: {:?}", inner_bytes);
     assert_eq!(inner_bytes.len(), 3); // u8(1) + u16(2) = 3
 
@@ -144,7 +144,7 @@ fn test_nested_tuple_struct() {
     );
 
     // Test conversion to bytes
-    let bytes = outer.to_byte_array();
+    let bytes = outer.into_byte_array();
     println!("Bytes: {:?}", bytes);
     println!("Size: {} bytes", bytes.len());
 
@@ -195,7 +195,7 @@ fn test_array_tuple_struct() {
     );
 
     // Test conversion to bytes
-    let bytes = tuple.to_byte_array();
+    let bytes = tuple.into_byte_array();
     println!("Bytes: {:?}", bytes);
     println!("Size: {} bytes", bytes.len());
 
@@ -225,7 +225,7 @@ fn test_tuple_struct_roundtrip() {
 
     // Do multiple roundtrips
     for i in 1..=5 {
-        let bytes = original.to_byte_array();
+        let bytes = original.into_byte_array();
         let restored = EndianTuple::from_byte_array(bytes);
         assert_eq!(original, restored);
         println!("  Roundtrip {}: ✓", i);

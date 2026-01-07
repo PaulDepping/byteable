@@ -6,7 +6,7 @@
 //! - Read byteable structs from a file
 //! - Handle endianness with #[byteable(little_endian)] and #[byteable(big_endian)] attributes
 
-use byteable::{Byteable, ReadByteable, WriteByteable};
+use byteable::{Byteable, FromByteArray, IntoByteArray, ReadByteable, WriteByteable};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
@@ -63,7 +63,7 @@ fn main() -> io::Result<()> {
     println!("   Timestamp: {}", packet.timestamp);
 
     // Convert to byte array
-    let bytes = packet.to_byte_array();
+    let bytes = packet.into_byte_array();
     println!("   As bytes: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
@@ -145,7 +145,7 @@ fn main() -> io::Result<()> {
     };
 
     // Convert to bytes
-    let byte_array = test_packet.to_byte_array();
+    let byte_array = test_packet.into_byte_array();
     println!("   Original packet: {:?}", test_packet);
     println!("   Byte array: {:?}", byte_array);
 

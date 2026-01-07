@@ -1,4 +1,4 @@
-use byteable::Byteable;
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 #[derive(Clone, Copy, Byteable)]
 struct MemberStruct {
@@ -32,7 +32,7 @@ fn test_transparent_attribute() {
     println!("  b: 0x{:04x}", member.b);
 
     // Test MemberStruct serialization
-    let member_bytes = member.to_byte_array();
+    let member_bytes = member.into_byte_array();
     println!("  bytes: {:?}", member_bytes);
     println!("  size: {} bytes", member_bytes.len());
     assert_eq!(member_bytes.len(), 3); // u8 + u16 = 3 bytes
@@ -61,7 +61,7 @@ fn test_transparent_attribute() {
     println!("  d: {}", test.d);
 
     // Test TestStruct serialization
-    let test_bytes = test.to_byte_array();
+    let test_bytes = test.into_byte_array();
     println!("  bytes: {:?}", test_bytes);
     println!("  size: {} bytes", test_bytes.len());
 

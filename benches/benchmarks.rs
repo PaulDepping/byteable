@@ -1,4 +1,4 @@
-use byteable::Byteable;
+use byteable::{Byteable, IntoByteArray};
 use core::f32;
 use core::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -35,7 +35,7 @@ fn benchmarks(c: &mut Criterion) {
                     e: 0,
                 },
             ])
-            .to_byte_array()
+            .into_byte_array()
         })
     });
 }

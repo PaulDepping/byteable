@@ -3,7 +3,7 @@
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::Byteable;
+use byteable::{AssociatedByteArray, Byteable, FromByteArray, IntoByteArray};
 
 /// A simple sensor reading structure
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Byteable)]
@@ -46,7 +46,7 @@ fn main() {
     println!("   Pressure: {} Pa", reading.pressure);
 
     // Convert to bytes
-    let bytes = reading.to_byte_array();
+    let bytes = reading.into_byte_array();
     println!("   Byte representation: {:?}", bytes);
     println!("   Size: {} bytes\n", bytes.len());
 
@@ -65,7 +65,7 @@ fn main() {
     };
 
     println!("   Color: RGB({}, {}, {})", cyan.red, cyan.green, cyan.blue);
-    let color_bytes = cyan.to_byte_array();
+    let color_bytes = cyan.into_byte_array();
     println!("   Bytes: {:?}", color_bytes);
     println!(
         "   Hex representation: #{:02X}{:02X}{:02X}\n",
@@ -94,7 +94,7 @@ fn main() {
 
     println!("   Color palette:");
     for (i, color) in color_palette.iter().enumerate() {
-        let bytes = color.to_byte_array();
+        let bytes = color.into_byte_array();
         println!(
             "   Color {}: RGB({:3}, {:3}, {:3}) = {:?}",
             i + 1,

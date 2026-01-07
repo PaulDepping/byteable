@@ -2,7 +2,7 @@
 ///
 /// This test demonstrates that the Byteable macros now enforce compile-time
 /// safety by requiring all field types to implement ValidBytecastMarker.
-use byteable::Byteable;
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // This should compile - all fields are safe types
 #[derive(Clone, Copy, Byteable)]
@@ -42,7 +42,7 @@ fn test_safe_types_compile() {
         data: [1, 2, 3, 4],
     };
 
-    let bytes = packet.to_byte_array();
+    let bytes = packet.into_byte_array();
     let restored = SafePacket::from_byte_array(bytes);
 
     assert_eq!(packet.id, restored.id);
@@ -59,7 +59,7 @@ fn test_nested_safe_types_compile() {
         bottom_right: Point { x: 100, y: 200 },
     };
 
-    let bytes = shape.to_byte_array();
+    let bytes = shape.into_byte_array();
     let restored = Shape::from_byte_array(bytes);
 
     assert_eq!(shape.id, restored.id);

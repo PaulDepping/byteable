@@ -1,4 +1,4 @@
-use byteable::Byteable;
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // Test 1: Private struct (default visibility)
 #[derive(Clone, Copy, Byteable)]
@@ -51,7 +51,7 @@ struct PrivateTupleStruct(u8, #[byteable(little_endian)] u16);
 #[test]
 fn test_private_struct_visibility() {
     let s = PrivateStruct { a: 42, b: 0x1234 };
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = PrivateStruct::from_byte_array(bytes);
     assert_eq!(s.a, restored.a);
     assert_eq!(s.b, restored.b);
@@ -63,7 +63,7 @@ fn test_public_struct_visibility() {
         a: 100,
         b: 0x12345678,
     };
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = PublicStruct::from_byte_array(bytes);
     assert_eq!(s.a, restored.a);
     assert_eq!(s.b, restored.b);
@@ -75,7 +75,7 @@ fn test_crate_struct_visibility() {
         a: 200,
         b: 0x0102030405060708,
     };
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = CrateStruct::from_byte_array(bytes);
     assert_eq!(s.a, restored.a);
     assert_eq!(s.b, restored.b);
@@ -84,7 +84,7 @@ fn test_crate_struct_visibility() {
 #[test]
 fn test_super_struct_visibility() {
     let s = inner::SuperStruct { a: 50, b: 0xABCD };
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = inner::SuperStruct::from_byte_array(bytes);
     assert_eq!(s.a, restored.a);
     assert_eq!(s.b, restored.b);
@@ -93,7 +93,7 @@ fn test_super_struct_visibility() {
 #[test]
 fn test_public_tuple_struct_visibility() {
     let s = PublicTupleStruct(10, 0x5678, 0xDEADBEEF);
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = PublicTupleStruct::from_byte_array(bytes);
     assert_eq!(s.0, restored.0);
     assert_eq!(s.1, restored.1);
@@ -103,7 +103,7 @@ fn test_public_tuple_struct_visibility() {
 #[test]
 fn test_private_tuple_struct_visibility() {
     let s = PrivateTupleStruct(255, 0xFFFF);
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
     let restored = PrivateTupleStruct::from_byte_array(bytes);
     assert_eq!(s.0, restored.0);
     assert_eq!(s.1, restored.1);
@@ -116,7 +116,7 @@ fn test_endianness_with_visibility() {
         a: 42,
         b: 0x01020304,
     };
-    let bytes = s.to_byte_array();
+    let bytes = s.into_byte_array();
 
     // a is u8 at position 0
     assert_eq!(bytes[0], 42);

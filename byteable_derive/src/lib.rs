@@ -1,7 +1,9 @@
-//! Procedural macro for deriving the `Byteable` trait.
+//! Procedural macros for deriving byte conversion traits.
 //!
-//! This crate provides the `#[derive(UnsafeByteableTransmute)]` procedural macro for automatically
-//! implementing the `Byteable` trait on structs.
+//! This crate provides procedural macros for automatically implementing the byte conversion traits
+//! (`AssociatedByteArray`, `IntoByteArray`, `FromByteArray`) on structs:
+//! - `#[derive(Byteable)]` - High-level macro with endianness support
+//! - `#[derive(UnsafeByteableTransmute)]` - Low-level transmute-based implementation
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
@@ -21,9 +23,10 @@ enum AttributeType {
     None,
 }
 
-/// Derives the `Byteable` trait for a struct using `transmute`.
+/// Derives byte conversion traits for a struct using `transmute`.
 ///
-/// This procedural macro automatically implements the `Byteable` trait for structs by using
+/// This procedural macro automatically implements the byte conversion traits
+/// (`AssociatedByteArray`, `IntoByteArray`, `FromByteArray`) for structs by using
 /// `core::mem::transmute` to convert between the struct and a byte array. This provides
 /// zero-overhead serialization but requires careful attention to memory layout and safety.
 ///
@@ -78,7 +81,7 @@ enum AttributeType {
 /// # #[cfg(feature = "derive")]
 /// # fn example() {
 /// let color = Color { r: 255, g: 128, b: 64, a: 255 };
-/// let bytes = color.to_byte_array();
+/// let bytes = color.into_byte_array();
 /// assert_eq!(bytes, [255, 128, 64, 255]);
 ///
 /// let restored = Color::from_byte_array(bytes);
@@ -113,7 +116,7 @@ enum AttributeType {
 ///     data: [0; 16],
 /// };
 ///
-/// let bytes = packet.to_byte_array();
+/// let bytes = packet.into_byte_array();
 /// // magic is big-endian: [0x12, 0x34, 0x56, 0x78]
 /// // payload_len is little-endian: [100, 0]
 /// # }
@@ -148,7 +151,7 @@ enum AttributeType {
 ///     end: Point { x: 10, y: 20 },
 /// };
 ///
-/// let bytes = line.to_byte_array();
+/// let bytes = line.into_byte_array();
 /// assert_eq!(bytes.len(), 16); // 4 i32s × 4 bytes each
 /// # }
 /// ```
@@ -208,13 +211,13 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
     let found_crate = crate_name("byteable").expect("my-crate is present in `Cargo.toml`");
 
     // Determine the correct path to the Byteable trait and crate
-    let (byteable, byteable_crate) = match found_crate {
+    let byteable_crate = match found_crate {
         // If we're inside the byteable crate itself
-        FoundCrate::Itself => (quote!(::byteable::Byteable), quote!(::byteable)),
+        FoundCrate::Itself => quote!(::byteable),
         // Otherwise, use the actual crate name (handles renamed imports)
         FoundCrate::Name(name) => {
             let ident = Ident::new(&name, Span::call_site());
-            (quote!( #ident::Byteable ), quote!( #ident ))
+            quote!( #ident )
         }
     };
 
@@ -255,15 +258,20 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 
     // Generate the Byteable trait implementation with safety checks
     quote! {
-        impl #impl_generics #byteable for #ident #type_generics #extended_where_clause {
+        impl #impl_generics #byteable_crate::AssociatedByteArray for #ident #type_generics #extended_where_clause {
             // The byte array type is a fixed-size array matching the struct size
             type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+        }
 
+        impl #impl_generics #byteable_crate::IntoByteArray for #ident #type_generics #extended_where_clause {
             // Convert the struct to bytes using transmute (unsafe but zero-cost)
-            fn to_byte_array(self) -> Self::ByteArray {
+            fn into_byte_array(self) -> Self::ByteArray {
                 unsafe { ::core::mem::transmute(self) }
             }
+        }
 
+
+        impl #impl_generics #byteable_crate::FromByteArray for #ident #type_generics #extended_where_clause {
             // Convert bytes back to the struct using transmute (unsafe but zero-cost)
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                 unsafe { ::core::mem::transmute(byte_array) }
@@ -291,7 +299,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 ///
 /// - `#[byteable(little_endian)]` - Wraps the field in `LittleEndian<T>`
 /// - `#[byteable(big_endian)]` - Wraps the field in `BigEndian<T>`
-/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `ByteableRaw`)
+/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `HasRawType`)
 /// - No attribute - Keeps the field type as-is
 ///
 /// # Requirements
@@ -330,7 +338,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 /// };
 ///
 /// // Byteable is automatically implemented
-/// let bytes = packet.to_byte_array();
+/// let bytes = packet.into_byte_array();
 /// let restored = Packet::from_byte_array(bytes);
 /// # }
 /// ```
@@ -408,24 +416,31 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         _ => panic!("Byteable only supports structs"),
     };
 
+    // Split generics for the impl block (handles generic types correctly)
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+
     // Handle unit structs separately - they have zero size and need a direct implementation
     if field_info.is_none() {
         let output = quote! {
             // Direct Byteable implementation for unit struct (zero-sized type)
-            impl #byteable_crate::Byteable for #original_name {
+            impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
                 type ByteArray = [u8; 0];
+            }
 
-                fn to_byte_array(self) -> Self::ByteArray {
+            impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                fn into_byte_array(self) -> Self::ByteArray {
                     []
                 }
+            }
 
+            impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
                 fn from_byte_array(_byte_array: Self::ByteArray) -> Self {
                     #original_name
                 }
             }
 
-            // Implement ByteableRaw for unit struct (raw type is itself)
-            impl #byteable_crate::ByteableRaw for #original_name {
+            // Implement HasRawType for unit struct (raw type is itself)
+            impl #byteable_crate::HasRawType for #original_name {
                 type Raw = Self;
             }
 
@@ -498,8 +513,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 AttributeType::Transparent => {
-                    // Use the ByteableRaw::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
+                    // Use the HasRawType::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::HasRawType>::Raw };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
                     from_original_conversions.push(quote! {
@@ -553,8 +568,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 AttributeType::Transparent => {
-                    // Use the ByteableRaw::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::ByteableRaw>::Raw };
+                    // Use the HasRawType::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::HasRawType>::Raw };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
                     });
@@ -600,7 +615,21 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
             {}
 
-            #byteable_crate::unsafe_byteable_transmute!(#raw_name);
+            impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+            }
+
+            impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                fn into_byte_array(self) -> Self::ByteArray {
+                    unsafe { ::core::mem::transmute(self) }
+                }
+            }
+
+            impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    unsafe { ::core::mem::transmute(byte_array) }
+                }
+            }
 
             // From original to raw
             impl From<#original_name> for #raw_name {
@@ -616,11 +645,26 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-            // Implement Byteable for the original struct via the raw struct
-            #byteable_crate::impl_byteable_via!(#original_name => #raw_name);
+            impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
+            }
 
-            // Implement ByteableRaw to expose the raw type
-            impl #byteable_crate::ByteableRaw for #original_name {
+            impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                fn into_byte_array(self) -> Self::ByteArray {
+                    let raw: #raw_name = self.into();
+                    raw.into_byte_array()
+                }
+            }
+
+            impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    let raw = <#raw_name>::from_byte_array(byte_array);
+                    raw.into()
+                }
+            }
+
+            // Implement HasRawType to expose the raw type
+            impl #byteable_crate::HasRawType for #original_name {
                 type Raw = #raw_name;
             }
         }
@@ -641,7 +685,21 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
             {}
 
-            #byteable_crate::unsafe_byteable_transmute!(#raw_name);
+            impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+            }
+
+            impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                fn into_byte_array(self) -> Self::ByteArray {
+                    unsafe { ::core::mem::transmute(self) }
+                }
+            }
+
+            impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    unsafe { ::core::mem::transmute(byte_array) }
+                }
+            }
 
             // From original to raw
             impl From<#original_name> for #raw_name {
@@ -652,6 +710,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
+            // From raw to original
             impl From<#raw_name> for #original_name {
                 fn from(value: #raw_name) -> Self {
                     Self {
@@ -660,10 +719,26 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-            #byteable_crate::impl_byteable_via!(#original_name => #raw_name);
+            impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
+            }
 
-            // Implement ByteableRaw to expose the raw type
-            impl #byteable_crate::ByteableRaw for #original_name {
+            impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                fn into_byte_array(self) -> Self::ByteArray {
+                    let raw: #raw_name = self.into();
+                    raw.into_byte_array()
+                }
+            }
+
+            impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    let raw = <#raw_name>::from_byte_array(byte_array);
+                    raw.into()
+                }
+            }
+
+            // Implement HasRawType to expose the raw type
+            impl #byteable_crate::HasRawType for #original_name {
                 type Raw = #raw_name;
             }
         }

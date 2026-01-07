@@ -5,7 +5,7 @@
 //! conversion, and the `BigEndian<T>` and `LittleEndian<T>` wrapper types that ensure
 //! values are stored in a specific byte order regardless of the system's native endianness.
 
-use crate::{ByteArray, Byteable};
+use crate::{AssociatedByteArray, ByteArray, FromByteArray, IntoByteArray};
 use core::{fmt, hash::Hash};
 
 /// A trait for types that can be converted between different byte orders (endianness).
@@ -266,14 +266,18 @@ impl<T: EndianConvert + Default> Default for BigEndian<T> {
     }
 }
 
-impl<T: EndianConvert> Byteable for BigEndian<T> {
+impl<T: EndianConvert> AssociatedByteArray for BigEndian<T> {
     type ByteArray = <T as EndianConvert>::ByteArray;
+}
 
-    fn to_byte_array(self) -> Self::ByteArray {
+impl<T: EndianConvert> IntoByteArray for BigEndian<T> {
+    fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored big-endian bytes directly (no conversion needed)
         self.0
     }
+}
 
+impl<T: EndianConvert> FromByteArray for BigEndian<T> {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in big-endian format)
         Self(byte_array)
@@ -474,14 +478,18 @@ impl<T: EndianConvert + Default> Default for LittleEndian<T> {
     }
 }
 
-impl<T: EndianConvert> Byteable for LittleEndian<T> {
+impl<T: EndianConvert> AssociatedByteArray for LittleEndian<T> {
     type ByteArray = <T as EndianConvert>::ByteArray;
+}
 
-    fn to_byte_array(self) -> Self::ByteArray {
+impl<T: EndianConvert> IntoByteArray for LittleEndian<T> {
+    fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored little-endian bytes directly (no conversion needed)
         self.0
     }
+}
 
+impl<T: EndianConvert> FromByteArray for LittleEndian<T> {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in little-endian format)
         Self(byte_array)

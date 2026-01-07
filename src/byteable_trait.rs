@@ -1,76 +1,170 @@
-//! Core trait for byte-oriented serialization and deserialization.
+//! Core traits for byte-oriented serialization and deserialization.
 //!
-//! This module contains the `Byteable` trait, which is the foundation of the crate's
-//! serialization capabilities, along with helper macros for implementing it.
+//! This module contains the fundamental traits for converting types to and from byte arrays:
+//! - [`AssociatedByteArray`]: Associates a type with its byte array representation
+//! - [`IntoByteArray`]: Converts a value into a byte array
+//! - [`FromByteArray`]: Constructs a value from a byte array
+//! - [`TryIntoByteArray`]: Fallible conversion to a byte array
+//! - [`TryFromByteArray`]: Fallible construction from a byte array
+//! - [`HasRawType`]: For types with a distinct raw representation
+//!
+//! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
+//! the crate, along with helper macros for implementing them.
 
 use crate::byte_array::ByteArray;
 
-/// A trait for types that can be converted to and from a byte array.
+/// Associates a type with its byte array representation.
 ///
-/// The `Byteable` trait provides a zero-overhead, zero-copy conversion between Rust types
-/// and their byte representations. This is particularly useful for:
-/// - Binary file I/O
-/// - Network protocols
-/// - Low-level system programming
-/// - Memory-mapped files
-/// - Interfacing with C libraries
+/// This trait defines the relationship between a Rust type and its corresponding byte array type.
+/// It serves as the foundation for byte-oriented serialization, providing the necessary type
+/// information for conversions.
 ///
 /// # Associated Types
 ///
 /// - `ByteArray`: The type of the byte array representation. Usually `[u8; N]` where `N`
-///   is the size of the type in bytes.
+///   is the size of the type in bytes. This must implement the [`ByteArray`] trait.
 ///
 /// # Associated Constants
 ///
 /// - `BYTE_SIZE`: The size of the type in bytes. This is automatically derived from
 ///   `ByteArray::BYTE_SIZE`.
 ///
-/// # Methods
+/// # Usage
 ///
-/// - `to_byte_array`: Converts the value into its byte array representation
-/// - `from_byte_array`: Constructs a value from its byte array representation
-///
-/// # Safety
-///
-/// While the trait itself is safe, implementations often use `unsafe` code internally
-/// (particularly via the `#[derive(Byteable)]` macro). The derive macro automatically handles
-/// memory layout and endianness conversion. Users must ensure:
-///
-/// 1. All fields are primitive types or use endianness attributes
-/// 2. All byte patterns are valid for the field types
-/// 3. No types with invalid bit patterns are used (e.g., `bool`, `char`, enums)
-///
-/// # Implementations
-///
-/// The trait is implemented for:
-/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
-/// - Fixed-size arrays of `Byteable` types
-/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
-/// - Custom types via `#[derive(Byteable)]` with automatic endianness handling
+/// This trait is typically not implemented directly. Instead, implement the higher-level traits
+/// [`IntoByteArray`] and [`FromByteArray`], which require `AssociatedByteArray` as a supertrait,
+/// or use the `#[derive(Byteable)]` macro which implements all necessary traits automatically.
 ///
 /// # Examples
 ///
-/// ## Using primitive types
+/// ```
+/// use byteable::{AssociatedByteArray, IntoByteArray, FromByteArray};
+///
+/// // Primitive types implement AssociatedByteArray
+/// assert_eq!(u32::BYTE_SIZE, 4);
+/// assert_eq!(u64::BYTE_SIZE, 8);
+///
+/// // Arrays also implement it
+/// assert_eq!(<[u16; 3]>::BYTE_SIZE, 6);
+/// ```
+///
+/// ## With custom types using derive
 ///
 /// ```
-/// use byteable::Byteable;
+/// # #![cfg(feature = "derive")]
+/// use byteable::{Byteable, AssociatedByteArray};
+///
+/// #[derive(Byteable, Clone, Copy)]
+/// struct Point {
+///     x: u8,
+///     y: u8,
+/// }
+///
+/// # fn main() {
+/// // AssociatedByteArray is automatically implemented
+/// assert_eq!(Point::BYTE_SIZE, 2);
+/// # }
+/// ```
+pub trait AssociatedByteArray {
+    type ByteArray: ByteArray;
+    const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
+}
+
+/// Converts a value into its byte array representation.
+///
+/// This trait provides the ability to transform a Rust value into a fixed-size byte array,
+/// enabling zero-overhead serialization. This is particularly useful for:
+/// - Binary file I/O
+/// - Network protocols
+/// - Low-level system programming
+/// - Memory-mapped files
+/// - Interfacing with C libraries
+///
+/// # Implementations
+///
+/// This trait is implemented for:
+/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
+/// - Fixed-size arrays of types implementing `IntoByteArray`
+/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
+/// - Custom types via `#[derive(Byteable)]`
+///
+/// # Examples
+///
+/// ## With primitive types
+///
+/// ```
+/// use byteable::IntoByteArray;
 ///
 /// let value: u32 = 0x12345678;
-/// let bytes = value.to_byte_array();
+/// let bytes = value.into_byte_array();
 ///
 /// // On little-endian systems
 /// #[cfg(target_endian = "little")]
 /// assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
-///
-/// let restored = u32::from_byte_array(bytes);
-/// assert_eq!(restored, value);
 /// ```
 ///
-/// ## Using with custom types
+/// ## With custom types
 ///
 /// ```
 /// # #![cfg(feature = "derive")]
-/// use byteable::Byteable;
+/// use byteable::{Byteable, IntoByteArray};
+///
+/// #[derive(Byteable, Clone, Copy)]
+/// struct Color {
+///     r: u8,
+///     g: u8,
+///     b: u8,
+///     a: u8,
+/// }
+///
+/// # fn main() {
+/// let color = Color { r: 255, g: 128, b: 64, a: 255 };
+/// let bytes = color.into_byte_array();
+/// assert_eq!(bytes, [255, 128, 64, 255]);
+/// # }
+/// ```
+pub trait IntoByteArray: AssociatedByteArray {
+    /// Converts `self` into its byte array representation.
+    ///
+    /// This method consumes the value and returns its byte representation.
+    fn into_byte_array(self) -> Self::ByteArray;
+}
+
+/// Constructs a value from its byte array representation.
+///
+/// This trait provides the ability to reconstruct a Rust value from a fixed-size byte array,
+/// enabling zero-overhead deserialization. This is the inverse operation of [`IntoByteArray`].
+///
+/// # Implementations
+///
+/// This trait is implemented for:
+/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
+/// - Fixed-size arrays of types implementing `FromByteArray`
+/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
+/// - Custom types via `#[derive(Byteable)]`
+///
+/// # Examples
+///
+/// ## With primitive types
+///
+/// ```
+/// use byteable::FromByteArray;
+///
+/// let bytes = [0x78, 0x56, 0x34, 0x12];
+///
+/// // On little-endian systems
+/// #[cfg(target_endian = "little")]
+/// {
+///     let value = u32::from_byte_array(bytes);
+///     assert_eq!(value, 0x12345678);
+/// }
+/// ```
+///
+/// ## With custom types
+///
+/// ```
+/// # #![cfg(feature = "derive")]
+/// use byteable::{Byteable, FromByteArray};
 ///
 /// #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
 /// struct Color {
@@ -81,63 +175,80 @@ use crate::byte_array::ByteArray;
 /// }
 ///
 /// # fn main() {
-/// let color = Color { r: 255, g: 128, b: 64, a: 255 };
-/// let bytes = color.to_byte_array();
-/// assert_eq!(bytes, [255, 128, 64, 255]);
-///
-/// let restored = Color::from_byte_array(bytes);
-/// assert_eq!(restored, color);
+/// let bytes = [255, 128, 64, 255];
+/// let color = Color::from_byte_array(bytes);
+/// assert_eq!(color, Color { r: 255, g: 128, b: 64, a: 255 });
 /// # }
 /// ```
-///
-/// ## Using with arrays
-///
-/// ```
-/// use byteable::Byteable;
-///
-/// let values: [u16; 3] = [1, 2, 3];
-/// let byte_array = values.to_byte_array();
-///
-/// // byte_array is [[u8; 2]; 3] - array of byte arrays
-/// let restored = <[u16; 3]>::from_byte_array(byte_array);
-/// assert_eq!(restored, values);
-/// ```
-pub trait Byteable {
-    /// The size of this type in bytes.
+pub trait FromByteArray: AssociatedByteArray {
+    /// Constructs a value from its byte array representation.
     ///
-    /// This is automatically computed from the associated `ByteArray` type.
-    const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
-
-    /// The byte array type used to represent this type.
-    ///
-    /// Typically this is `[u8; N]` where N is `size_of::<Self>()`.
-    type ByteArray: ByteArray;
-
-    /// Converts this value into a byte array.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::Byteable;
-    ///
-    /// let value: u16 = 0x1234;
-    /// let bytes = value.to_byte_array();
-    /// ```
-    fn to_byte_array(self) -> Self::ByteArray;
-
-    /// Constructs a value from a byte array.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::Byteable;
-    ///
-    /// let bytes = [0x34, 0x12];
-    /// let value = u16::from_byte_array(bytes);
-    /// #[cfg(target_endian = "little")]
-    /// assert_eq!(value, 0x1234);
-    /// ```
+    /// This method consumes the byte array and returns the reconstructed value.
     fn from_byte_array(byte_array: Self::ByteArray) -> Self;
+}
+
+/// Attempts to convert a value into its byte array representation, potentially failing.
+///
+/// This trait provides fallible conversion to byte arrays, useful for types that may need
+/// validation or have constraints that could prevent conversion. Types that implement
+/// [`IntoByteArray`] automatically implement this trait with `Error = Infallible`.
+///
+/// # Examples
+///
+/// ```
+/// use byteable::{IntoByteArray, TryIntoByteArray};
+///
+/// // Types that implement IntoByteArray automatically get TryIntoByteArray
+/// let value: u32 = 42;
+/// let bytes = value.try_to_byte_array().unwrap();
+/// assert_eq!(bytes, value.into_byte_array());
+/// ```
+pub trait TryIntoByteArray: AssociatedByteArray {
+    /// The type returned in the event of a conversion error.
+    type Error;
+
+    /// Attempts to convert `self` into its byte array representation.
+    fn try_to_byte_array(self) -> Result<Self::ByteArray, Self::Error>;
+}
+
+/// Attempts to construct a value from its byte array representation, potentially failing.
+///
+/// This trait provides fallible construction from byte arrays, useful for types that may need
+/// validation or have constraints on valid byte patterns. Types that implement [`FromByteArray`]
+/// automatically implement this trait with `Error = Infallible`.
+///
+/// # Examples
+///
+/// ```
+/// use byteable::{FromByteArray, TryFromByteArray};
+///
+/// // Types that implement FromByteArray automatically get TryFromByteArray
+/// let bytes = [42, 0, 0, 0];
+/// let value = u32::try_from_byte_array(bytes).unwrap();
+/// assert_eq!(value, u32::from_byte_array(bytes));
+/// ```
+pub trait TryFromByteArray: AssociatedByteArray + Sized {
+    /// The type returned in the event of a conversion error.
+    type Error;
+
+    /// Attempts to construct a value from its byte array representation.
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error>;
+}
+
+impl<T: IntoByteArray> TryIntoByteArray for T {
+    type Error = core::convert::Infallible;
+
+    fn try_to_byte_array(self) -> Result<Self::ByteArray, Self::Error> {
+        Ok(self.into_byte_array())
+    }
+}
+
+impl<T: FromByteArray> TryFromByteArray for T {
+    type Error = core::convert::Infallible;
+
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
+        Ok(Self::from_byte_array(byte_array))
+    }
 }
 
 /// A trait for types that have a corresponding raw representation type.
@@ -155,7 +266,7 @@ pub trait Byteable {
 ///
 /// ```
 /// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, ByteableRaw};
+/// use byteable::{Byteable, HasRawType};
 ///
 /// # #[cfg(feature = "derive")]
 /// #[derive(Clone, Copy, Byteable)]
@@ -172,29 +283,33 @@ pub trait Byteable {
 ///
 /// # #[cfg(feature = "derive")]
 /// # fn example() {
-/// // Both Inner and Outer automatically implement ByteableRaw via derive(Byteable)
+/// // Both Inner and Outer automatically implement HasRawType via derive(Byteable)
 /// // The generated raw types are properly nested and type-safe
 /// # }
 /// ```
-pub trait ByteableRaw: Byteable + From<Self::Raw> {
+pub trait HasRawType: AssociatedByteArray + From<Self::Raw> {
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
     /// that handles the actual memory layout and byte-level operations.
-    type Raw: Byteable + From<Self>;
+    type Raw: AssociatedByteArray + From<Self>;
 }
 
 // Implementation of Byteable for fixed-size arrays of Byteable types
 // This allows [T; N] to be Byteable if T is Byteable
-impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
+
+impl<T: AssociatedByteArray, const SIZE: usize> AssociatedByteArray for [T; SIZE] {
     // The byte array is an array of the element's byte arrays
     type ByteArray = [T::ByteArray; SIZE];
+}
 
-    fn to_byte_array(self) -> Self::ByteArray {
+impl<T: IntoByteArray, const SIZE: usize> IntoByteArray for [T; SIZE] {
+    fn into_byte_array(self) -> Self::ByteArray {
         // Convert each element to its byte array representation
-        self.map(T::to_byte_array)
+        self.map(T::into_byte_array)
     }
-
+}
+impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Convert each byte array back to its element type
         byte_array.map(T::from_byte_array)
@@ -217,7 +332,7 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 /// # Examples
 ///
 /// ```
-/// use byteable::{Byteable, unsafe_byteable_transmute};
+/// use byteable::{Byteable, unsafe_byteable_transmute, IntoByteArray};
 ///
 /// #[derive(Clone, Copy)]
 /// #[repr(transparent)]
@@ -226,7 +341,7 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 /// unsafe_byteable_transmute!(MyU32);
 ///
 /// let value = MyU32(0x12345678);
-/// let bytes = value.to_byte_array();
+/// let bytes = value.into_byte_array();
 /// ```
 ///
 /// Multiple types can be implemented at once:
@@ -248,11 +363,16 @@ impl<T: Byteable, const SIZE: usize> Byteable for [T; SIZE] {
 macro_rules! unsafe_byteable_transmute {
     ($($type:ty),+) => {
         $(
-            impl $crate::Byteable for $type {
+            impl $crate::AssociatedByteArray for $type {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                fn to_byte_array(self) -> Self::ByteArray {
+            }
+
+            impl $crate::IntoByteArray for $type {
+                fn into_byte_array(self) -> Self::ByteArray {
                     unsafe { ::core::mem::transmute(self) }
                 }
+            }
+            impl $crate::FromByteArray for $type {
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     unsafe { ::core::mem::transmute(byte_array) }
                 }
@@ -280,7 +400,7 @@ macro_rules! unsafe_byteable_transmute {
 /// # Examples
 ///
 /// ```
-/// use byteable::{Byteable, LittleEndian, impl_byteable_via};
+/// use byteable::{Byteable, LittleEndian, impl_byteable_via, IntoByteArray, FromByteArray};
 ///
 /// # #[cfg(feature = "derive")]
 /// use byteable::UnsafeByteableTransmute;
@@ -329,7 +449,7 @@ macro_rules! unsafe_byteable_transmute {
 /// # #[cfg(feature = "derive")]
 /// # fn example() {
 /// let point = Point { x: 100, y: 200 };
-/// let bytes = point.to_byte_array();
+/// let bytes = point.into_byte_array();
 /// let restored = Point::from_byte_array(bytes);
 /// assert_eq!(restored, point);
 /// # }
@@ -337,14 +457,18 @@ macro_rules! unsafe_byteable_transmute {
 #[macro_export]
 macro_rules! impl_byteable_via {
     ($regular_type:ty => $raw_type:ty) => {
-        impl $crate::Byteable for $regular_type {
-            type ByteArray = <$raw_type as Byteable>::ByteArray;
+        impl $crate::AssociatedByteArray for $regular_type {
+            type ByteArray = <$raw_type as $crate::AssociatedByteArray>::ByteArray;
+        }
 
-            fn to_byte_array(self) -> Self::ByteArray {
+        impl $crate::IntoByteArray for $regular_type {
+            fn into_byte_array(self) -> Self::ByteArray {
                 let raw: $raw_type = self.into();
-                raw.to_byte_array()
+                raw.into_byte_array()
             }
+        }
 
+        impl $crate::FromByteArray for $regular_type {
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                 let raw = <$raw_type>::from_byte_array(byte_array);
                 raw.into()
@@ -356,13 +480,17 @@ macro_rules! impl_byteable_via {
 macro_rules! impl_byteable_primitive {
     ($($type:ty),+) => {
         $(
-            impl $crate::Byteable for $type {
+            impl $crate::AssociatedByteArray for $type {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+            }
 
-                fn to_byte_array(self) -> Self::ByteArray {
+            impl $crate::IntoByteArray for $type {
+                fn into_byte_array(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)
                 }
+            }
 
+            impl $crate::FromByteArray for $type {
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     <$type>::from_ne_bytes(byte_array)
                 }
@@ -375,7 +503,7 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 
 #[cfg(test)]
 mod tests {
-    use crate::{BigEndian, Byteable, LittleEndian};
+    use crate::{AssociatedByteArray, BigEndian, FromByteArray, IntoByteArray, LittleEndian};
     use byteable_derive::UnsafeByteableTransmute;
 
     #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]
@@ -395,7 +523,7 @@ mod tests {
         };
 
         let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.to_byte_array(), expected_bytes);
+        assert_eq!(a.into_byte_array(), expected_bytes);
 
         let read_a = ABC::from_byte_array(expected_bytes);
         assert_eq!(read_a.a.get(), 1);
@@ -413,7 +541,7 @@ mod tests {
         };
 
         let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.to_byte_array(), expected_bytes);
+        assert_eq!(a.into_byte_array(), expected_bytes);
 
         let read = ABC::from_byte_array(expected_bytes);
         assert_eq!(read.a.get(), 1);
@@ -477,7 +605,7 @@ mod tests {
             e: 2,
         };
 
-        let bytes = my_struct.to_byte_array();
+        let bytes = my_struct.into_byte_array();
         assert_eq!(bytes, [192, 168, 0, 0, 0, 1, 0, 1, 2]);
 
         let struct_from_bytes = MyRegularStruct::from_byte_array([192, 168, 0, 0, 0, 1, 0, 1, 2]);

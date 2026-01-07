@@ -10,16 +10,20 @@
 //!
 //! ## Features
 //!
-//! - **`Byteable` Trait**: The core trait for types that can be converted to and from a byte array.
+//! - **Byte Conversion Traits**: A modular trait system for byte array conversion:
+//!   - `AssociatedByteArray`: Associates a type with its byte array representation
+//!   - `IntoByteArray`: Converts values into byte arrays
+//!   - `FromByteArray`: Constructs values from byte arrays
+//!   - `TryIntoByteArray` & `TryFromByteArray`: Fallible conversion variants
 //! - **`ReadByteable` & `WriteByteable` Traits**: Extension traits for `std::io::Read` and
-//!   `std::io::Write`, enabling convenient reading and writing of `Byteable` types.
+//!   `std::io::Write`, enabling convenient reading and writing of byteable types.
 //! - **`AsyncReadByteable` & `AsyncWriteByteable` Traits** (with `tokio` feature): Asynchronous
 //!   counterparts to `ReadByteable` and `WriteByteable`, designed for use with `tokio`'s async I/O.
 //! - **`EndianConvert` Trait & Wrappers**: Provides methods for converting primitive types between
 //!   different endianness (little-endian and big-endian), along with `BigEndian<T>` and
 //!   `LittleEndian<T>` wrapper types.
 //! - **`#[derive(Byteable)]`** (with `derive` feature): A procedural macro that automatically
-//!   implements the `Byteable` trait for structs, significantly simplifying boilerplate. For
+//!   implements the byte conversion traits for structs, significantly simplifying boilerplate. For
 //!   advanced use cases, `#[derive(UnsafeByteableTransmute)]` is also available for manual
 //!   transmute-based implementations.
 //!
@@ -202,7 +206,7 @@
 //!
 //! ```
 //! #![cfg(feature = "derive")]
-//! use byteable::Byteable;
+//! use byteable::{Byteable, IntoByteArray, FromByteArray};
 //!
 //! #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
 //! struct Point {
@@ -214,7 +218,7 @@
 //!
 //! # fn main() {
 //! let point = Point { x: 10, y: 20 };
-//! let bytes = point.to_byte_array();
+//! let bytes = point.into_byte_array();
 //! let restored = Point::from_byte_array(bytes);
 //! assert_eq!(point, restored);
 //! # }
@@ -231,7 +235,7 @@
 //! ## Performance
 //!
 //! This crate is designed for zero-copy, zero-overhead serialization. Operations like
-//! `to_byte_array` and `from_byte_array` typically compile down to simple memory operations
+//! `into_byte_array` and `from_byte_array` typically compile down to simple memory operations
 //! or even no-ops when possible.
 
 mod byte_array;
@@ -252,13 +256,18 @@ pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 
 pub use byte_array::ByteArray;
 
-pub use byteable_trait::{Byteable, ByteableRaw};
+pub use byteable_trait::{
+    AssociatedByteArray, FromByteArray, HasRawType, IntoByteArray, TryFromByteArray,
+    TryIntoByteArray,
+};
 
 #[cfg(feature = "std")]
-pub use io::{ReadByteable, WriteByteable};
+pub use io::{ReadByteable, ReadTryByteable, TryByteableError, WriteByteable, WriteTryByteable};
 
 #[cfg(feature = "tokio")]
-pub use async_io::{AsyncReadByteable, AsyncWriteByteable};
+pub use async_io::{
+    AsyncReadByteable, AsyncReadTryByteable, AsyncWriteByteable, AsyncWriteTryByteable,
+};
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 
