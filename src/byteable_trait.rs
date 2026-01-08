@@ -11,7 +11,7 @@
 //! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
 //! the crate, along with helper macros for implementing them.
 
-use crate::byte_array::ByteArray;
+use crate::{LittleEndian, ValidBytecastMarker, byte_array::ByteArray};
 
 /// Associates a type with its byte array representation.
 ///
@@ -84,6 +84,7 @@ pub trait AssociatedByteArray {
 ///
 /// This trait is implemented for:
 /// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
+/// - `bool` and `char` (with validation on deserialization)
 /// - Fixed-size arrays of types implementing `IntoByteArray`
 /// - `BigEndian<T>` and `LittleEndian<T>` wrappers
 /// - Custom types via `#[derive(Byteable)]`
@@ -139,6 +140,7 @@ pub trait IntoByteArray: AssociatedByteArray {
 ///
 /// This trait is implemented for:
 /// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
+/// - `bool` and `char` (via `TryFromByteArray` with validation)
 /// - Fixed-size arrays of types implementing `FromByteArray`
 /// - `BigEndian<T>` and `LittleEndian<T>` wrappers
 /// - Custom types via `#[derive(Byteable)]`
@@ -287,12 +289,73 @@ impl<T: FromByteArray> TryFromByteArray for T {
 /// // The generated raw types are properly nested and type-safe
 /// # }
 /// ```
-pub trait HasRawType: AssociatedByteArray + From<Self::Raw> {
+pub trait HasRawType:
+    AssociatedByteArray + From<Self::Raw> + IntoByteArray + FromByteArray
+{
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
     /// that handles the actual memory layout and byte-level operations.
-    type Raw: AssociatedByteArray + From<Self>;
+    type Raw: AssociatedByteArray + From<Self> + IntoByteArray + FromByteArray;
+}
+
+/// A trait for types that have a corresponding raw representation type with fallible conversion.
+///
+/// This trait is similar to [`HasRawType`], but is designed for types where conversion from
+/// the raw representation might fail. This is particularly useful for enums, where not all
+/// byte patterns represent valid discriminants.
+///
+/// This trait is automatically implemented by the `#[derive(Byteable)]` macro for enums.
+/// The raw type can be converted to the original type using `TryFrom`.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::{Byteable, TryHasRawType, TryFromByteArray, IntoByteArray};
+///
+/// # #[cfg(feature = "derive")]
+/// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
+/// #[repr(u8)]
+/// enum Status {
+///     Idle = 0,
+///     Running = 1,
+///     Completed = 2,
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// // Enums automatically implement TryHasRawType
+/// // Converting enum to raw (always succeeds)
+/// let status = Status::Running;
+/// let raw: <Status as TryHasRawType>::Raw = status.into();
+///
+/// // Converting raw back to enum (might fail for invalid discriminants)
+/// let restored: Status = Status::try_from(raw).unwrap();
+/// assert_eq!(restored, Status::Running);
+///
+/// // TryFromByteArray is also implemented for enums
+/// let bytes = status.into_byte_array();
+/// let from_bytes = Status::try_from_byte_array(bytes).unwrap();
+/// assert_eq!(from_bytes, Status::Running);
+/// # }
+/// ```
+pub trait TryHasRawType:
+    AssociatedByteArray + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray
+{
+    /// The raw type used for byte conversion.
+    ///
+    /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
+    /// that handles the actual memory layout and byte-level operations.
+    type Raw: AssociatedByteArray + From<Self> + IntoByteArray + FromByteArray;
+}
+
+/// Blanket implementation of `TryHasRawType` for types that implement `HasRawType`.
+///
+/// Types with infallible raw conversion automatically get fallible conversion
+/// with `Infallible` as the error type (via the blanket `TryFrom` impl for types implementing `From`).
+impl<T: HasRawType> TryHasRawType for T {
+    type Raw = <T as HasRawType>::Raw;
 }
 
 // Implementation of Byteable for fixed-size arrays of Byteable types
@@ -500,6 +563,279 @@ macro_rules! impl_byteable_primitive {
 }
 
 impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+pub struct BoolRaw(u8);
+
+unsafe impl ValidBytecastMarker for BoolRaw {}
+
+unsafe_byteable_transmute!(BoolRaw);
+
+impl From<bool> for BoolRaw {
+    fn from(value: bool) -> Self {
+        Self(value as u8)
+    }
+}
+
+impl TryFrom<BoolRaw> for bool {
+    type Error = EnumFromBytesError;
+
+    fn try_from(value: BoolRaw) -> Result<Self, Self::Error> {
+        match value.0 {
+            0 => Ok(false),
+            1 => Ok(true),
+            invalid => Err(EnumFromBytesError::new(
+                invalid,
+                ::core::any::type_name::<Self>(),
+            )),
+        }
+    }
+}
+
+impl AssociatedByteArray for bool {
+    type ByteArray = <<bool as TryHasRawType>::Raw as AssociatedByteArray>::ByteArray;
+}
+
+impl IntoByteArray for bool {
+    fn into_byte_array(self) -> Self::ByteArray {
+        let raw: <Self as TryHasRawType>::Raw = self.into();
+        raw.into_byte_array()
+    }
+}
+
+impl TryFromByteArray for bool {
+    type Error = EnumFromBytesError;
+
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
+        let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
+        raw.try_into()
+    }
+}
+
+impl TryHasRawType for bool {
+    type Raw = BoolRaw;
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+pub struct CharRaw(LittleEndian<u32>);
+
+// because of code point representation this should always be little endian, i think
+
+unsafe impl ValidBytecastMarker for CharRaw {}
+
+unsafe_byteable_transmute!(CharRaw);
+
+impl From<char> for CharRaw {
+    fn from(value: char) -> Self {
+        Self((value as u32).into())
+    }
+}
+
+impl TryFrom<CharRaw> for char {
+    type Error = EnumFromBytesError;
+
+    fn try_from(value: CharRaw) -> Result<Self, Self::Error> {
+        let num = value.0.get();
+        match char::from_u32(num) {
+            Some(c) => Ok(c),
+            None => Err(EnumFromBytesError::new(
+                num,
+                ::core::any::type_name::<Self>(),
+            )),
+        }
+    }
+}
+
+impl AssociatedByteArray for char {
+    type ByteArray = <<char as TryHasRawType>::Raw as AssociatedByteArray>::ByteArray;
+}
+
+impl IntoByteArray for char {
+    fn into_byte_array(self) -> Self::ByteArray {
+        let raw: <Self as TryHasRawType>::Raw = self.into();
+        raw.into_byte_array()
+    }
+}
+
+impl TryFromByteArray for char {
+    type Error = EnumFromBytesError;
+
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
+        let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
+        raw.try_into()
+    }
+}
+
+impl TryHasRawType for char {
+    type Raw = CharRaw;
+}
+
+/// Represents a discriminant value that can be of various integer types.
+///
+/// This enum stores the invalid discriminant value with its original type information,
+/// allowing for proper formatting and type-safe error handling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Discriminant {
+    U8(u8),
+    I8(i8),
+    U16(u16),
+    I16(i16),
+    U32(u32),
+    I32(i32),
+    U64(u64),
+    I64(i64),
+    U128(u128),
+    I128(i128),
+}
+
+impl core::fmt::Display for Discriminant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Discriminant::U8(v) => write!(f, "{} (u8)", v),
+            Discriminant::I8(v) => write!(f, "{} (i8)", v),
+            Discriminant::U16(v) => write!(f, "{} (u16)", v),
+            Discriminant::I16(v) => write!(f, "{} (i16)", v),
+            Discriminant::U32(v) => write!(f, "{} (u32)", v),
+            Discriminant::I32(v) => write!(f, "{} (i32)", v),
+            Discriminant::U64(v) => write!(f, "{} (u64)", v),
+            Discriminant::I64(v) => write!(f, "{} (i64)", v),
+            Discriminant::U128(v) => write!(f, "{} (u128)", v),
+            Discriminant::I128(v) => write!(f, "{} (i128)", v),
+        }
+    }
+}
+
+// Implement From for all supported integer types
+impl From<u8> for Discriminant {
+    fn from(v: u8) -> Self {
+        Discriminant::U8(v)
+    }
+}
+
+impl From<i8> for Discriminant {
+    fn from(v: i8) -> Self {
+        Discriminant::I8(v)
+    }
+}
+
+impl From<u16> for Discriminant {
+    fn from(v: u16) -> Self {
+        Discriminant::U16(v)
+    }
+}
+
+impl From<i16> for Discriminant {
+    fn from(v: i16) -> Self {
+        Discriminant::I16(v)
+    }
+}
+
+impl From<u32> for Discriminant {
+    fn from(v: u32) -> Self {
+        Discriminant::U32(v)
+    }
+}
+
+impl From<i32> for Discriminant {
+    fn from(v: i32) -> Self {
+        Discriminant::I32(v)
+    }
+}
+
+impl From<u64> for Discriminant {
+    fn from(v: u64) -> Self {
+        Discriminant::U64(v)
+    }
+}
+
+impl From<i64> for Discriminant {
+    fn from(v: i64) -> Self {
+        Discriminant::I64(v)
+    }
+}
+
+impl From<u128> for Discriminant {
+    fn from(v: u128) -> Self {
+        Discriminant::U128(v)
+    }
+}
+
+impl From<i128> for Discriminant {
+    fn from(v: i128) -> Self {
+        Discriminant::I128(v)
+    }
+}
+
+/// Error type for converting bytes to an enum with an invalid discriminant.
+///
+/// This error is returned when attempting to convert a byte array to an enum
+/// value, but the discriminant value doesn't match any valid enum variant.
+///
+/// The error includes both the invalid discriminant value (with its original type)
+/// and the enum type name for better diagnostics.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::{Byteable, TryFromByteArray, IntoByteArray};
+///
+/// # #[cfg(feature = "derive")]
+/// #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+/// #[repr(u8)]
+/// enum Status {
+///     Idle = 0,
+///     Running = 1,
+/// }
+///
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// // Valid discriminant
+/// let bytes = [1];
+/// let status = Status::try_from_byte_array(bytes).unwrap();
+/// assert_eq!(status, Status::Running);
+///
+/// // Invalid discriminant
+/// let bytes = [255];
+/// let result = Status::try_from_byte_array(bytes);
+/// assert!(result.is_err());
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnumFromBytesError {
+    /// The invalid discriminant value that was encountered
+    pub invalid_discriminant: Discriminant,
+    /// The name of the enum type that failed to match
+    pub enum_type_name: &'static str,
+}
+
+impl EnumFromBytesError {
+    /// Creates a new `EnumFromBytesError` with the given invalid discriminant and type name.
+    pub fn new<T: Into<Discriminant>>(
+        invalid_discriminant: T,
+        enum_type_name: &'static str,
+    ) -> Self {
+        Self {
+            invalid_discriminant: invalid_discriminant.into(),
+            enum_type_name,
+        }
+    }
+}
+
+impl core::fmt::Display for EnumFromBytesError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Invalid discriminant value {} for enum '{}'",
+            self.invalid_discriminant, self.enum_type_name
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for EnumFromBytesError {}
 
 #[cfg(test)]
 mod tests {

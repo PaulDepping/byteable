@@ -186,13 +186,124 @@
 //! assert_eq!(little.get(), 0x12345678u32);
 //! ```
 //!
+//! ## Enum Support
+//!
+//! The `#[derive(Byteable)]` macro supports C-like enums with explicit discriminants:
+//!
+//! ```
+//! # #[cfg(feature = "derive")]
+//! use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+//!
+//! # #[cfg(feature = "derive")]
+//! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+//! #[repr(u8)]
+//! enum Status {
+//!     Idle = 0,
+//!     Running = 1,
+//!     Completed = 2,
+//!     Failed = 3,
+//! }
+//!
+//! # #[cfg(feature = "derive")]
+//! # fn main() -> Result<(), byteable::EnumFromBytesError> {
+//! let status = Status::Running;
+//! let bytes = status.into_byte_array();
+//! assert_eq!(bytes, [1]);
+//!
+//! // Use TryFromByteArray for fallible conversion
+//! let restored = Status::try_from_byte_array(bytes)?;
+//! assert_eq!(restored, Status::Running);
+//!
+//! // Invalid discriminants return an error
+//! let invalid = Status::try_from_byte_array([255]);
+//! assert!(invalid.is_err());
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "derive"))]
+//! # fn main() {}
+//! ```
+//!
+//! ### Enum with Endianness
+//!
+//! Enums support type-level endianness attributes for multi-byte discriminants:
+//!
+//! ```
+//! # #[cfg(feature = "derive")]
+//! use byteable::Byteable;
+//!
+//! # #[cfg(feature = "derive")]
+//! // Little-endian (common for file formats)
+//! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+//! #[repr(u16)]
+//! #[byteable(little_endian)]
+//! enum Command {
+//!     Start = 0x1000,
+//!     Stop = 0x2000,
+//!     Pause = 0x3000,
+//! }
+//!
+//! # #[cfg(feature = "derive")]
+//! // Big-endian (common for network protocols)
+//! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+//! #[repr(u32)]
+//! #[byteable(big_endian)]
+//! enum HttpStatus {
+//!     Ok = 200,
+//!     NotFound = 404,
+//!     InternalError = 500,
+//! }
+//! # fn main() {}
+//! ```
+//!
+//! ### Enum Requirements
+//!
+//! When deriving `Byteable` for enums:
+//!
+//! 1. **Explicit repr type required**: `#[repr(u8)]`, `#[repr(u16)]`, `#[repr(u32)]`, `#[repr(u64)]`,
+//!    `#[repr(i8)]`, `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`
+//! 2. **Unit variants only**: All variants must be unit variants (no fields)
+//! 3. **Explicit discriminants**: All variants must have explicit values
+//! 4. **Fallible conversion**: Use `TryFromByteArray` (not `FromByteArray`) because invalid
+//!    discriminants return `EnumFromBytesError`
+//!
+//! ### Nested Enums in Structs
+//!
+//! Use the `#[byteable(try_transparent)]` attribute for enum fields in structs:
+//!
+//! ```
+//! # #[cfg(feature = "derive")]
+//! use byteable::Byteable;
+//!
+//! # #[cfg(feature = "derive")]
+//! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+//! #[repr(u8)]
+//! enum MessageType {
+//!     Data = 1,
+//!     Control = 2,
+//!     ErrorMsg = 3,
+//! }
+//!
+//! # #[cfg(feature = "derive")]
+//! #[derive(Byteable, Clone, Copy)]
+//! struct Message {
+//!     #[byteable(try_transparent)]
+//!     msg_type: MessageType,
+//!     #[byteable(big_endian)]
+//!     sequence: u32,
+//!     payload: [u8; 16],
+//! }
+//! # fn main() {}
+//! ```
+//!
 //! ## Safety Considerations
 //!
 //! The `#[derive(Byteable)]` macro uses `core::mem::transmute` internally, which is unsafe.
 //! When using this macro, ensure that:
 //!
 //! 1. All fields are primitive types or have endianness attributes (`#[byteable(big_endian)]`, `#[byteable(little_endian)]`)
-//! 2. The struct doesn't contain types with invalid bit patterns (e.g., `bool`, `char`, enums)
+//! 2. The struct doesn't contain types with invalid bit patterns (e.g., `bool`, `char`)
+//! 3. C-like enums with explicit discriminants are safe (supported via derive)
+//! 4. Complex enums with fields are **not** safe
 //!
 //! For types with complex invariants (like `String`, `Vec`, references, etc.), do **not** use
 //! the `Byteable` derive macro. Use only with plain old data (POD) types.
@@ -257,8 +368,8 @@ pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 pub use byte_array::ByteArray;
 
 pub use byteable_trait::{
-    AssociatedByteArray, FromByteArray, HasRawType, IntoByteArray, TryFromByteArray,
-    TryIntoByteArray,
+    AssociatedByteArray, BoolRaw, CharRaw, Discriminant, EnumFromBytesError, FromByteArray,
+    HasRawType, IntoByteArray, TryFromByteArray, TryHasRawType, TryIntoByteArray,
 };
 
 #[cfg(feature = "std")]

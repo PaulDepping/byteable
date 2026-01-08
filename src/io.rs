@@ -504,6 +504,7 @@ impl<T: Write> WriteTryByteable for T {}
 #[cfg(test)]
 mod tests {
     use byteable_derive::UnsafeByteableTransmute;
+    use thiserror::Error;
 
     use super::{ReadByteable, ReadTryByteable, TryByteableError, WriteByteable, WriteTryByteable};
     use crate::{
@@ -612,6 +613,23 @@ mod tests {
         );
     }
 
+    #[derive(Debug, Error)]
+    #[error(transparent)]
+    enum MyBiggerError {
+        Io(#[from] std::io::Error),
+        Conversion(#[from] ConversionError),
+        Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+    }
+
+    impl From<TryByteableError<ConversionError>> for MyBiggerError {
+        fn from(value: TryByteableError<ConversionError>) -> Self {
+            match value {
+                TryByteableError::Io(error) => error.into(),
+                TryByteableError::Conversion(error) => error.into(),
+            }
+        }
+    }
+
     // Test types for fallible conversion
     #[derive(Debug, PartialEq, Clone, Copy)]
     struct EvenU32(u32);
@@ -635,7 +653,7 @@ mod tests {
         type Error = ConversionError;
 
         fn try_from_byte_array(bytes: [u8; 4]) -> Result<Self, Self::Error> {
-            let value = u32::from_ne_bytes(bytes);
+            let value = u32::from_le_bytes(bytes);
             if value % 2 == 0 {
                 Ok(EvenU32(value))
             } else {
@@ -649,7 +667,7 @@ mod tests {
 
         fn try_to_byte_array(self) -> Result<[u8; 4], Self::Error> {
             if self.0 % 2 == 0 {
-                Ok(self.0.to_ne_bytes())
+                Ok(self.0.to_le_bytes())
             } else {
                 Err(ConversionError)
             }
@@ -664,7 +682,6 @@ mod tests {
         let result: Result<EvenU32, _> = cursor.read_try_byteable();
         assert!(result.is_ok());
 
-        #[cfg(target_endian = "little")]
         assert_eq!(result.unwrap(), EvenU32(42));
     }
 
@@ -674,14 +691,32 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result: Result<EvenU32, TryByteableError<ConversionError>> = cursor.read_try_byteable();
-        assert!(result.is_err());
+        assert!(matches!(result, Err(TryByteableError::Conversion(_))));
+    }
 
-        match result {
-            Err(TryByteableError::Conversion(_)) => {
-                // Expected
-            }
-            _ => panic!("Expected conversion error"),
+    #[test]
+    fn test_read_try_byteable_error_conversion() {
+        fn subfunc_success() -> Result<(), MyBiggerError> {
+            let data = vec![42, 0, 0, 0]; // Odd value
+            let mut cursor = Cursor::new(data);
+
+            let _: EvenU32 = cursor.read_try_byteable()?;
+            Ok(())
         }
+
+        let r = subfunc_success();
+        assert!(matches!(r, Ok(_)));
+
+        fn subfunc_fail() -> Result<(), MyBiggerError> {
+            let data = vec![43, 0, 0, 0]; // Odd value
+            let mut cursor = Cursor::new(data);
+
+            let _: EvenU32 = cursor.read_try_byteable()?;
+            Ok(())
+        }
+
+        let r = subfunc_fail();
+        assert!(matches!(r, Err(MyBiggerError::Conversion(_))));
     }
 
     #[test]
