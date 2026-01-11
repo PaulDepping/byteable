@@ -202,7 +202,7 @@ pub trait FromByteArray: AssociatedByteArray {
 ///
 /// // Types that implement IntoByteArray automatically get TryIntoByteArray
 /// let value: u32 = 42;
-/// let bytes = value.try_to_byte_array().unwrap();
+/// let bytes = value.try_into_byte_array().unwrap();
 /// assert_eq!(bytes, value.into_byte_array());
 /// ```
 pub trait TryIntoByteArray: AssociatedByteArray {
@@ -210,7 +210,7 @@ pub trait TryIntoByteArray: AssociatedByteArray {
     type Error;
 
     /// Attempts to convert `self` into its byte array representation.
-    fn try_to_byte_array(self) -> Result<Self::ByteArray, Self::Error>;
+    fn try_into_byte_array(self) -> Result<Self::ByteArray, Self::Error>;
 }
 
 /// Attempts to construct a value from its byte array representation, potentially failing.
@@ -240,7 +240,7 @@ pub trait TryFromByteArray: AssociatedByteArray + Sized {
 impl<T: IntoByteArray> TryIntoByteArray for T {
     type Error = core::convert::Infallible;
 
-    fn try_to_byte_array(self) -> Result<Self::ByteArray, Self::Error> {
+    fn try_into_byte_array(self) -> Result<Self::ByteArray, Self::Error> {
         Ok(self.into_byte_array())
     }
 }

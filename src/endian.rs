@@ -5,7 +5,7 @@
 //! conversion, and the `BigEndian<T>` and `LittleEndian<T>` wrapper types that ensure
 //! values are stored in a specific byte order regardless of the system's native endianness.
 
-use crate::{AssociatedByteArray, ByteArray, FromByteArray, IntoByteArray};
+use crate::{AssociatedByteArray, FromByteArray, IntoByteArray};
 use core::{fmt, hash::Hash};
 
 /// A trait for types that can be converted between different byte orders (endianness).
@@ -37,64 +37,82 @@ use core::{fmt, hash::Hash};
 /// assert_eq!(u32::from_le_bytes(le_bytes), value);
 /// assert_eq!(u32::from_be_bytes(be_bytes), value);
 /// ```
-pub trait EndianConvert: Copy {
-    /// The byte array type used to represent this type.
-    type ByteArray: ByteArray;
+pub trait EndianConvert: Copy + AssociatedByteArray + IntoByteArray + FromByteArray {
+    /// Creates a value from its little-endian representation.
+    fn from_le(value: Self) -> Self;
 
-    /// Creates a value from its little-endian byte representation.
-    fn from_le_bytes(byte_array: Self::ByteArray) -> Self;
+    /// Creates a value from its big-endian representation.
+    fn from_be(value: Self) -> Self;
 
-    /// Creates a value from its big-endian byte representation.
-    fn from_be_bytes(byte_array: Self::ByteArray) -> Self;
+    /// Converts to little-endian representation.
+    fn to_le(self) -> Self;
 
-    /// Creates a value from its native-endian byte representation.
-    fn from_ne_bytes(byte_array: Self::ByteArray) -> Self;
-
-    /// Returns the little-endian byte representation of this value.
-    fn to_le_bytes(self) -> Self::ByteArray;
-
-    /// Returns the big-endian byte representation of this value.
-    fn to_be_bytes(self) -> Self::ByteArray;
-
-    /// Returns the native-endian byte representation of this value.
-    fn to_ne_bytes(self) -> Self::ByteArray;
+    /// Converts to big-endian representation.
+    fn to_be(self) -> Self;
 }
 
-macro_rules! impl_endianable {
+macro_rules! impl_endianable_int {
     ($($type:ty),+) => {
         $(
             impl $crate::EndianConvert for $type {
-                type ByteArray = [u8; ::core::mem::size_of::<$type>()];
-
-                fn from_le_bytes(byte_array: Self::ByteArray) -> Self {
-                    <$type>::from_le_bytes(byte_array)
+                fn from_le(value: Self) -> Self {
+                    <$type>::from_le(value)
                 }
 
-                fn from_be_bytes(byte_array: Self::ByteArray) -> Self {
-                    <$type>::from_be_bytes(byte_array)
+                fn from_be(value: Self) -> Self {
+                    <$type>::from_be(value)
                 }
 
-                fn from_ne_bytes(byte_array: Self::ByteArray) -> Self {
-                    <$type>::from_ne_bytes(byte_array)
+                fn to_le(self) -> Self {
+                    <$type>::to_le(self)
                 }
 
-                fn to_ne_bytes(self) -> Self::ByteArray {
-                    <$type>::to_ne_bytes(self)
-                }
-
-                fn to_le_bytes(self) -> Self::ByteArray {
-                    <$type>::to_le_bytes(self)
-                }
-
-                fn to_be_bytes(self) -> Self::ByteArray {
-                    <$type>::to_be_bytes(self)
+                fn to_be(self) -> Self {
+                    <$type>::to_be(self)
                 }
             }
         )+
     };
 }
 
-impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+impl_endianable_int!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+
+// Float implementations use to_bits/from_bits for endianness conversion
+impl EndianConvert for f32 {
+    fn from_le(value: Self) -> Self {
+        Self::from_bits(u32::from_le(value.to_bits()))
+    }
+
+    fn from_be(value: Self) -> Self {
+        Self::from_bits(u32::from_be(value.to_bits()))
+    }
+
+    fn to_le(self) -> Self {
+        Self::from_bits(self.to_bits().to_le())
+    }
+
+    fn to_be(self) -> Self {
+        Self::from_bits(self.to_bits().to_be())
+    }
+}
+
+impl EndianConvert for f64 {
+    fn from_le(value: Self) -> Self {
+        Self::from_bits(u64::from_le(value.to_bits()))
+    }
+
+    fn from_be(value: Self) -> Self {
+        Self::from_bits(u64::from_be(value.to_bits()))
+    }
+
+    fn to_le(self) -> Self {
+        Self::from_bits(self.to_bits().to_le())
+    }
+
+    fn to_be(self) -> Self {
+        Self::from_bits(self.to_bits().to_be())
+    }
+}
 
 /// A wrapper type that stores a value in big-endian (network) byte order.
 ///
@@ -116,12 +134,12 @@ impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 /// ## Basic usage
 ///
 /// ```
-/// use byteable::BigEndian;
+/// use byteable::{BigEndian, IntoByteArray};
 ///
 /// let value = BigEndian::new(0x12345678u32);
 ///
 /// // The bytes are always stored in big-endian order
-/// assert_eq!(value.raw_bytes(), [0x12, 0x34, 0x56, 0x78]);
+/// assert_eq!(value.into_byte_array(), [0x12, 0x34, 0x56, 0x78]);
 ///
 /// // Get back the native value
 /// assert_eq!(value.get(), 0x12345678u32);
@@ -131,7 +149,7 @@ impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 ///
 /// ```
 /// # #[cfg(feature = "derive")]
-/// use byteable::{BigEndian};
+/// use byteable::{BigEndian, IntoByteArray};
 ///
 /// # #[cfg(feature = "derive")]
 /// #[derive(byteable::UnsafeByteableTransmute, Debug)]
@@ -172,7 +190,7 @@ impl_endianable!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 /// ```
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct BigEndian<T: EndianConvert>(pub(crate) T::ByteArray);
+pub struct BigEndian<T: EndianConvert>(pub(crate) T);
 
 impl<T: fmt::Debug + EndianConvert> fmt::Debug for BigEndian<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -214,14 +232,14 @@ impl<T: EndianConvert> BigEndian<T> {
     /// # Examples
     ///
     /// ```
-    /// use byteable::BigEndian;
+    /// use byteable::{BigEndian, IntoByteArray};
     ///
     /// let be = BigEndian::new(0x1234u16);
-    /// assert_eq!(be.raw_bytes(), [0x12, 0x34]);
+    /// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
     /// ```
     pub fn new(value: T) -> Self {
         // Convert to big-endian bytes and store internally
-        Self(value.to_be_bytes())
+        Self(value.to_be())
     }
 
     /// Extracts the native value from this `BigEndian` wrapper.
@@ -238,24 +256,7 @@ impl<T: EndianConvert> BigEndian<T> {
     /// ```
     pub fn get(self) -> T {
         // Convert from big-endian bytes back to native value
-        T::from_be_bytes(self.0)
-    }
-
-    /// Returns the raw bytes in big-endian order.
-    ///
-    /// This returns the actual byte representation without any conversion.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::BigEndian;
-    ///
-    /// let be = BigEndian::new(0x12345678u32);
-    /// assert_eq!(be.raw_bytes(), [0x12, 0x34, 0x56, 0x78]);
-    /// ```
-    pub fn raw_bytes(self) -> T::ByteArray {
-        // Return the stored bytes directly
-        self.0
+        T::from_be(self.0)
     }
 }
 
@@ -267,20 +268,20 @@ impl<T: EndianConvert + Default> Default for BigEndian<T> {
 }
 
 impl<T: EndianConvert> AssociatedByteArray for BigEndian<T> {
-    type ByteArray = <T as EndianConvert>::ByteArray;
+    type ByteArray = <T as AssociatedByteArray>::ByteArray;
 }
 
 impl<T: EndianConvert> IntoByteArray for BigEndian<T> {
     fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored big-endian bytes directly (no conversion needed)
-        self.0
+        self.0.into_byte_array()
     }
 }
 
 impl<T: EndianConvert> FromByteArray for BigEndian<T> {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in big-endian format)
-        Self(byte_array)
+        Self(T::from_byte_array(byte_array))
     }
 }
 
@@ -312,12 +313,12 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 /// ## Basic usage
 ///
 /// ```
-/// use byteable::LittleEndian;
+/// use byteable::{LittleEndian, IntoByteArray};
 ///
 /// let value = LittleEndian::new(0x12345678u32);
 ///
 /// // The bytes are always stored in little-endian order
-/// assert_eq!(value.raw_bytes(), [0x78, 0x56, 0x34, 0x12]);
+/// assert_eq!(value.into_byte_array(), [0x78, 0x56, 0x34, 0x12]);
 ///
 /// // Get back the native value
 /// assert_eq!(value.get(), 0x12345678u32);
@@ -384,7 +385,7 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 /// ```
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct LittleEndian<T: EndianConvert>(T::ByteArray);
+pub struct LittleEndian<T: EndianConvert>(T);
 
 impl<T: fmt::Debug + EndianConvert> fmt::Debug for LittleEndian<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -426,14 +427,14 @@ impl<T: EndianConvert> LittleEndian<T> {
     /// # Examples
     ///
     /// ```
-    /// use byteable::LittleEndian;
+    /// use byteable::{LittleEndian, IntoByteArray};
     ///
     /// let le = LittleEndian::new(0x1234u16);
-    /// assert_eq!(le.raw_bytes(), [0x34, 0x12]);
+    /// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
     /// ```
     pub fn new(value: T) -> Self {
         // Convert to little-endian bytes and store internally
-        Self(value.to_le_bytes())
+        Self(value.to_le())
     }
 
     /// Extracts the native value from this `LittleEndian` wrapper.
@@ -450,24 +451,7 @@ impl<T: EndianConvert> LittleEndian<T> {
     /// ```
     pub fn get(self) -> T {
         // Convert from little-endian bytes back to native value
-        T::from_le_bytes(self.0)
-    }
-
-    /// Returns the raw bytes in little-endian order.
-    ///
-    /// This returns the actual byte representation without any conversion.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::LittleEndian;
-    ///
-    /// let le = LittleEndian::new(0x12345678u32);
-    /// assert_eq!(le.raw_bytes(), [0x78, 0x56, 0x34, 0x12]);
-    /// ```
-    pub fn raw_bytes(self) -> T::ByteArray {
-        // Return the stored bytes directly
-        self.0
+        T::from_le(self.0)
     }
 }
 
@@ -479,20 +463,20 @@ impl<T: EndianConvert + Default> Default for LittleEndian<T> {
 }
 
 impl<T: EndianConvert> AssociatedByteArray for LittleEndian<T> {
-    type ByteArray = <T as EndianConvert>::ByteArray;
+    type ByteArray = <T as AssociatedByteArray>::ByteArray;
 }
 
 impl<T: EndianConvert> IntoByteArray for LittleEndian<T> {
     fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored little-endian bytes directly (no conversion needed)
-        self.0
+        self.0.into_byte_array()
     }
 }
 
 impl<T: EndianConvert> FromByteArray for LittleEndian<T> {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in little-endian format)
-        Self(byte_array)
+        Self(T::from_byte_array(byte_array))
     }
 }
 
@@ -505,6 +489,8 @@ impl<T: EndianConvert> From<T> for LittleEndian<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::IntoByteArray;
+
     use super::{BigEndian, LittleEndian};
 
     #[test]
@@ -513,8 +499,8 @@ mod tests {
         let be_val = BigEndian::new(val);
 
         assert_eq!(be_val.get(), val);
-        assert_eq!(be_val.raw_bytes(), [1, 2, 3, 4]);
-        assert_eq!(u32::from_be_bytes(be_val.raw_bytes()), val);
+        assert_eq!(be_val.into_byte_array(), [1, 2, 3, 4]);
+        assert_eq!(u32::from_be_bytes(be_val.into_byte_array()), val);
     }
 
     #[test]
@@ -523,7 +509,7 @@ mod tests {
         let le_val = LittleEndian::new(val);
 
         assert_eq!(le_val.get(), val);
-        assert_eq!(le_val.raw_bytes(), [4, 3, 2, 1]);
-        assert_eq!(u32::from_le_bytes(le_val.raw_bytes()), val);
+        assert_eq!(le_val.into_byte_array(), [4, 3, 2, 1]);
+        assert_eq!(u32::from_le_bytes(le_val.into_byte_array()), val);
     }
 }

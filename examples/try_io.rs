@@ -71,7 +71,7 @@ impl TryFromByteArray for Temperature {
 impl TryIntoByteArray for Temperature {
     type Error = TemperatureError;
 
-    fn try_to_byte_array(self) -> Result<[u8; 4], Self::Error> {
+    fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
         // Validate before serialization (in case value was modified)
         if self.celsius > Self::MAX {
             return Err(TemperatureError::TooHot(self.celsius));

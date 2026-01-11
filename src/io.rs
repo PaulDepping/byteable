@@ -436,7 +436,7 @@ impl<T: Read> ReadTryByteable for T {}
 /// impl TryIntoByteArray for EvenU32 {
 ///     type Error = NotEvenError;
 ///     
-///     fn try_to_byte_array(self) -> Result<[u8; 4], Self::Error> {
+///     fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
 ///         if self.0 % 2 == 0 {
 ///             Ok(self.0.to_ne_bytes())
 ///         } else {
@@ -463,7 +463,7 @@ pub trait WriteTryByteable: Write {
     /// # Errors
     ///
     /// This method returns [`TryByteableError::Conversion`] if:
-    /// - The value could not be converted to bytes (`try_to_byte_array` failed)
+    /// - The value could not be converted to bytes (`try_into_byte_array` failed)
     ///
     /// This method returns [`TryByteableError::Io`] if:
     /// - Any underlying I/O error occurs while writing
@@ -488,7 +488,7 @@ pub trait WriteTryByteable: Write {
     ) -> Result<(), TryByteableError<T::Error>> {
         // Attempt to convert the data into its byte array representation
         let byte_array = data
-            .try_to_byte_array()
+            .try_into_byte_array()
             .map_err(TryByteableError::Conversion)?;
 
         // Write all bytes to the writer
@@ -665,7 +665,7 @@ mod tests {
     impl TryIntoByteArray for EvenU32 {
         type Error = ConversionError;
 
-        fn try_to_byte_array(self) -> Result<[u8; 4], Self::Error> {
+        fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
             if self.0 % 2 == 0 {
                 Ok(self.0.to_le_bytes())
             } else {

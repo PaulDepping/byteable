@@ -171,15 +171,15 @@
 //! The crate provides `BigEndian<T>` and `LittleEndian<T>` wrappers for handling byte order:
 //!
 //! ```
-//! use byteable::{BigEndian, LittleEndian};
+//! use byteable::{BigEndian, LittleEndian, IntoByteArray};
 //!
 //! // Create endian-aware values
 //! let big = BigEndian::new(0x12345678u32);
 //! let little = LittleEndian::new(0x12345678u32);
 //!
 //! // Get raw bytes (in specified endianness)
-//! assert_eq!(big.raw_bytes(), [0x12, 0x34, 0x56, 0x78]);
-//! assert_eq!(little.raw_bytes(), [0x78, 0x56, 0x34, 0x12]);
+//! assert_eq!(big.into_byte_array(), [0x12, 0x34, 0x56, 0x78]);
+//! assert_eq!(little.into_byte_array(), [0x78, 0x56, 0x34, 0x12]);
 //!
 //! // Convert back to native value
 //! assert_eq!(big.get(), 0x12345678u32);
