@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 #[derive(Clone, Copy, Byteable)]

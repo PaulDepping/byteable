@@ -51,7 +51,7 @@ use crate::{LittleEndian, ValidBytecastMarker, byte_array::ByteArray};
 /// ## With custom types using derive
 ///
 /// ```
-/// # #![cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, AssociatedByteArray};
 ///
 /// #[derive(Byteable, Clone, Copy)]
@@ -60,7 +60,6 @@ use crate::{LittleEndian, ValidBytecastMarker, byte_array::ByteArray};
 ///     y: u8,
 /// }
 ///
-/// # fn main() {
 /// // AssociatedByteArray is automatically implemented
 /// assert_eq!(Point::BYTE_SIZE, 2);
 /// # }
@@ -107,7 +106,7 @@ pub trait AssociatedByteArray {
 /// ## With custom types
 ///
 /// ```
-/// # #![cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, IntoByteArray};
 ///
 /// #[derive(Byteable, Clone, Copy)]
@@ -118,7 +117,6 @@ pub trait AssociatedByteArray {
 ///     a: u8,
 /// }
 ///
-/// # fn main() {
 /// let color = Color { r: 255, g: 128, b: 64, a: 255 };
 /// let bytes = color.into_byte_array();
 /// assert_eq!(bytes, [255, 128, 64, 255]);
@@ -165,7 +163,7 @@ pub trait IntoByteArray: AssociatedByteArray {
 /// ## With custom types
 ///
 /// ```
-/// # #![cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, FromByteArray};
 ///
 /// #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
@@ -176,8 +174,7 @@ pub trait IntoByteArray: AssociatedByteArray {
 ///     a: u8,
 /// }
 ///
-/// # fn main() {
-/// let bytes = [255, 128, 64, 255];
+/// let bytes = [255_u8, 128, 64, 255];
 /// let color = Color::from_byte_array(bytes);
 /// assert_eq!(color, Color { r: 255, g: 128, b: 64, a: 255 });
 /// # }
@@ -269,24 +266,20 @@ impl<T: FromByteArray> TryFromByteArray for T {
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, HasRawType};
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(Clone, Copy, Byteable)]
 /// struct Inner {
 ///     value: u8,
 /// }
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(Clone, Copy, Byteable)]
 /// struct Outer {
 ///     #[byteable(transparent)]
 ///     inner: Inner,  // Uses Inner::Raw instead of [u8; 1]
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
 /// // Both Inner and Outer automatically implement HasRawType via derive(Byteable)
 /// // The generated raw types are properly nested and type-safe
 /// # }
@@ -313,10 +306,9 @@ pub trait HasRawType:
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, TryHasRawType, TryFromByteArray, IntoByteArray};
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
 /// #[repr(u8)]
 /// enum Status {
@@ -325,8 +317,6 @@ pub trait HasRawType:
 ///     Completed = 2,
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
 /// // Enums automatically implement TryHasRawType
 /// // Converting enum to raw (always succeeds)
 /// let status = Status::Running;
@@ -399,7 +389,7 @@ impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
 /// # Examples
 ///
 /// ```
-/// use byteable::{Byteable, unsafe_byteable_transmute, IntoByteArray};
+/// use byteable::{unsafe_byteable_transmute, IntoByteArray};
 ///
 /// #[derive(Clone, Copy)]
 /// #[repr(transparent)]
@@ -469,13 +459,11 @@ macro_rules! unsafe_byteable_transmute {
 /// # Examples
 ///
 /// ```
-/// use byteable::{Byteable, LittleEndian, impl_byteable_via, IntoByteArray, FromByteArray};
-///
-/// # #[cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
+/// use byteable::{LittleEndian, impl_byteable_via, IntoByteArray, FromByteArray};
 /// use byteable::UnsafeByteableTransmute;
 ///
 /// // Raw type with explicit byte layout
-/// # #[cfg(feature = "derive")]
 /// #[derive(byteable::UnsafeByteableTransmute, Clone, Copy)]
 /// #[repr(C, packed)]
 /// struct PointRaw {
@@ -490,33 +478,20 @@ macro_rules! unsafe_byteable_transmute {
 ///     y: i32,
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// // Implement conversions
 /// impl From<Point> for PointRaw {
 ///     fn from(p: Point) -> Self {
-///         Self {
-///             x: p.x.into(),
-///             y: p.y.into(),
-///         }
+///         Self { x: p.x.into(), y: p.y.into() }
 ///     }
 /// }
 ///
-/// # #[cfg(feature = "derive")]
 /// impl From<PointRaw> for Point {
 ///     fn from(raw: PointRaw) -> Self {
-///         Self {
-///             x: raw.x.get(),
-///             y: raw.y.get(),
-///         }
+///         Self { x: raw.x.get(), y: raw.y.get() }
 ///     }
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// // Now Point implements Byteable via PointRaw
 /// impl_byteable_via!(Point => PointRaw);
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
 /// let point = Point { x: 100, y: 200 };
 /// let bytes = point.into_byte_array();
 /// let restored = Point::from_byte_array(bytes);
@@ -807,10 +782,9 @@ impl From<i128> for Discriminant {
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, TryFromByteArray, IntoByteArray};
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 /// #[repr(u8)]
 /// enum Status {
@@ -818,8 +792,6 @@ impl From<i128> for Discriminant {
 ///     Running = 1,
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
 /// // Valid discriminant
 /// let bytes = [1];
 /// let status = Status::try_from_byte_array(bytes).unwrap();
@@ -866,7 +838,7 @@ impl core::fmt::Display for EnumFromBytesError {
 #[cfg(feature = "std")]
 impl std::error::Error for EnumFromBytesError {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "derive"))]
 mod tests {
     use crate::{AssociatedByteArray, BigEndian, FromByteArray, IntoByteArray, LittleEndian};
     use byteable_derive::UnsafeByteableTransmute;

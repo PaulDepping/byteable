@@ -82,6 +82,7 @@
 //! ### Example: Network Protocol
 //!
 //! ```no_run
+//! #[cfg(feature = "derive")] {
 //! use byteable::Byteable;
 //!
 //! #[derive(Byteable, Debug, Clone, Copy)]
@@ -93,13 +94,13 @@
 //!     #[byteable(little_endian)]
 //!     payload_len: u16, // Little-endian for payload
 //! }
-//! # fn main() {}
+//! # }
 //! ```
 //!
 //! ### Example: Working with TCP Streams
 //!
-//! ```no_run,ignore
-//! # #![cfg(feature = "std")]
+//! ```no_run
+//! # #[cfg(all(feature = "std", feature = "derive"))] {
 //! use byteable::{Byteable, ReadByteable, WriteByteable};
 //! use std::net::TcpStream;
 //!
@@ -123,6 +124,7 @@
 //! let response: Message = stream.read_byteable()?;
 //! # Ok(())
 //! # }
+//! # }
 //! ```
 //!
 //! ## Async I/O (with `tokio` feature)
@@ -138,8 +140,8 @@
 //! Example usage:
 //!
 //! ```no_run
-//! # #[cfg(feature = "tokio")]
-//! {
+//! # #[cfg(all(feature = "tokio", feature = "derive"))]
+//! # {
 //! use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable};
 //! use tokio::net::TcpStream;
 //!
@@ -162,7 +164,6 @@
 //! let response: AsyncPacket = stream.read_byteable().await?;
 //! # Ok(())
 //! # }
-//! # fn main() {}
 //! # }
 //! ```
 //!
@@ -191,10 +192,9 @@
 //! The `#[derive(Byteable)]` macro supports C-like enums with explicit discriminants:
 //!
 //! ```
-//! # #[cfg(feature = "derive")]
+//! # #[cfg(feature = "derive")] {
 //! use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 //!
-//! # #[cfg(feature = "derive")]
 //! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 //! #[repr(u8)]
 //! enum Status {
@@ -204,23 +204,18 @@
 //!     Failed = 3,
 //! }
 //!
-//! # #[cfg(feature = "derive")]
-//! # fn main() -> Result<(), byteable::EnumFromBytesError> {
 //! let status = Status::Running;
 //! let bytes = status.into_byte_array();
 //! assert_eq!(bytes, [1]);
 //!
-//! // Use TryFromByteArray for fallible conversion
-//! let restored = Status::try_from_byte_array(bytes)?;
+//!  // Use TryFromByteArray for fallible conversion
+//! let restored = Status::try_from_byte_array(bytes).unwrap();
 //! assert_eq!(restored, Status::Running);
 //!
-//! // Invalid discriminants return an error
+//!  // Invalid discriminants return an error
 //! let invalid = Status::try_from_byte_array([255]);
 //! assert!(invalid.is_err());
-//! # Ok(())
 //! # }
-//! # #[cfg(not(feature = "derive"))]
-//! # fn main() {}
 //! ```
 //!
 //! ### Enum with Endianness
@@ -228,10 +223,9 @@
 //! Enums support type-level endianness attributes for multi-byte discriminants:
 //!
 //! ```
-//! # #[cfg(feature = "derive")]
+//! # #[cfg(feature = "derive")] {
 //! use byteable::Byteable;
 //!
-//! # #[cfg(feature = "derive")]
 //! // Little-endian (common for file formats)
 //! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 //! #[repr(u16)]
@@ -242,7 +236,6 @@
 //!     Pause = 0x3000,
 //! }
 //!
-//! # #[cfg(feature = "derive")]
 //! // Big-endian (common for network protocols)
 //! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 //! #[repr(u32)]
@@ -252,7 +245,7 @@
 //!     NotFound = 404,
 //!     InternalError = 500,
 //! }
-//! # fn main() {}
+//! # }
 //! ```
 //!
 //! ### Enum Requirements
@@ -271,10 +264,9 @@
 //! Use the `#[byteable(try_transparent)]` attribute for enum fields in structs:
 //!
 //! ```
-//! # #[cfg(feature = "derive")]
+//! # #[cfg(feature = "derive")] {
 //! use byteable::Byteable;
 //!
-//! # #[cfg(feature = "derive")]
 //! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 //! #[repr(u8)]
 //! enum MessageType {
@@ -283,7 +275,6 @@
 //!     ErrorMsg = 3,
 //! }
 //!
-//! # #[cfg(feature = "derive")]
 //! #[derive(Byteable, Clone, Copy)]
 //! struct Message {
 //!     #[byteable(try_transparent)]
@@ -292,7 +283,7 @@
 //!     sequence: u32,
 //!     payload: [u8; 16],
 //! }
-//! # fn main() {}
+//! # }
 //! ```
 //!
 //! ## Safety Considerations
@@ -316,7 +307,7 @@
 //! endianness conversion via attributes:
 //!
 //! ```
-//! #![cfg(feature = "derive")]
+//! # #[cfg(feature = "derive")] {
 //! use byteable::{Byteable, IntoByteArray, FromByteArray};
 //!
 //! #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
@@ -327,7 +318,6 @@
 //!     y: i32,
 //! }
 //!
-//! # fn main() {
 //! let point = Point { x: 10, y: 20 };
 //! let bytes = point.into_byte_array();
 //! let restored = Point::from_byte_array(bytes);

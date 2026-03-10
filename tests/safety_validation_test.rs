@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 /// Tests for compile-time safety validation using ValidBytecastMarker
 ///
 /// This test demonstrates that the Byteable macros now enforce compile-time

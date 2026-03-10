@@ -101,10 +101,8 @@ use crate::{BigEndian, LittleEndian};
 /// ## Correct usage in structs:
 ///
 /// ```
-/// # #![cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::Byteable;
-///
-/// // CORRECT: Explicit endianness
 /// #[derive(Clone, Copy, Byteable)]
 /// struct GoodPacket {
 ///     id: u8,  // Single byte - OK
@@ -113,10 +111,11 @@ use crate::{BigEndian, LittleEndian};
 ///     #[byteable(big_endian)]
 ///     checksum: u32,  // Multi-byte with explicit endianness
 /// }
-/// # fn main() {}
+/// # }
 /// ```
 ///
-/// ```compile_fail
+/// ```compile_fail,cfg(feature="derive")
+/// # #[cfg(feature = "derive")] {
 /// use byteable::Byteable;
 ///
 /// // WRONG: Will not compile - no endianness specified
@@ -126,7 +125,11 @@ use crate::{BigEndian, LittleEndian};
 ///     length: u16,     // Error: needs endianness wrapper or attribute
 ///     checksum: u32,   // Error: needs endianness wrapper or attribute
 /// }
-/// # fn main() {}
+/// # }
+/// # #[cfg(not(feature = "derive"))] {
+/// # let x = 5;
+/// # x += 2; // shouldn't compile!
+/// # }
 /// ```
 pub unsafe trait ValidBytecastMarker {}
 

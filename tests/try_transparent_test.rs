@@ -2,6 +2,7 @@
 //!
 //! This test demonstrates how enums can be used with the TryHasRawType trait
 //! for fallible conversion from raw representation.
+#![cfg(feature = "derive")]
 
 use byteable::{Byteable, IntoByteArray, TryFromByteArray, TryHasRawType};
 

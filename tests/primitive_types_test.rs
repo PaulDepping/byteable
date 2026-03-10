@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use byteable::{AssociatedByteArray, IntoByteArray, TryFromByteArray};
 
 // ============================================================================

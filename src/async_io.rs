@@ -97,12 +97,10 @@ pub trait AsyncReadByteable: tokio::io::AsyncReadExt + Unpin {
     /// # Examples
     ///
     /// ```no_run
-    /// # #[cfg(feature = "tokio")]
+    /// # #![cfg(feature = "tokio")]
     /// use byteable::{Byteable, AsyncReadByteable};
-    /// # #[cfg(feature = "tokio")]
     /// use std::io::Cursor;
     ///
-    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> std::io::Result<()> {
     /// let data = vec![0x12, 0x34, 0x56, 0x78];
@@ -113,8 +111,6 @@ pub trait AsyncReadByteable: tokio::io::AsyncReadExt + Unpin {
     /// assert_eq!(value, 0x78563412);
     /// # Ok(())
     /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
     /// ```
     fn read_byteable<T: FromByteArray>(&mut self) -> impl Future<Output = std::io::Result<T>> {
         async move {
@@ -339,12 +335,10 @@ pub trait AsyncReadTryByteable: tokio::io::AsyncReadExt + Unpin {
     /// # Examples
     ///
     /// ```no_run
-    /// # #[cfg(feature = "tokio")]
+    /// # #![cfg(feature = "tokio")]
     /// use byteable::AsyncReadTryByteable;
-    /// # #[cfg(feature = "tokio")]
     /// use std::io::Cursor;
     ///
-    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> std::io::Result<()> {
     /// let data = vec![42, 0, 0, 0];
@@ -356,8 +350,6 @@ pub trait AsyncReadTryByteable: tokio::io::AsyncReadExt + Unpin {
     /// assert_eq!(value, 42);
     /// # Ok(())
     /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
     /// ```
     fn read_try_byteable<T: TryFromByteArray>(
         &mut self,
@@ -457,12 +449,10 @@ pub trait AsyncWriteTryByteable: tokio::io::AsyncWriteExt + Unpin {
     /// # Examples
     ///
     /// ```no_run
-    /// # #[cfg(feature = "tokio")]
+    /// # #![cfg(feature = "tokio")]
     /// use byteable::AsyncWriteTryByteable;
-    /// # #[cfg(feature = "tokio")]
     /// use std::io::Cursor;
     ///
-    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> std::io::Result<()> {
     /// let mut buffer = Cursor::new(Vec::new());
@@ -474,8 +464,6 @@ pub trait AsyncWriteTryByteable: tokio::io::AsyncWriteExt + Unpin {
     /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
     /// # Ok(())
     /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
     /// ```
     fn write_try_byteable<T: TryIntoByteArray>(
         &mut self,

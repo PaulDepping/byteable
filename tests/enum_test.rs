@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]

@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.24.1"
+version = "0.24.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -25,11 +25,23 @@ thiserror = "2.0.17"
 
 [[example]]
 name = "cursor_usage"
-required-features = ["std"]
+required-features = ["std", "derive"]
 
 [[example]]
 name = "file_io"
-required-features = ["std"]
+required-features = ["std", "derive"]
+
+[[example]]
+name = "simple_usage"
+required-features = ["derive"]
+
+[[example]]
+name = "enum_endianness"
+required-features = ["derive"]
+
+[[example]]
+name = "try_io"
+required-features = ["std", "derive"]
 
 [[bench]]
 name = "benchmarks"

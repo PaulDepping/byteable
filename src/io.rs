@@ -20,10 +20,10 @@ use std::io::{Read, Write};
 /// ## Reading from a file
 ///
 /// ```no_run
+/// # #![cfg(feature = "derive")]
 /// use byteable::{Byteable, ReadByteable};
 /// use std::fs::File;
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(byteable::Byteable, Debug)]
 /// struct Header {
 ///     #[byteable(big_endian)]
@@ -35,11 +35,9 @@ use std::io::{Read, Write};
 /// }
 ///
 /// # fn main() -> std::io::Result<()> {
-/// # #[cfg(feature = "derive")] {
 /// let mut file = File::open("data.bin")?;
 /// let header: Header = file.read_byteable()?;
 /// println!("Header: {:?}", header);
-/// # }
 /// # Ok(())
 /// # }
 /// ```
@@ -130,10 +128,10 @@ impl<T: Read> ReadByteable for T {}
 /// ## Writing to a file
 ///
 /// ```no_run
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{Byteable, WriteByteable};
 /// use std::fs::File;
 ///
-/// # #[cfg(feature = "derive")]
 /// #[derive(byteable::Byteable)]
 /// struct Header {
 ///     #[byteable(big_endian)]
@@ -145,7 +143,6 @@ impl<T: Read> ReadByteable for T {}
 /// }
 ///
 /// # fn main() -> std::io::Result<()> {
-/// # #[cfg(feature = "derive")] {
 /// let header = Header {
 ///     magic: 0x12345678,
 ///     version: 1,
@@ -154,8 +151,8 @@ impl<T: Read> ReadByteable for T {}
 ///
 /// let mut file = File::create("output.bin")?;
 /// file.write_byteable(header)?;
-/// # }
 /// # Ok(())
+/// # }
 /// # }
 /// ```
 ///
@@ -328,7 +325,7 @@ impl<E> From<std::io::Error> for TryByteableError<E> {
 ///
 /// impl TryFromByteArray for EvenU32 {
 ///     type Error = NotEvenError;
-///     
+///
 ///     fn try_from_byte_array(bytes: [u8; 4]) -> Result<Self, Self::Error> {
 ///         let value = u32::from_ne_bytes(bytes);
 ///         if value % 2 == 0 {
@@ -439,7 +436,7 @@ impl<T: Read> ReadTryByteable for T {}
 ///
 /// impl TryIntoByteArray for EvenU32 {
 ///     type Error = NotEvenError;
-///     
+///
 ///     fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
 ///         if self.0 % 2 == 0 {
 ///             Ok(self.0.to_ne_bytes())

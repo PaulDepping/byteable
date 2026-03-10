@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // Test 1: Private struct (default visibility)

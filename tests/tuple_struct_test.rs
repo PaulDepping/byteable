@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // Simple tuple struct with basic types
