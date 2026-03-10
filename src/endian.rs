@@ -55,18 +55,22 @@ macro_rules! impl_endianable_int {
     ($($type:ty),+) => {
         $(
             impl $crate::EndianConvert for $type {
+                #[inline]
                 fn from_le(value: Self) -> Self {
                     <$type>::from_le(value)
                 }
 
+                #[inline]
                 fn from_be(value: Self) -> Self {
                     <$type>::from_be(value)
                 }
 
+                #[inline]
                 fn to_le(self) -> Self {
                     <$type>::to_le(self)
                 }
 
+                #[inline]
                 fn to_be(self) -> Self {
                     <$type>::to_be(self)
                 }
@@ -79,36 +83,44 @@ impl_endianable_int!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // Float implementations use to_bits/from_bits for endianness conversion
 impl EndianConvert for f32 {
+    #[inline]
     fn from_le(value: Self) -> Self {
         Self::from_bits(u32::from_le(value.to_bits()))
     }
 
+    #[inline]
     fn from_be(value: Self) -> Self {
         Self::from_bits(u32::from_be(value.to_bits()))
     }
 
+    #[inline]
     fn to_le(self) -> Self {
         Self::from_bits(self.to_bits().to_le())
     }
 
+    #[inline]
     fn to_be(self) -> Self {
         Self::from_bits(self.to_bits().to_be())
     }
 }
 
 impl EndianConvert for f64 {
+    #[inline]
     fn from_le(value: Self) -> Self {
         Self::from_bits(u64::from_le(value.to_bits()))
     }
 
+    #[inline]
     fn from_be(value: Self) -> Self {
         Self::from_bits(u64::from_be(value.to_bits()))
     }
 
+    #[inline]
     fn to_le(self) -> Self {
         Self::from_bits(self.to_bits().to_le())
     }
 
+    #[inline]
     fn to_be(self) -> Self {
         Self::from_bits(self.to_bits().to_be())
     }
@@ -193,12 +205,14 @@ impl EndianConvert for f64 {
 pub struct BigEndian<T: EndianConvert>(pub(crate) T);
 
 impl<T: fmt::Debug + EndianConvert> fmt::Debug for BigEndian<T> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("BigEndian").field(&self.get()).finish()
     }
 }
 
 impl<T: PartialEq + EndianConvert> PartialEq for BigEndian<T> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.get() == other.get()
     }
@@ -207,18 +221,21 @@ impl<T: PartialEq + EndianConvert> PartialEq for BigEndian<T> {
 impl<T: Eq + EndianConvert> Eq for BigEndian<T> {}
 
 impl<T: PartialOrd + EndianConvert> PartialOrd for BigEndian<T> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         self.get().partial_cmp(&other.get())
     }
 }
 
 impl<T: Ord + EndianConvert> Ord for BigEndian<T> {
+    #[inline]
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.get().cmp(&other.get())
     }
 }
 
 impl<T: Hash + EndianConvert> Hash for BigEndian<T> {
+    #[inline]
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
@@ -237,6 +254,7 @@ impl<T: EndianConvert> BigEndian<T> {
     /// let be = BigEndian::new(0x1234u16);
     /// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
     /// ```
+    #[inline]
     pub fn new(value: T) -> Self {
         // Convert to big-endian bytes and store internally
         Self(value.to_be())
@@ -254,6 +272,7 @@ impl<T: EndianConvert> BigEndian<T> {
     /// let be = BigEndian::new(42u32);
     /// assert_eq!(be.get(), 42);
     /// ```
+    #[inline]
     pub fn get(self) -> T {
         // Convert from big-endian bytes back to native value
         T::from_be(self.0)
@@ -261,6 +280,7 @@ impl<T: EndianConvert> BigEndian<T> {
 }
 
 impl<T: EndianConvert + Default> Default for BigEndian<T> {
+    #[inline]
     fn default() -> Self {
         // Create a BigEndian wrapper with the default value of T
         Self::new(T::default())
@@ -272,6 +292,7 @@ impl<T: EndianConvert> AssociatedByteArray for BigEndian<T> {
 }
 
 impl<T: EndianConvert> IntoByteArray for BigEndian<T> {
+    #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored big-endian bytes directly (no conversion needed)
         self.0.into_byte_array()
@@ -279,6 +300,7 @@ impl<T: EndianConvert> IntoByteArray for BigEndian<T> {
 }
 
 impl<T: EndianConvert> FromByteArray for BigEndian<T> {
+    #[inline]
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in big-endian format)
         Self(T::from_byte_array(byte_array))
@@ -286,6 +308,7 @@ impl<T: EndianConvert> FromByteArray for BigEndian<T> {
 }
 
 impl<T: EndianConvert> From<T> for BigEndian<T> {
+    #[inline]
     fn from(value: T) -> Self {
         // Convenient conversion from native value to BigEndian
         BigEndian::new(value)
@@ -388,12 +411,14 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 pub struct LittleEndian<T: EndianConvert>(T);
 
 impl<T: fmt::Debug + EndianConvert> fmt::Debug for LittleEndian<T> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("LittleEndian").field(&self.get()).finish()
     }
 }
 
 impl<T: PartialEq + EndianConvert> PartialEq for LittleEndian<T> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.get() == other.get()
     }
@@ -402,18 +427,21 @@ impl<T: PartialEq + EndianConvert> PartialEq for LittleEndian<T> {
 impl<T: Eq + EndianConvert> Eq for LittleEndian<T> {}
 
 impl<T: PartialOrd + EndianConvert> PartialOrd for LittleEndian<T> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         self.get().partial_cmp(&other.get())
     }
 }
 
 impl<T: Ord + EndianConvert> Ord for LittleEndian<T> {
+    #[inline]
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.get().cmp(&other.get())
     }
 }
 
 impl<T: Hash + EndianConvert> Hash for LittleEndian<T> {
+    #[inline]
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
@@ -432,6 +460,7 @@ impl<T: EndianConvert> LittleEndian<T> {
     /// let le = LittleEndian::new(0x1234u16);
     /// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
     /// ```
+    #[inline]
     pub fn new(value: T) -> Self {
         // Convert to little-endian bytes and store internally
         Self(value.to_le())
@@ -449,6 +478,7 @@ impl<T: EndianConvert> LittleEndian<T> {
     /// let le = LittleEndian::new(42u32);
     /// assert_eq!(le.get(), 42);
     /// ```
+    #[inline]
     pub fn get(self) -> T {
         // Convert from little-endian bytes back to native value
         T::from_le(self.0)
@@ -456,6 +486,7 @@ impl<T: EndianConvert> LittleEndian<T> {
 }
 
 impl<T: EndianConvert + Default> Default for LittleEndian<T> {
+    #[inline]
     fn default() -> Self {
         // Create a LittleEndian wrapper with the default value of T
         Self::new(T::default())
@@ -467,6 +498,7 @@ impl<T: EndianConvert> AssociatedByteArray for LittleEndian<T> {
 }
 
 impl<T: EndianConvert> IntoByteArray for LittleEndian<T> {
+    #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
         // Return the stored little-endian bytes directly (no conversion needed)
         self.0.into_byte_array()
@@ -474,6 +506,7 @@ impl<T: EndianConvert> IntoByteArray for LittleEndian<T> {
 }
 
 impl<T: EndianConvert> FromByteArray for LittleEndian<T> {
+    #[inline]
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Wrap the bytes directly (they're already in little-endian format)
         Self(T::from_byte_array(byte_array))
@@ -481,6 +514,7 @@ impl<T: EndianConvert> FromByteArray for LittleEndian<T> {
 }
 
 impl<T: EndianConvert> From<T> for LittleEndian<T> {
+    #[inline]
     fn from(value: T) -> Self {
         // Convenient conversion from native value to LittleEndian
         LittleEndian::new(value)

@@ -240,6 +240,7 @@ pub trait TryFromByteArray: AssociatedByteArray + Sized {
 impl<T: IntoByteArray> TryIntoByteArray for T {
     type Error = core::convert::Infallible;
 
+    #[inline]
     fn try_into_byte_array(self) -> Result<Self::ByteArray, Self::Error> {
         Ok(self.into_byte_array())
     }
@@ -248,6 +249,7 @@ impl<T: IntoByteArray> TryIntoByteArray for T {
 impl<T: FromByteArray> TryFromByteArray for T {
     type Error = core::convert::Infallible;
 
+    #[inline]
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
         Ok(Self::from_byte_array(byte_array))
     }
@@ -367,12 +369,14 @@ impl<T: AssociatedByteArray, const SIZE: usize> AssociatedByteArray for [T; SIZE
 }
 
 impl<T: IntoByteArray, const SIZE: usize> IntoByteArray for [T; SIZE] {
+    #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
         // Convert each element to its byte array representation
         self.map(T::into_byte_array)
     }
 }
 impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
+    #[inline]
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
         // Convert each byte array back to its element type
         byte_array.map(T::from_byte_array)
@@ -431,11 +435,13 @@ macro_rules! unsafe_byteable_transmute {
             }
 
             impl $crate::IntoByteArray for $type {
+                #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     unsafe { ::core::mem::transmute(self) }
                 }
             }
             impl $crate::FromByteArray for $type {
+                #[inline]
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     unsafe { ::core::mem::transmute(byte_array) }
                 }
@@ -525,6 +531,7 @@ macro_rules! impl_byteable_via {
         }
 
         impl $crate::IntoByteArray for $regular_type {
+            #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 let raw: $raw_type = self.into();
                 raw.into_byte_array()
@@ -532,6 +539,7 @@ macro_rules! impl_byteable_via {
         }
 
         impl $crate::FromByteArray for $regular_type {
+            #[inline]
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                 let raw = <$raw_type>::from_byte_array(byte_array);
                 raw.into()
@@ -548,12 +556,14 @@ macro_rules! impl_byteable_primitive {
             }
 
             impl $crate::IntoByteArray for $type {
+                #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     <$type>::to_ne_bytes(self)
                 }
             }
 
             impl $crate::FromByteArray for $type {
+                #[inline]
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     <$type>::from_ne_bytes(byte_array)
                 }
@@ -573,6 +583,7 @@ unsafe impl ValidBytecastMarker for BoolRaw {}
 unsafe_byteable_transmute!(BoolRaw);
 
 impl From<bool> for BoolRaw {
+    #[inline]
     fn from(value: bool) -> Self {
         Self(value as u8)
     }
@@ -581,6 +592,7 @@ impl From<bool> for BoolRaw {
 impl TryFrom<BoolRaw> for bool {
     type Error = EnumFromBytesError;
 
+    #[inline]
     fn try_from(value: BoolRaw) -> Result<Self, Self::Error> {
         match value.0 {
             0 => Ok(false),
@@ -598,6 +610,7 @@ impl AssociatedByteArray for bool {
 }
 
 impl IntoByteArray for bool {
+    #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
         let raw: <Self as TryHasRawType>::Raw = self.into();
         raw.into_byte_array()
@@ -607,6 +620,7 @@ impl IntoByteArray for bool {
 impl TryFromByteArray for bool {
     type Error = EnumFromBytesError;
 
+    #[inline]
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
         let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
         raw.try_into()
@@ -628,6 +642,7 @@ unsafe impl ValidBytecastMarker for CharRaw {}
 unsafe_byteable_transmute!(CharRaw);
 
 impl From<char> for CharRaw {
+    #[inline]
     fn from(value: char) -> Self {
         Self((value as u32).into())
     }
@@ -636,6 +651,7 @@ impl From<char> for CharRaw {
 impl TryFrom<CharRaw> for char {
     type Error = EnumFromBytesError;
 
+    #[inline]
     fn try_from(value: CharRaw) -> Result<Self, Self::Error> {
         let num = value.0.get();
         match char::from_u32(num) {
@@ -653,6 +669,7 @@ impl AssociatedByteArray for char {
 }
 
 impl IntoByteArray for char {
+    #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
         let raw: <Self as TryHasRawType>::Raw = self.into();
         raw.into_byte_array()
@@ -662,6 +679,7 @@ impl IntoByteArray for char {
 impl TryFromByteArray for char {
     type Error = EnumFromBytesError;
 
+    #[inline]
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
         let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
         raw.try_into()
@@ -709,60 +727,70 @@ impl core::fmt::Display for Discriminant {
 
 // Implement From for all supported integer types
 impl From<u8> for Discriminant {
+    #[inline]
     fn from(v: u8) -> Self {
         Discriminant::U8(v)
     }
 }
 
 impl From<i8> for Discriminant {
+    #[inline]
     fn from(v: i8) -> Self {
         Discriminant::I8(v)
     }
 }
 
 impl From<u16> for Discriminant {
+    #[inline]
     fn from(v: u16) -> Self {
         Discriminant::U16(v)
     }
 }
 
 impl From<i16> for Discriminant {
+    #[inline]
     fn from(v: i16) -> Self {
         Discriminant::I16(v)
     }
 }
 
 impl From<u32> for Discriminant {
+    #[inline]
     fn from(v: u32) -> Self {
         Discriminant::U32(v)
     }
 }
 
 impl From<i32> for Discriminant {
+    #[inline]
     fn from(v: i32) -> Self {
         Discriminant::I32(v)
     }
 }
 
 impl From<u64> for Discriminant {
+    #[inline]
     fn from(v: u64) -> Self {
         Discriminant::U64(v)
     }
 }
 
 impl From<i64> for Discriminant {
+    #[inline]
     fn from(v: i64) -> Self {
         Discriminant::I64(v)
     }
 }
 
 impl From<u128> for Discriminant {
+    #[inline]
     fn from(v: u128) -> Self {
         Discriminant::U128(v)
     }
 }
 
 impl From<i128> for Discriminant {
+    #[inline]
     fn from(v: i128) -> Self {
         Discriminant::I128(v)
     }
@@ -813,6 +841,7 @@ pub struct EnumFromBytesError {
 
 impl EnumFromBytesError {
     /// Creates a new `EnumFromBytesError` with the given invalid discriminant and type name.
+    #[inline]
     pub fn new<T: Into<Discriminant>>(
         invalid_discriminant: T,
         enum_type_name: &'static str,

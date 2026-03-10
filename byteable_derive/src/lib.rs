@@ -267,6 +267,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 
         impl #impl_generics #byteable_crate::IntoByteArray for #ident #type_generics #extended_where_clause {
             // Convert the struct to bytes using transmute (unsafe but zero-cost)
+            #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 unsafe { ::core::mem::transmute(self) }
             }
@@ -275,6 +276,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 
         impl #impl_generics #byteable_crate::FromByteArray for #ident #type_generics #extended_where_clause {
             // Convert bytes back to the struct using transmute (unsafe but zero-cost)
+            #[inline]
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                 unsafe { ::core::mem::transmute(byte_array) }
             }
@@ -444,12 +446,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             }
 
             impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     []
                 }
             }
 
             impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+                #[inline]
                 fn from_byte_array(_byte_array: Self::ByteArray) -> Self {
                     #original_name
                 }
@@ -671,12 +675,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         unsafe { ::core::mem::transmute(self) }
                     }
                 }
 
                 impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                         unsafe { ::core::mem::transmute(byte_array) }
                     }
@@ -684,6 +690,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // From original to raw (always infallible)
                 impl From<#original_name> for #raw_name {
+                    #[inline]
                     fn from(value: #original_name) -> Self {
                         Self(#(#from_original_conversions),*)
                     }
@@ -693,6 +700,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 impl TryFrom<#raw_name> for #original_name {
                     type Error = #byteable_crate::EnumFromBytesError;
 
+                    #[inline]
                     fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                         Ok(Self(#(#from_raw_conversions),*))
                     }
@@ -703,6 +711,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         let raw: #raw_name = self.into();
                         raw.into_byte_array()
@@ -713,6 +722,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
                     type Error = #byteable_crate::EnumFromBytesError;
 
+                    #[inline]
                     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
                         let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
                         raw.try_into()
@@ -745,12 +755,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         unsafe { ::core::mem::transmute(self) }
                     }
                 }
 
                 impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                         unsafe { ::core::mem::transmute(byte_array) }
                     }
@@ -758,6 +770,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // From original to raw
                 impl From<#original_name> for #raw_name {
+                    #[inline]
                     fn from(value: #original_name) -> Self {
                         Self(#(#from_original_conversions),*)
                     }
@@ -765,6 +778,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // From raw to original
                 impl From<#raw_name> for #original_name {
+                    #[inline]
                     fn from(value: #raw_name) -> Self {
                         Self(#(#from_raw_conversions),*)
                     }
@@ -775,6 +789,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         let raw: #raw_name = self.into();
                         raw.into_byte_array()
@@ -782,6 +797,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+                    #[inline]
                     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                         let raw = <#raw_name>::from_byte_array(byte_array);
                         raw.into()
@@ -818,12 +834,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         unsafe { ::core::mem::transmute(self) }
                     }
                 }
 
                 impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                    #[inline]
                     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                         unsafe { ::core::mem::transmute(byte_array) }
                     }
@@ -831,6 +849,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // From original to raw (always infallible)
                 impl From<#original_name> for #raw_name {
+                    #[inline]
                     fn from(value: #original_name) -> Self {
                         Self {
                             #(#from_original_conversions),*
@@ -842,6 +861,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 impl TryFrom<#raw_name> for #original_name {
                     type Error = #byteable_crate::EnumFromBytesError;
 
+                    #[inline]
                     fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                         Ok(Self {
                             #(#from_raw_conversions),*
@@ -854,6 +874,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
 
                 impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                    #[inline]
                     fn into_byte_array(self) -> Self::ByteArray {
                         let raw: #raw_name = self.into();
                         raw.into_byte_array()
@@ -864,6 +885,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
                     type Error = #byteable_crate::EnumFromBytesError;
 
+                    #[inline]
                     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
                         let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
                         raw.try_into()
@@ -897,12 +919,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             }
 
             impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+                #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     unsafe { ::core::mem::transmute(self) }
                 }
             }
 
             impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+                #[inline]
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     unsafe { ::core::mem::transmute(byte_array) }
                 }
@@ -910,6 +934,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
             // From original to raw
             impl From<#original_name> for #raw_name {
+                #[inline]
                 fn from(value: #original_name) -> Self {
                     Self {
                         #(#from_original_conversions),*
@@ -919,6 +944,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
             // From raw to original
             impl From<#raw_name> for #original_name {
+                #[inline]
                 fn from(value: #raw_name) -> Self {
                     Self {
                         #(#from_raw_conversions),*
@@ -931,6 +957,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             }
 
             impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+                #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     let raw: #raw_name = self.into();
                     raw.into_byte_array()
@@ -938,6 +965,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             }
 
             impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+                #[inline]
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                     let raw = <#raw_name>::from_byte_array(byte_array);
                     raw.into()
@@ -1091,12 +1119,14 @@ fn handle_enum_derive(
         }
 
         impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
+            #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 unsafe { ::core::mem::transmute(self) }
             }
         }
 
         impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
+            #[inline]
             fn from_byte_array(byte_array: Self::ByteArray) -> Self {
                 unsafe { ::core::mem::transmute(byte_array) }
             }
@@ -1104,6 +1134,7 @@ fn handle_enum_derive(
 
         // From original enum to raw
         impl From<#enum_name> for #raw_name {
+            #[inline]
             fn from(value: #enum_name) -> Self {
                 // Convert enum to its discriminant value
                 let discriminant: #repr_ty = value as _;
@@ -1116,6 +1147,7 @@ fn handle_enum_derive(
         impl TryFrom<#raw_name> for #enum_name {
             type Error = #byteable_crate::EnumFromBytesError;
 
+            #[inline]
             fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                 let value = #raw_type_get;
                 match value {
@@ -1136,6 +1168,7 @@ fn handle_enum_derive(
         }
 
         impl #impl_generics #byteable_crate::IntoByteArray for #enum_name #type_generics #where_clause {
+            #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 let raw: #raw_name = self.into();
                 <#raw_name as #byteable_crate::IntoByteArray>::into_byte_array(raw)
@@ -1147,6 +1180,7 @@ fn handle_enum_derive(
         impl #impl_generics #byteable_crate::TryFromByteArray for #enum_name #type_generics #where_clause {
             type Error = <Self as TryFrom<#raw_name>>::Error;
 
+            #[inline]
             fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
                 let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
                 raw.try_into()

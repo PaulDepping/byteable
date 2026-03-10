@@ -104,6 +104,7 @@ pub trait ReadByteable: Read {
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(value, 0x78563412);
     /// ```
+    #[inline]
     fn read_byteable<T: FromByteArray>(&mut self) -> std::io::Result<T> {
         // Create a zeroed byte array to hold the data
         let mut byte_array = T::ByteArray::zeroed();
@@ -213,6 +214,7 @@ pub trait WriteByteable: Write {
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(buffer.into_inner(), vec![0x78, 0x56, 0x34, 0x12]);
     /// ```
+    #[inline]
     fn write_byteable<T: IntoByteArray>(&mut self, data: T) -> std::io::Result<()> {
         // Convert the data into its byte array representation
         let byte_array = data.into_byte_array();
@@ -279,6 +281,7 @@ impl<E: Error + 'static> Error for TryByteableError<E> {
 }
 
 impl<E> From<std::io::Error> for TryByteableError<E> {
+    #[inline]
     fn from(err: std::io::Error) -> Self {
         TryByteableError::Io(err)
     }
@@ -379,6 +382,7 @@ pub trait ReadTryByteable: Read {
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(value, 42);
     /// ```
+    #[inline]
     fn read_try_byteable<T: TryFromByteArray>(&mut self) -> Result<T, TryByteableError<T::Error>> {
         // Create a zeroed byte array to hold the data
         let mut byte_array = T::ByteArray::zeroed();
@@ -482,6 +486,7 @@ pub trait WriteTryByteable: Write {
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
     /// ```
+    #[inline]
     fn write_try_byteable<T: TryIntoByteArray>(
         &mut self,
         data: T,
