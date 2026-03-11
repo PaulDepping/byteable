@@ -72,7 +72,7 @@ fn main() -> io::Result<()> {
     let mut file = File::create("example_data.bin")?;
 
     // Write multiple packets
-    file.write_byteable(packet)?;
+    file.write_byteable(&packet)?;
 
     let packet2 = NetworkPacket {
         sequence: 43,
@@ -80,7 +80,7 @@ fn main() -> io::Result<()> {
         payload_length: 2048,
         timestamp: 1638360001,
     };
-    file.write_byteable(packet2)?;
+    file.write_byteable(&packet2)?;
 
     // Write a device config
     let config = DeviceConfig {
@@ -90,7 +90,7 @@ fn main() -> io::Result<()> {
         port: 8080,
         calibration: 3.14159,
     };
-    file.write_byteable(config)?;
+    file.write_byteable(&config)?;
 
     println!("   Written 2 NetworkPackets and 1 DeviceConfig to 'example_data.bin'");
     println!(

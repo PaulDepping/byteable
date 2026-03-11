@@ -68,7 +68,7 @@
 //!
 //! // Write to file
 //! let mut file = File::create("packet.bin")?;
-//! file.write_byteable(packet)?;
+//! file.write_byteable(&packet)?;
 //!
 //! // Read from file
 //! let mut file = File::open("packet.bin")?;
@@ -118,7 +118,7 @@
 //!     msg_type: 1,
 //!     data: [0; 16],
 //! };
-//! stream.write_byteable(msg)?;
+//! stream.write_byteable(&msg)?;
 //!
 //! // Read response
 //! let response: Message = stream.read_byteable()?;
@@ -160,7 +160,7 @@
 //!     data: [1, 2, 3, 4, 5, 6, 7, 8],
 //! };
 //!
-//! stream.write_byteable(packet).await?;
+//! stream.write_byteable(&packet).await?;
 //! let response: AsyncPacket = stream.read_byteable().await?;
 //! # Ok(())
 //! # }

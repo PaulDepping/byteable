@@ -64,7 +64,7 @@ use crate::{LittleEndian, ValidBytecastMarker, byte_array::ByteArray};
 /// assert_eq!(Point::BYTE_SIZE, 2);
 /// # }
 /// ```
-pub trait AssociatedByteArray {
+pub trait AssociatedByteArray: Copy {
     type ByteArray: ByteArray;
     const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
 }

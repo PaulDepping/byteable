@@ -76,7 +76,7 @@ fn main() -> std::io::Result<()> {
 
     // Write packet to a file
     let mut file = File::create("packet.bin")?;
-    file.write_byteable(packet)?;
+    file.write_byteable(&packet)?;
     println!("Packet written to file");
 
     // Read packet back from file
@@ -140,7 +140,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     // Async write
-    stream.write_byteable(msg).await?;
+    stream.write_byteable(&msg).await?;
 
     // Async read
     let response: Message = stream.read_byteable().await?;

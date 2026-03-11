@@ -59,8 +59,8 @@ fn main() -> std::io::Result<()> {
 
     // Write to cursor
     let mut buffer = Cursor::new(Vec::new());
-    buffer.write_byteable(header)?;
-    buffer.write_byteable(login)?;
+    buffer.write_byteable(&header)?;
+    buffer.write_byteable(&login)?;
 
     let bytes = buffer.into_inner();
     println!("   Written {} bytes", bytes.len());
@@ -124,7 +124,7 @@ fn main() -> std::io::Result<()> {
     ];
 
     for header in &headers {
-        packet.write_byteable(*header)?;
+        packet.write_byteable(header)?;
     }
 
     let packet_bytes = packet.into_inner();
@@ -157,7 +157,7 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut status_buffer = Cursor::new(Vec::new());
-    status_buffer.write_byteable(status)?;
+    status_buffer.write_byteable(&status)?;
 
     let status_bytes = status_buffer.into_inner();
     println!("   Status response bytes: {:?}", status_bytes);

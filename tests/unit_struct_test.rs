@@ -85,10 +85,10 @@ fn test_unit_struct_in_generic_context() {
 fn test_unit_struct_size() {
     use std::mem::size_of;
 
-    #[derive(Byteable)]
+    #[derive(Byteable, Clone, Copy)]
     struct Empty;
 
-    #[derive(UnsafeByteableTransmute)]
+    #[derive(UnsafeByteableTransmute, Clone, Copy)]
     struct AlsoEmpty;
 
     // Unit structs should have zero size

@@ -164,7 +164,7 @@ impl EndianConvert for f64 {
 /// use byteable::{BigEndian, IntoByteArray};
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(byteable::UnsafeByteableTransmute, Debug)]
+/// #[derive(byteable::UnsafeByteableTransmute, Debug, Clone, Copy)]
 /// #[repr(C, packed)]
 /// struct TcpHeader {
 ///     source_port: BigEndian<u16>,      // Network byte order
@@ -350,11 +350,10 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 /// ## In a struct for file formats
 ///
 /// ```
-/// # #[cfg(feature = "derive")]
+/// # #[cfg(feature = "derive")] {
 /// use byteable::{LittleEndian};
 ///
-/// # #[cfg(feature = "derive")]
-/// #[derive(byteable::UnsafeByteableTransmute, Debug)]
+/// #[derive(byteable::UnsafeByteableTransmute, Debug, Clone, Copy)]
 /// #[repr(C, packed)]
 /// struct BmpHeader {
 ///     signature: [u8; 2],               // "BM"
@@ -363,8 +362,6 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 ///     data_offset: LittleEndian<u32>,   // Little-endian
 /// }
 ///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
 /// let header = BmpHeader {
 ///     signature: *b"BM",
 ///     file_size: 1024.into(),

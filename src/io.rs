@@ -5,10 +5,248 @@
 //! ([`IntoByteArray`] and [`FromByteArray`]).
 
 use crate::byte_array::ByteArray;
-use crate::{FromByteArray, IntoByteArray, TryFromByteArray, TryIntoByteArray};
+use crate::{FromByteArray, IntoByteArray, LittleEndian, TryFromByteArray, TryIntoByteArray};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt;
+use std::hash::{BuildHasher, Hash};
 use std::io::{Read, Write};
+
+pub trait ByteableReadable: Sized {
+    fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self>;
+}
+
+impl<T: FromByteArray> ByteableReadable for T {
+    fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let mut b = T::ByteArray::zeroed();
+        reader.read_exact(b.as_byte_slice_mut())?;
+        Ok(T::from_byte_array(b))
+    }
+}
+
+impl<T: ByteableReadable> ByteableReadable for Vec<T> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut result = Vec::with_capacity(len);
+        for _ in 0..len {
+            result.push(reader.read_byteable()?);
+        }
+        Ok(result)
+    }
+}
+
+impl<T: ByteableReadable> ByteableReadable for VecDeque<T> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut result = VecDeque::with_capacity(len);
+        for _ in 0..len {
+            result.push_back(reader.read_byteable()?);
+        }
+        Ok(result)
+    }
+}
+
+impl<K, V, S> ByteableReadable for HashMap<K, V, S>
+where
+    K: ByteableReadable + Eq + Hash,
+    V: ByteableReadable,
+    S: BuildHasher + Default,
+{
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut map = HashMap::with_capacity_and_hasher(len, S::default());
+        for _ in 0..len {
+            let key = reader.read_byteable()?;
+            let val = reader.read_byteable()?;
+            map.insert(key, val);
+        }
+        Ok(map)
+    }
+}
+
+impl<T, S> ByteableReadable for HashSet<T, S>
+where
+    T: ByteableReadable + Eq + Hash,
+    S: BuildHasher + Default,
+{
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut set = HashSet::with_capacity_and_hasher(len, S::default());
+        for _ in 0..len {
+            set.insert(reader.read_byteable()?);
+        }
+        Ok(set)
+    }
+}
+
+impl<K: ByteableReadable + Ord, V: ByteableReadable> ByteableReadable for BTreeMap<K, V> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut map = BTreeMap::new();
+        for _ in 0..len {
+            let key = reader.read_byteable()?;
+            let val = reader.read_byteable()?;
+            map.insert(key, val);
+        }
+        Ok(map)
+    }
+}
+
+impl<T: ByteableReadable + Ord> ByteableReadable for BTreeSet<T> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut set = BTreeSet::new();
+        for _ in 0..len {
+            set.insert(reader.read_byteable()?);
+        }
+        Ok(set)
+    }
+}
+
+impl<T: ByteableReadable> ByteableReadable for Option<T> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let tag: u8 = reader.read_byteable()?;
+        match tag {
+            0 => Ok(None),
+            1 => Ok(Some(reader.read_byteable()?)),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid Option tag byte",
+            )),
+        }
+    }
+}
+
+impl ByteableReadable for String {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
+        let len: LittleEndian<u64> = reader.read_byteable()?;
+        let len = len.get() as usize;
+        let mut bytes = vec![0u8; len];
+        reader.read_exact(&mut bytes)?;
+        String::from_utf8(bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+}
+
+pub trait ByteableWritable {
+    fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()>;
+}
+
+impl<T: IntoByteArray> ByteableWritable for T {
+    fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let byte_array = self.into_byte_array();
+        writer.write_all(byte_array.as_byte_slice())
+    }
+}
+
+impl<T: ByteableWritable> ByteableWritable for Vec<T> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for el in self {
+            writer.write_byteable(el)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: ByteableWritable> ByteableWritable for VecDeque<T> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for el in self {
+            writer.write_byteable(el)?;
+        }
+        Ok(())
+    }
+}
+
+impl<K, V, S> ByteableWritable for HashMap<K, V, S>
+where
+    K: ByteableWritable,
+    V: ByteableWritable,
+    S: BuildHasher,
+{
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for (k, v) in self {
+            writer.write_byteable(k)?;
+            writer.write_byteable(v)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T, S> ByteableWritable for HashSet<T, S>
+where
+    T: ByteableWritable,
+    S: BuildHasher,
+{
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for el in self {
+            writer.write_byteable(el)?;
+        }
+        Ok(())
+    }
+}
+
+impl<K: ByteableWritable, V: ByteableWritable> ByteableWritable for BTreeMap<K, V> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for (k, v) in self {
+            writer.write_byteable(k)?;
+            writer.write_byteable(v)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: ByteableWritable> ByteableWritable for BTreeSet<T> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        for el in self {
+            writer.write_byteable(el)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: ByteableWritable> ByteableWritable for Option<T> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        match self {
+            None => writer.write_byteable(&0u8),
+            Some(val) => {
+                writer.write_byteable(&1u8)?;
+                writer.write_byteable(val)
+            }
+        }
+    }
+}
+
+impl ByteableWritable for str {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        let len = LittleEndian::new(self.len() as u64);
+        writer.write_byteable(&len)?;
+        writer.write_all(self.as_bytes())
+    }
+}
+
+impl ByteableWritable for String {
+    fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
+        self.as_str().write_to(writer)
+    }
+}
 
 /// Extension trait for `Read` that adds methods for reading `Byteable` types.
 ///
@@ -24,7 +262,7 @@ use std::io::{Read, Write};
 /// use byteable::{Byteable, ReadByteable};
 /// use std::fs::File;
 ///
-/// #[derive(byteable::Byteable, Debug)]
+/// #[derive(Byteable, Debug, Clone, Copy)]
 /// struct Header {
 ///     #[byteable(big_endian)]
 ///     magic: u32,
@@ -103,15 +341,8 @@ pub trait ReadByteable: Read {
     /// assert_eq!(value, 0x78563412);
     /// ```
     #[inline]
-    fn read_byteable<T: FromByteArray>(&mut self) -> std::io::Result<T> {
-        // Create a zeroed byte array to hold the data
-        let mut byte_array = T::ByteArray::zeroed();
-
-        // Read exactly BYTE_SIZE bytes from the reader into the array
-        self.read_exact(byte_array.as_byte_slice_mut())?;
-
-        // Convert the bytes into the target type
-        Ok(T::from_byte_array(byte_array))
+    fn read_byteable<T: ByteableReadable>(&mut self) -> std::io::Result<T> {
+        T::read_from(self)
     }
 }
 
@@ -132,7 +363,7 @@ impl<T: Read> ReadByteable for T {}
 /// use byteable::{Byteable, WriteByteable};
 /// use std::fs::File;
 ///
-/// #[derive(byteable::Byteable)]
+/// #[derive(Byteable, Clone, Copy)]
 /// struct Header {
 ///     #[byteable(big_endian)]
 ///     magic: u32,
@@ -150,7 +381,7 @@ impl<T: Read> ReadByteable for T {}
 /// };
 ///
 /// let mut file = File::create("output.bin")?;
-/// file.write_byteable(header)?;
+/// file.write_byteable(&header)?;
 /// # Ok(())
 /// # }
 /// # }
@@ -166,7 +397,7 @@ impl<T: Read> ReadByteable for T {}
 /// let mut stream = TcpStream::connect("127.0.0.1:8080")?;
 ///
 /// // Write a u32 length prefix
-/// stream.write_byteable(42u32)?;
+/// stream.write_byteable(&42u32)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -179,9 +410,9 @@ impl<T: Read> ReadByteable for T {}
 ///
 /// let mut buffer = Cursor::new(Vec::new());
 ///
-/// buffer.write_byteable(1u32).unwrap();
-/// buffer.write_byteable(2u32).unwrap();
-/// buffer.write_byteable(3u32).unwrap();
+/// buffer.write_byteable(&1u32).unwrap();
+/// buffer.write_byteable(&2u32).unwrap();
+/// buffer.write_byteable(&3u32).unwrap();
 ///
 /// #[cfg(target_endian = "little")]
 /// assert_eq!(
@@ -206,18 +437,14 @@ pub trait WriteByteable: Write {
     /// use std::io::Cursor;
     ///
     /// let mut buffer = Cursor::new(Vec::new());
-    /// buffer.write_byteable(0x12345678u32).unwrap();
+    /// buffer.write_byteable(&0x12345678u32).unwrap();
     ///
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(buffer.into_inner(), vec![0x78, 0x56, 0x34, 0x12]);
     /// ```
     #[inline]
-    fn write_byteable<T: IntoByteArray>(&mut self, data: T) -> std::io::Result<()> {
-        // Convert the data into its byte array representation
-        let byte_array = data.into_byte_array();
-
-        // Write all bytes to the writer
-        self.write_all(byte_array.as_byte_slice())
+    fn write_byteable<T: ByteableWritable>(&mut self, data: &T) -> std::io::Result<()> {
+        data.write_to(self)
     }
 }
 
@@ -284,6 +511,51 @@ impl<E> From<std::io::Error> for TryByteableError<E> {
     }
 }
 
+pub trait ByteableTryWritable {
+    type Error;
+
+    fn try_write_to(
+        &self,
+        writer: &mut (impl Write + ?Sized),
+    ) -> Result<(), TryByteableError<Self::Error>>;
+}
+
+pub trait ByteableTryReadable: Sized {
+    type Error;
+
+    fn try_read_from(
+        reader: &mut (impl Read + ?Sized),
+    ) -> Result<Self, TryByteableError<Self::Error>>;
+}
+
+impl<T: TryIntoByteArray> ByteableTryWritable for T {
+    type Error = <T as TryIntoByteArray>::Error;
+
+    fn try_write_to(
+        &self,
+        writer: &mut (impl Write + ?Sized),
+    ) -> Result<(), TryByteableError<Self::Error>> {
+        let byte_array = self
+            .try_into_byte_array()
+            .map_err(TryByteableError::Conversion)?;
+        writer.write_all(byte_array.as_byte_slice())?;
+        Ok(())
+    }
+}
+
+impl<T: TryFromByteArray> ByteableTryReadable for T {
+    type Error = <T as TryFromByteArray>::Error;
+
+    fn try_read_from(
+        reader: &mut (impl Read + ?Sized),
+    ) -> Result<Self, TryByteableError<Self::Error>> {
+        let mut b = T::ByteArray::zeroed();
+        reader.read_exact(b.as_byte_slice_mut())?;
+
+        T::try_from_byte_array(b).map_err(TryByteableError::Conversion)
+    }
+}
+
 /// Extension trait for `Read` that adds methods for reading types with fallible conversion.
 ///
 /// This trait is automatically implemented for all types that implement `std::io::Read`,
@@ -305,7 +577,7 @@ impl<E> From<std::io::Error> for TryByteableError<E> {
 /// use std::io::Cursor;
 ///
 /// // A type that only accepts even values
-/// #[derive(Debug, PartialEq)]
+/// #[derive(Debug, PartialEq, Clone, Copy)]
 /// struct EvenU32(u32);
 ///
 /// #[derive(Debug)]
@@ -380,15 +652,10 @@ pub trait ReadTryByteable: Read {
     /// assert_eq!(value, 42);
     /// ```
     #[inline]
-    fn read_try_byteable<T: TryFromByteArray>(&mut self) -> Result<T, TryByteableError<T::Error>> {
-        // Create a zeroed byte array to hold the data
-        let mut byte_array = T::ByteArray::zeroed();
-
-        // Read exactly BYTE_SIZE bytes from the reader into the array
-        self.read_exact(byte_array.as_byte_slice_mut())?;
-
-        // Attempt to convert the bytes into the target type
-        T::try_from_byte_array(byte_array).map_err(TryByteableError::Conversion)
+    fn read_try_byteable<T: ByteableTryReadable>(
+        &mut self,
+    ) -> Result<T, TryByteableError<T::Error>> {
+        T::try_read_from(self)
     }
 }
 
@@ -416,10 +683,10 @@ impl<T: Read> ReadTryByteable for T {}
 /// use std::io::Cursor;
 ///
 /// // A type that only accepts even values
-/// #[derive(Debug, PartialEq)]
+/// #[derive(Debug, PartialEq, Clone, Copy)]
 /// struct EvenU32(u32);
 ///
-/// #[derive(Debug)]
+/// #[derive(Debug, Clone, Copy)]
 /// struct NotEvenError;
 ///
 /// impl std::fmt::Display for NotEvenError {
@@ -448,7 +715,7 @@ impl<T: Read> ReadTryByteable for T {}
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut buffer = Cursor::new(Vec::new());
-/// buffer.write_try_byteable(EvenU32(42))?;
+/// buffer.write_try_byteable(&EvenU32(42))?;
 ///
 /// #[cfg(target_endian = "little")]
 /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
@@ -478,25 +745,17 @@ pub trait WriteTryByteable: Write {
     /// let mut buffer = Cursor::new(Vec::new());
     ///
     /// // u32 implements TryIntoByteArray (never fails)
-    /// buffer.write_try_byteable(42u32).unwrap();
+    /// buffer.write_try_byteable(&42u32).unwrap();
     ///
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
     /// ```
     #[inline]
-    fn write_try_byteable<T: TryIntoByteArray>(
+    fn write_try_byteable<T: ByteableTryWritable>(
         &mut self,
-        data: T,
+        data: &T,
     ) -> Result<(), TryByteableError<T::Error>> {
-        // Attempt to convert the data into its byte array representation
-        let byte_array = data
-            .try_into_byte_array()
-            .map_err(TryByteableError::Conversion)?;
-
-        // Write all bytes to the writer
-        self.write_all(byte_array.as_byte_slice())?;
-
-        Ok(())
+        data.try_write_to(self)
     }
 }
 
@@ -556,7 +815,7 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_byteable(packet).unwrap();
+        buffer.write_byteable(&packet).unwrap();
         assert_eq!(buffer.into_inner(), vec![0, 123, 4, 3, 2, 1]);
     }
 
@@ -580,7 +839,7 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_byteable(original).unwrap();
+        buffer.write_byteable(&original).unwrap();
 
         let mut reader = Cursor::new(buffer.into_inner());
         let read_packet: TestPacket = reader.read_byteable().unwrap();
@@ -592,8 +851,10 @@ mod tests {
     fn test_write_multiple() {
         let mut buffer = Cursor::new(vec![]);
 
-        buffer.write_byteable(BigEndian::new(0x0102u16)).unwrap();
-        buffer.write_byteable(LittleEndian::new(0x0304u16)).unwrap();
+        buffer.write_byteable(&BigEndian::new(0x0102u16)).unwrap();
+        buffer
+            .write_byteable(&LittleEndian::new(0x0304u16))
+            .unwrap();
 
         assert_eq!(buffer.into_inner(), vec![1, 2, 4, 3]);
     }
@@ -603,7 +864,7 @@ mod tests {
         let mut buffer = Cursor::new(vec![]);
 
         buffer
-            .write_byteable([
+            .write_byteable(&[
                 TestPacket { id: 0, value: 1 },
                 TestPacket { id: 1, value: 2 },
             ])
@@ -741,7 +1002,7 @@ mod tests {
     fn test_write_try_byteable_success() {
         let mut buffer = Cursor::new(Vec::new());
 
-        let result = buffer.write_try_byteable(EvenU32(100));
+        let result = buffer.write_try_byteable(&EvenU32(100));
         assert!(result.is_ok());
 
         #[cfg(target_endian = "little")]
@@ -752,7 +1013,7 @@ mod tests {
     fn test_write_try_byteable_conversion_error() {
         let mut buffer = Cursor::new(Vec::new());
 
-        let result = buffer.write_try_byteable(EvenU32(101)); // Odd value
+        let result = buffer.write_try_byteable(&EvenU32(101)); // Odd value
         assert!(result.is_err());
 
         match result {
@@ -768,7 +1029,7 @@ mod tests {
         let original = EvenU32(1024);
 
         let mut buffer = Cursor::new(Vec::new());
-        buffer.write_try_byteable(original).unwrap();
+        buffer.write_try_byteable(&original).unwrap();
 
         let mut reader = Cursor::new(buffer.into_inner());
         let read_value: EvenU32 = reader.read_try_byteable().unwrap();
@@ -780,7 +1041,7 @@ mod tests {
     fn test_try_byteable_with_infallible() {
         // Test that regular types work with Try traits (should never fail)
         let mut buffer = Cursor::new(Vec::new());
-        buffer.write_try_byteable(42u32).unwrap();
+        buffer.write_try_byteable(&42u32).unwrap();
 
         let mut reader = Cursor::new(buffer.into_inner());
         let value: u32 = reader.read_try_byteable().unwrap();

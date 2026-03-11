@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Created temperature: {}°C", temp.celsius);
 
     let mut buffer = Cursor::new(Vec::new());
-    buffer.write_try_byteable(temp)?;
+    buffer.write_try_byteable(&temp)?;
     println!("  Written to buffer: {:?}", buffer.get_ref());
 
     buffer.set_position(0);
@@ -171,7 +171,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut buffer = Cursor::new(Vec::new());
     for temp in &temps {
-        buffer.write_try_byteable(*temp)?;
+        buffer.write_try_byteable(temp)?;
         println!("  Written: {}°C", temp.celsius);
     }
 
