@@ -10,19 +10,80 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Ident, Meta, Visibility, parse_macro_input};
 
-/// Represents the type of byteable attribute applied to a field.
+/// Represents the type of byteable attribute applied to a field or type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttributeType {
-    /// Field should use little-endian byte order
     LittleEndian,
-    /// Field should use big-endian byte order
     BigEndian,
-    /// Field should be stored as its ByteArray representation (infallible conversion)
+    /// Use field's raw representation via `RawRepr` (infallible conversion)
     Transparent,
-    /// Field should be stored as its ByteArray representation (fallible conversion)
+    /// Use field's raw representation via `TryRawRepr` (fallible conversion)
     TryTransparent,
-    /// No special attribute applied
     None,
+}
+
+/// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
+fn byteable_crate_path() -> proc_macro2::TokenStream {
+    match crate_name("byteable").expect("byteable is present in `Cargo.toml`") {
+        FoundCrate::Itself => quote!(::byteable),
+        FoundCrate::Name(name) => {
+            let ident = Ident::new(&name, Span::call_site());
+            quote!(#ident)
+        }
+    }
+}
+
+/// Parses the `#[byteable(...)]` attribute from a list of attributes.
+fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
+    for attr in attrs {
+        if attr.path().is_ident("byteable") {
+            if let Meta::List(meta_list) = &attr.meta {
+                return match meta_list.tokens.to_string().as_str() {
+                    "little_endian" => AttributeType::LittleEndian,
+                    "big_endian" => AttributeType::BigEndian,
+                    "transparent" => AttributeType::Transparent,
+                    "try_transparent" => AttributeType::TryTransparent,
+                    other => panic!(
+                        "Unknown byteable attribute: {other}. \
+                         Valid attributes are: little_endian, big_endian, transparent, try_transparent"
+                    ),
+                };
+            }
+        }
+    }
+    AttributeType::None
+}
+
+/// Generates `BytecastSafe`, `AssociatedByteArray`, `IntoByteArray`, and `FromByteArray`
+/// impls for a raw struct, using `transmute` for zero-cost conversion.
+fn gen_raw_struct_impls(
+    raw_name: &Ident,
+    raw_field_types: &[proc_macro2::TokenStream],
+    bc: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        unsafe impl #bc::BytecastSafe for #raw_name
+        where #(#raw_field_types: #bc::BytecastSafe),*
+        {}
+
+        impl #bc::AssociatedByteArray for #raw_name {
+            type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+        }
+
+        impl #bc::IntoByteArray for #raw_name {
+            #[inline]
+            fn into_byte_array(self) -> Self::ByteArray {
+                unsafe { ::core::mem::transmute(self) }
+            }
+        }
+
+        impl #bc::FromByteArray for #raw_name {
+            #[inline]
+            fn from_byte_array(bytes: Self::ByteArray) -> Self {
+                unsafe { ::core::mem::transmute(bytes) }
+            }
+        }
+    }
 }
 
 /// Derives byte conversion traits for a struct using `transmute`.
@@ -209,30 +270,11 @@ enum AttributeType {
 /// - [`unsafe_byteable_transmute!`](../byteable/macro.unsafe_byteable_transmute.html) - Manual implementation macro
 #[proc_macro_derive(UnsafeByteableTransmute)]
 pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // Find the byteable crate name (handles renamed imports and when used within the crate itself)
-    let found_crate = crate_name("byteable").expect("my-crate is present in `Cargo.toml`");
-
-    // Determine the correct path to the Byteable trait and crate
-    let byteable_crate = match found_crate {
-        // If we're inside the byteable crate itself
-        FoundCrate::Itself => quote!(::byteable),
-        // Otherwise, use the actual crate name (handles renamed imports)
-        FoundCrate::Name(name) => {
-            let ident = Ident::new(&name, Span::call_site());
-            quote!( #ident )
-        }
-    };
-
-    // Parse the input token stream into a DeriveInput AST
+    let bc = byteable_crate_path();
     let input: DeriveInput = parse_macro_input!(input);
-
-    // Extract the struct/enum identifier
     let ident = &input.ident;
-
-    // Split generics for the impl block (handles generic types correctly)
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    // Extract all field types to add BytecastSafe bounds
     let field_types: Vec<_> = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => fields.named.iter().map(|f| &f.ty).collect(),
@@ -242,43 +284,34 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
         _ => Vec::new(),
     };
 
-    // Build where clause that includes BytecastSafe bounds for all fields
-    let extended_where_clause = if field_types.is_empty() {
+    let extended_where = if field_types.is_empty() {
         where_clause.cloned()
     } else {
         let mut clauses = where_clause
             .cloned()
             .unwrap_or_else(|| syn::parse_quote! { where });
-
-        for field_ty in &field_types {
-            clauses.predicates.push(syn::parse_quote! {
-                #field_ty: #byteable_crate::BytecastSafe
-            });
+        for ty in &field_types {
+            clauses.predicates.push(syn::parse_quote! { #ty: #bc::BytecastSafe });
         }
         Some(clauses)
     };
 
-    // Generate the Byteable trait implementation with safety checks
     quote! {
-        impl #impl_generics #byteable_crate::AssociatedByteArray for #ident #type_generics #extended_where_clause {
-            // The byte array type is a fixed-size array matching the struct size
+        impl #impl_generics #bc::AssociatedByteArray for #ident #type_generics #extended_where {
             type ByteArray = [u8; ::core::mem::size_of::<Self>()];
         }
 
-        impl #impl_generics #byteable_crate::IntoByteArray for #ident #type_generics #extended_where_clause {
-            // Convert the struct to bytes using transmute (unsafe but zero-cost)
+        impl #impl_generics #bc::IntoByteArray for #ident #type_generics #extended_where {
             #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 unsafe { ::core::mem::transmute(self) }
             }
         }
 
-
-        impl #impl_generics #byteable_crate::FromByteArray for #ident #type_generics #extended_where_clause {
-            // Convert bytes back to the struct using transmute (unsafe but zero-cost)
+        impl #impl_generics #bc::FromByteArray for #ident #type_generics #extended_where {
             #[inline]
-            fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                unsafe { ::core::mem::transmute(byte_array) }
+            fn from_byte_array(bytes: Self::ByteArray) -> Self {
+                unsafe { ::core::mem::transmute(bytes) }
             }
         }
     }
@@ -387,576 +420,160 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 /// ```
 #[proc_macro_derive(Byteable, attributes(byteable))]
 pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // Find the byteable crate name
-    let found_crate = crate_name("byteable").expect("byteable is present in `Cargo.toml`");
-
-    // Determine the correct path to the byteable crate
-    let byteable_crate = match found_crate {
-        FoundCrate::Itself => quote!(::byteable),
-        FoundCrate::Name(name) => {
-            let ident = Ident::new(&name, Span::call_site());
-            quote!( #ident )
-        }
-    };
-
-    // Parse the input
+    let bc = byteable_crate_path();
     let input: DeriveInput = parse_macro_input!(input);
 
-    // Check if it's an enum and handle it
     if let Data::Enum(enum_data) = input.data {
-        return handle_enum_derive(
-            input.ident,
-            input.generics,
-            input.vis,
-            input.attrs,
-            &enum_data,
-            byteable_crate,
-        )
-        .into();
+        return handle_enum_derive(input.ident, input.generics, input.vis, input.attrs, &enum_data, bc).into();
     }
 
     let original_name = &input.ident;
-    let vis = &input.vis; // Capture the visibility of the original struct
+    let vis = &input.vis;
+    let raw_name = Ident::new(&format!("__byteable_raw_{}", original_name), original_name.span());
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    // Create the raw struct name by appending "Raw"
-    let raw_name = Ident::new(
-        &format!("__byteable_raw_{}", original_name),
-        original_name.span(),
-    );
-
-    // Extract fields from the struct and determine if it's a tuple struct, named struct, or unit struct
-    let field_info = match &input.data {
-        Data::Struct(data) => match &data.fields {
-            Fields::Named(fields) => Some((&fields.named, false)),
-            Fields::Unnamed(fields) => Some((&fields.unnamed, true)),
-            Fields::Unit => None, // Unit structs have no fields
-        },
+    let fields_data = match &input.data {
+        Data::Struct(data) => &data.fields,
         _ => panic!("Byteable only supports structs"),
     };
 
-    // Split generics for the impl block (handles generic types correctly)
-    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
-
-    // Handle unit structs separately - they have zero size and need a direct implementation
-    if field_info.is_none() {
-        let output = quote! {
-            // Direct Byteable implementation for unit struct (zero-sized type)
-            impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
+    // Unit structs: zero-sized, implement directly without a raw struct
+    if let Fields::Unit = fields_data {
+        return quote! {
+            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
                 type ByteArray = [u8; 0];
             }
-
-            impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
                 #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    []
-                }
+                fn into_byte_array(self) -> Self::ByteArray { [] }
             }
-
-            impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+            impl #impl_generics #bc::FromByteArray for #original_name #type_generics #where_clause {
                 #[inline]
-                fn from_byte_array(_byte_array: Self::ByteArray) -> Self {
-                    #original_name
-                }
+                fn from_byte_array(_: Self::ByteArray) -> Self { #original_name }
             }
-
-            // Implement RawRepr for unit struct (raw type is itself)
-            impl #byteable_crate::RawRepr for #original_name {
-                type Raw = Self;
-            }
-
-            // Automatic BytecastSafe impl for unit struct
-            // Unit structs are always safe as they have no data
-            unsafe impl #byteable_crate::BytecastSafe for #original_name {}
-        };
-        return output.into();
+            impl #bc::RawRepr for #original_name { type Raw = Self; }
+            unsafe impl #bc::BytecastSafe for #original_name {}
+        }
+        .into();
     }
 
-    let (fields, is_tuple_struct) = field_info.unwrap();
+    let (fields, is_tuple) = match fields_data {
+        Fields::Named(f) => (&f.named, false),
+        Fields::Unnamed(f) => (&f.unnamed, true),
+        Fields::Unit => unreachable!(),
+    };
 
-    // Process each field to determine its type in the raw struct and conversion logic
-    let mut raw_fields = Vec::new();
-    let mut raw_field_types = Vec::new(); // Track raw field types for BytecastSafe
-    let mut from_original_conversions = Vec::new();
-    let mut from_raw_conversions = Vec::new();
-    let mut has_try_transparent = false; // Track if any field uses try_transparent
+    // Process each field: determine raw type and to/from conversion expressions
+    let mut raw_field_defs = Vec::new();
+    let mut raw_field_types = Vec::new();
+    let mut to_raw_exprs = Vec::new();
+    let mut from_raw_exprs = Vec::new();
+    let mut has_try = false;
 
-    for (index, field) in fields.iter().enumerate() {
+    for (i, field) in fields.iter().enumerate() {
         let field_type = &field.ty;
-
-        // Check for byteable attributes
-        let mut attribute_type = AttributeType::None;
-        for attr in &field.attrs {
-            if attr.path().is_ident("byteable") {
-                if let Meta::List(meta_list) = &attr.meta {
-                    let tokens = &meta_list.tokens;
-                    let tokens_str = tokens.to_string();
-                    if tokens_str == "little_endian" {
-                        attribute_type = AttributeType::LittleEndian;
-                    } else if tokens_str == "big_endian" {
-                        attribute_type = AttributeType::BigEndian;
-                    } else if tokens_str == "transparent" {
-                        attribute_type = AttributeType::Transparent;
-                    } else if tokens_str == "try_transparent" {
-                        attribute_type = AttributeType::TryTransparent;
-                    } else {
-                        panic!(
-                            "Unknown byteable attribute: {}. Valid attributes are: little_endian, big_endian, transparent, try_transparent",
-                            tokens_str
-                        );
-                    }
-                }
-            }
+        let attr = parse_byteable_attr(&field.attrs);
+        if attr == AttributeType::TryTransparent {
+            has_try = true;
         }
 
-        // For tuple structs, use index-based access; for named structs, use field names
-        if is_tuple_struct {
-            let idx = syn::Index::from(index);
+        let (raw_ty, to_raw_suffix, from_raw_suffix) = match attr {
+            AttributeType::LittleEndian => (
+                quote! { #bc::LittleEndian<#field_type> },
+                quote! { .into() },
+                quote! { .get() },
+            ),
+            AttributeType::BigEndian => (
+                quote! { #bc::BigEndian<#field_type> },
+                quote! { .into() },
+                quote! { .get() },
+            ),
+            AttributeType::Transparent => (
+                quote! { <#field_type as #bc::RawRepr>::Raw },
+                quote! { .into() },
+                quote! { .into() },
+            ),
+            AttributeType::TryTransparent => (
+                quote! { <#field_type as #bc::TryRawRepr>::Raw },
+                quote! { .into() },
+                quote! { .try_into()? },
+            ),
+            AttributeType::None => (quote! { #field_type }, quote! {}, quote! {}),
+        };
 
-            match attribute_type {
-                AttributeType::LittleEndian => {
-                    let raw_ty = quote! { #byteable_crate::LittleEndian<#field_type> };
-                    raw_fields.push(raw_ty.clone());
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        value.#idx.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        value.#idx.get()
-                    });
-                }
-                AttributeType::BigEndian => {
-                    let raw_ty = quote! { #byteable_crate::BigEndian<#field_type> };
-                    raw_fields.push(raw_ty.clone());
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        value.#idx.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        value.#idx.get()
-                    });
-                }
-                AttributeType::Transparent => {
-                    // Use the RawRepr::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::RawRepr>::Raw };
-                    raw_fields.push(raw_ty.clone());
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        value.#idx.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        value.#idx.into()
-                    });
-                }
-                AttributeType::TryTransparent => {
-                    has_try_transparent = true;
-                    // Use the TryRawRepr::Raw type for fallible conversion
-                    let raw_ty = quote! { <#field_type as #byteable_crate::TryRawRepr>::Raw };
-                    raw_fields.push(raw_ty.clone());
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        value.#idx.into()
-                    });
-                    // Note: try_transparent fields require TryFrom conversion, handled separately
-                    from_raw_conversions.push(quote! {
-                        value.#idx.try_into()?
-                    });
-                }
-                AttributeType::None => {
-                    let raw_ty = quote! { #field_type };
-                    raw_fields.push(raw_ty.clone());
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        value.#idx
-                    });
-                    from_raw_conversions.push(quote! {
-                        value.#idx
-                    });
-                }
-            }
+        raw_field_types.push(raw_ty.clone());
+
+        if is_tuple {
+            let idx = syn::Index::from(i);
+            raw_field_defs.push(quote! { #raw_ty });
+            to_raw_exprs.push(quote! { value.#idx #to_raw_suffix });
+            from_raw_exprs.push(quote! { value.#idx #from_raw_suffix });
         } else {
-            // Named struct
-            let field_name = field.ident.as_ref().unwrap();
-
-            match attribute_type {
-                AttributeType::LittleEndian => {
-                    let raw_ty = quote! { #byteable_crate::LittleEndian<#field_type> };
-                    raw_fields.push(quote! {
-                        #field_name: #raw_ty
-                    });
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        #field_name: value.#field_name.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        #field_name: value.#field_name.get()
-                    });
-                }
-                AttributeType::BigEndian => {
-                    let raw_ty = quote! { #byteable_crate::BigEndian<#field_type> };
-                    raw_fields.push(quote! {
-                        #field_name: #raw_ty
-                    });
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        #field_name: value.#field_name.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        #field_name: value.#field_name.get()
-                    });
-                }
-                AttributeType::Transparent => {
-                    // Use the RawRepr::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::RawRepr>::Raw };
-                    raw_fields.push(quote! {
-                        #field_name: #raw_ty
-                    });
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        #field_name: value.#field_name.into()
-                    });
-                    from_raw_conversions.push(quote! {
-                        #field_name: value.#field_name.into()
-                    });
-                }
-                AttributeType::TryTransparent => {
-                    has_try_transparent = true;
-                    // Use the TryRawRepr::Raw type for fallible conversion
-                    let raw_ty = quote! { <#field_type as #byteable_crate::TryRawRepr>::Raw };
-                    raw_fields.push(quote! {
-                        #field_name: #raw_ty
-                    });
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        #field_name: value.#field_name.into()
-                    });
-                    // Note: try_transparent fields require TryFrom conversion, handled separately
-                    from_raw_conversions.push(quote! {
-                        #field_name: value.#field_name.try_into()?
-                    });
-                }
-                AttributeType::None => {
-                    let raw_ty = quote! { #field_type };
-                    raw_fields.push(quote! {
-                        #field_name: #raw_ty
-                    });
-                    raw_field_types.push(raw_ty);
-                    from_original_conversions.push(quote! {
-                        #field_name: value.#field_name
-                    });
-                    from_raw_conversions.push(quote! {
-                        #field_name: value.#field_name
-                    });
-                }
-            }
+            let name = field.ident.as_ref().unwrap();
+            raw_field_defs.push(quote! { #name: #raw_ty });
+            to_raw_exprs.push(quote! { #name: value.#name #to_raw_suffix });
+            from_raw_exprs.push(quote! { #name: value.#name #from_raw_suffix });
         }
     }
 
-    // Generate the output code based on whether we have try_transparent fields
-    let output = if is_tuple_struct {
-        if has_try_transparent {
-            // Generate TryFrom and TryFromByteArray for tuple structs with try_transparent fields
-            quote! {
-                // Generate the raw struct (tuple struct)
-                #[derive(Clone, Copy, Debug)]
-                #[repr(C, packed)]
-                #[doc(hidden)]
-                #[allow(non_camel_case_types)]
-                #vis struct #raw_name(#(#raw_fields),*);
-
-                // Automatic BytecastSafe impl for the raw struct
-                // This is safe because all fields implement BytecastSafe
-                unsafe impl #byteable_crate::BytecastSafe for #raw_name
-                where
-                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
-                {}
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
-                    type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        unsafe { ::core::mem::transmute(self) }
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                        unsafe { ::core::mem::transmute(byte_array) }
-                    }
-                }
-
-                // From original to raw (always infallible)
-                impl From<#original_name> for #raw_name {
-                    #[inline]
-                    fn from(value: #original_name) -> Self {
-                        Self(#(#from_original_conversions),*)
-                    }
-                }
-
-                // TryFrom raw to original (fallible due to try_transparent fields)
-                impl TryFrom<#raw_name> for #original_name {
-                    type Error = #byteable_crate::InvalidDiscriminantError;
-
-                    #[inline]
-                    fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
-                        Ok(Self(#(#from_raw_conversions),*))
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
-                    type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        let raw: #raw_name = self.into();
-                        raw.into_byte_array()
-                    }
-                }
-
-                // Implement TryFromByteArray instead of FromByteArray
-                impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
-                    type Error = #byteable_crate::InvalidDiscriminantError;
-
-                    #[inline]
-                    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                        let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
-                        raw.try_into()
-                    }
-                }
-
-                // Implement TryRawRepr to expose the raw type with fallible conversion
-                impl #byteable_crate::TryRawRepr for #original_name {
-                    type Raw = #raw_name;
-                }
-            }
-        } else {
-            quote! {
-                // Generate the raw struct (tuple struct)
-                #[derive(Clone, Copy, Debug)]
-                #[repr(C, packed)]
-                #[doc(hidden)]
-                #[allow(non_camel_case_types)]
-                #vis struct #raw_name(#(#raw_fields),*);
-
-                // Automatic BytecastSafe impl for the raw struct
-                // This is safe because all fields implement BytecastSafe
-                unsafe impl #byteable_crate::BytecastSafe for #raw_name
-                where
-                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
-                {}
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
-                    type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        unsafe { ::core::mem::transmute(self) }
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                        unsafe { ::core::mem::transmute(byte_array) }
-                    }
-                }
-
-                // From original to raw
-                impl From<#original_name> for #raw_name {
-                    #[inline]
-                    fn from(value: #original_name) -> Self {
-                        Self(#(#from_original_conversions),*)
-                    }
-                }
-
-                // From raw to original
-                impl From<#raw_name> for #original_name {
-                    #[inline]
-                    fn from(value: #raw_name) -> Self {
-                        Self(#(#from_raw_conversions),*)
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
-                    type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        let raw: #raw_name = self.into();
-                        raw.into_byte_array()
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
-                    #[inline]
-                    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                        let raw = <#raw_name>::from_byte_array(byte_array);
-                        raw.into()
-                    }
-                }
-
-                // Implement RawRepr to expose the raw type
-                impl #byteable_crate::RawRepr for #original_name {
-                    type Raw = #raw_name;
-                }
-            }
-        }
-    } else {
-        if has_try_transparent {
-            // Generate TryFrom and TryFromByteArray for named structs with try_transparent fields
-            quote! {
-                #[derive(Clone, Copy, Debug)]
-                #[repr(C, packed)]
-                #[doc(hidden)]
-                #[allow(non_camel_case_types)]
-                #vis struct #raw_name {
-                    #(#raw_fields),*
-                }
-
-                // Automatic BytecastSafe impl for the raw struct
-                // This is safe because all fields implement BytecastSafe
-                unsafe impl #byteable_crate::BytecastSafe for #raw_name
-                where
-                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
-                {}
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
-                    type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        unsafe { ::core::mem::transmute(self) }
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
-                    #[inline]
-                    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                        unsafe { ::core::mem::transmute(byte_array) }
-                    }
-                }
-
-                // From original to raw (always infallible)
-                impl From<#original_name> for #raw_name {
-                    #[inline]
-                    fn from(value: #original_name) -> Self {
-                        Self {
-                            #(#from_original_conversions),*
-                        }
-                    }
-                }
-
-                // TryFrom raw to original (fallible due to try_transparent fields)
-                impl TryFrom<#raw_name> for #original_name {
-                    type Error = #byteable_crate::InvalidDiscriminantError;
-
-                    #[inline]
-                    fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
-                        Ok(Self {
-                            #(#from_raw_conversions),*
-                        })
-                    }
-                }
-
-                impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
-                    type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
-                }
-
-                impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
-                    #[inline]
-                    fn into_byte_array(self) -> Self::ByteArray {
-                        let raw: #raw_name = self.into();
-                        raw.into_byte_array()
-                    }
-                }
-
-                // Implement TryFromByteArray instead of FromByteArray
-                impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
-                    type Error = #byteable_crate::InvalidDiscriminantError;
-
-                    #[inline]
-                    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                        let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
-                        raw.try_into()
-                    }
-                }
-
-                // Implement TryRawRepr to expose the raw type with fallible conversion
-                impl #byteable_crate::TryRawRepr for #original_name {
-                    type Raw = #raw_name;
-                }
-            }
-        } else {
-            quote! {
+    let raw_struct_def = if is_tuple {
+        quote! {
             #[derive(Clone, Copy, Debug)]
             #[repr(C, packed)]
             #[doc(hidden)]
             #[allow(non_camel_case_types)]
-            #vis struct #raw_name {
-                #(#raw_fields),*
-            }
+            #vis struct #raw_name(#(#raw_field_defs),*);
+        }
+    } else {
+        quote! {
+            #[derive(Clone, Copy, Debug)]
+            #[repr(C, packed)]
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            #vis struct #raw_name { #(#raw_field_defs),* }
+        }
+    };
 
-            // Automatic BytecastSafe impl for the raw struct
-            // This is safe because all fields implement BytecastSafe
-            unsafe impl #byteable_crate::BytecastSafe for #raw_name
-            where
-                #(#raw_field_types: #byteable_crate::BytecastSafe),*
-            {}
+    let raw_impls = gen_raw_struct_impls(&raw_name, &raw_field_types, &bc);
 
-            impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
-                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-            }
-
-            impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    unsafe { ::core::mem::transmute(self) }
-                }
-            }
-
-            impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
-                #[inline]
-                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                    unsafe { ::core::mem::transmute(byte_array) }
-                }
-            }
-
-            // From original to raw
+    let from_original = if is_tuple {
+        quote! {
             impl From<#original_name> for #raw_name {
                 #[inline]
-                fn from(value: #original_name) -> Self {
-                    Self {
-                        #(#from_original_conversions),*
-                    }
-                }
+                fn from(value: #original_name) -> Self { Self(#(#to_raw_exprs),*) }
             }
-
-            // From raw to original
-            impl From<#raw_name> for #original_name {
+        }
+    } else {
+        quote! {
+            impl From<#original_name> for #raw_name {
                 #[inline]
-                fn from(value: #raw_name) -> Self {
-                    Self {
-                        #(#from_raw_conversions),*
-                    }
+                fn from(value: #original_name) -> Self { Self { #(#to_raw_exprs),* } }
+            }
+        }
+    };
+
+    let from_raw_body = if is_tuple {
+        quote! { Self(#(#from_raw_exprs),*) }
+    } else {
+        quote! { Self { #(#from_raw_exprs),* } }
+    };
+
+    // If any field uses try_transparent, the raw→original conversion is fallible
+    let original_impls = if has_try {
+        quote! {
+            impl TryFrom<#raw_name> for #original_name {
+                type Error = #bc::InvalidDiscriminantError;
+                #[inline]
+                fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
+                    Ok(#from_raw_body)
                 }
             }
 
-            impl #impl_generics #byteable_crate::AssociatedByteArray for #original_name #type_generics #where_clause {
-                type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
+            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
             }
 
-            impl #impl_generics #byteable_crate::IntoByteArray for #original_name #type_generics #where_clause {
+            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
                 #[inline]
                 fn into_byte_array(self) -> Self::ByteArray {
                     let raw: #raw_name = self.into();
@@ -964,46 +581,65 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-            impl #impl_generics #byteable_crate::FromByteArray for #original_name #type_generics #where_clause {
+            impl #impl_generics #bc::TryFromByteArray for #original_name #type_generics #where_clause {
+                type Error = #bc::InvalidDiscriminantError;
                 #[inline]
-                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                    let raw = <#raw_name>::from_byte_array(byte_array);
-                    raw.into()
+                fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
+                    let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
+                    raw.try_into()
                 }
             }
 
-                // Implement RawRepr to expose the raw type
-                impl #byteable_crate::RawRepr for #original_name {
-                    type Raw = #raw_name;
+            impl #bc::TryRawRepr for #original_name { type Raw = #raw_name; }
+        }
+    } else {
+        quote! {
+            impl From<#raw_name> for #original_name {
+                #[inline]
+                fn from(value: #raw_name) -> Self { #from_raw_body }
+            }
+
+            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
+            }
+
+            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
+                #[inline]
+                fn into_byte_array(self) -> Self::ByteArray {
+                    let raw: #raw_name = self.into();
+                    raw.into_byte_array()
                 }
             }
+
+            impl #impl_generics #bc::FromByteArray for #original_name #type_generics #where_clause {
+                #[inline]
+                fn from_byte_array(bytes: Self::ByteArray) -> Self {
+                    <#raw_name as #bc::FromByteArray>::from_byte_array(bytes).into()
+                }
+            }
+
+            impl #bc::RawRepr for #original_name { type Raw = #raw_name; }
         }
     };
-    output.into()
+
+    quote! {
+        #raw_struct_def
+        #raw_impls
+        #from_original
+        #original_impls
+    }
+    .into()
 }
 
-/// Extracts the repr type from enum attributes (e.g., `#[repr(u8)]`).
-///
-/// Returns `Some(ident)` if a valid integer repr is found, `None` otherwise.
+/// Extracts the integer repr type from enum attributes (e.g., `#[repr(u8)]` → `u8`).
 fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
     for attr in attrs {
         if attr.path().is_ident("repr") {
             if let Meta::List(meta_list) = &attr.meta {
-                let tokens = &meta_list.tokens;
-                // Parse simple repr types like u8, u16, etc.
-                if let Ok(ident) = syn::parse2::<syn::Ident>(tokens.clone()) {
-                    let ident_str: String = ident.to_string();
+                if let Ok(ident) = syn::parse2::<syn::Ident>(meta_list.tokens.clone()) {
                     if matches!(
-                        ident_str.as_str(),
-                        "u8" | "i8"
-                            | "u16"
-                            | "i16"
-                            | "u32"
-                            | "i32"
-                            | "u64"
-                            | "i64"
-                            | "u128"
-                            | "i128"
+                        ident.to_string().as_str(),
+                        "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "u64" | "i64" | "u128" | "i128"
                     ) {
                         return Some(ident);
                     }
@@ -1014,175 +650,114 @@ fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
     None
 }
 
-/// Handles deriving Byteable for C-like enums.
+/// Handles deriving `Byteable` for C-like enums with explicit discriminants.
 ///
-/// This function generates implementations of `AssociatedByteArray`, `IntoByteArray`,
-/// and `TryFromByteArray` for enums with explicit repr types and discriminants.
-/// It also generates a raw type with the matching endianness wrapper.
+/// Generates `AssociatedByteArray`, `IntoByteArray`, and `TryFromByteArray` impls,
+/// along with a raw wrapper type for the matching endianness.
 fn handle_enum_derive(
     enum_name: Ident,
     generics: syn::Generics,
     vis: Visibility,
     attrs: Vec<syn::Attribute>,
     enum_data: &syn::DataEnum,
-    byteable_crate: proc_macro2::TokenStream,
+    bc: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
-    // Step 1: Validate that all variants are unit variants (no fields)
+    // Validate: all variants must be unit variants with explicit discriminants
     for variant in &enum_data.variants {
-        match &variant.fields {
-            Fields::Unit => {} // Good
-            _ => panic!(
+        if !matches!(variant.fields, Fields::Unit) {
+            panic!(
                 "Byteable can only be derived for C-like enums (all variants must be unit variants). \
                  Variant '{}' has fields.",
                 variant.ident
-            ),
+            );
         }
     }
 
-    // Step 2: Extract the repr type from attributes
     let repr_ty = extract_repr_type(&attrs)
         .expect("Enum must have a #[repr(u8)], #[repr(u16)], #[repr(u32)], or similar attribute");
 
-    // Step 2.5: Check for byteable endianness attributes
-    let mut endianness = AttributeType::None;
-    for attr in &attrs {
-        if attr.path().is_ident("byteable") {
-            if let Meta::List(meta_list) = &attr.meta {
-                let tokens = &meta_list.tokens;
-                let tokens_str = tokens.to_string();
-                if tokens_str == "little_endian" {
-                    endianness = AttributeType::LittleEndian;
-                } else if tokens_str == "big_endian" {
-                    endianness = AttributeType::BigEndian;
-                } else {
-                    panic!(
-                        "Unknown byteable attribute for enum: {}. Valid attributes are: little_endian, big_endian",
-                        tokens_str
-                    );
-                }
-            }
-        }
+    let endianness = parse_byteable_attr(&attrs);
+    if matches!(endianness, AttributeType::Transparent | AttributeType::TryTransparent) {
+        panic!("transparent and try_transparent attributes are not supported for enums");
     }
 
     let from_discriminant_arms = enum_data.variants.iter().map(|variant| {
         let variant_name = &variant.ident;
-        if variant.discriminant.is_none() {
+        let (_, expr) = variant.discriminant.as_ref().unwrap_or_else(|| {
             panic!(
                 "All enum variants must have explicit discriminant values for Byteable. \
                  Variant '{}' is missing a discriminant.",
                 variant_name
-            );
-        }
-        let (_, expr) = variant.discriminant.as_ref().unwrap();
-        quote! {
-            #expr => Ok(#enum_name::#variant_name),
-        }
+            )
+        });
+        quote! { #expr => Ok(#enum_name::#variant_name), }
     });
 
-    // Step 5: Determine the byte conversion methods and raw type wrapper based on endianness
     let (raw_type_wrapper, raw_type_get) = match endianness {
         AttributeType::LittleEndian => (
-            quote! { #byteable_crate::LittleEndian<#repr_ty> },
-            quote! {value.0.get()},
+            quote! { #bc::LittleEndian<#repr_ty> },
+            quote! { value.0.get() },
         ),
         AttributeType::BigEndian => (
-            quote! { #byteable_crate::BigEndian<#repr_ty> },
-            quote! {value.0.get()},
+            quote! { #bc::BigEndian<#repr_ty> },
+            quote! { value.0.get() },
         ),
-        AttributeType::None => (quote! { #repr_ty }, quote! {value.0}), // No wrapper for native endianness
-        AttributeType::Transparent | AttributeType::TryTransparent => {
-            panic!("transparent and try_transparent attributes are not supported for enums");
-        }
+        _ => (quote! { #repr_ty }, quote! { value.0 }),
     };
 
-    // Step 6: Create the raw type name
     let raw_name = Ident::new(&format!("__byteable_raw_{}", enum_name), enum_name.span());
+    let raw_impls = gen_raw_struct_impls(&raw_name, &[raw_type_wrapper.clone()], &bc);
 
-    // Step 7: Generate the raw type and implementations
     quote! {
-        // Generate the raw type with endianness wrapper
         #[derive(Clone, Copy, Debug)]
         #[repr(transparent)]
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         #vis struct #raw_name(#raw_type_wrapper);
 
-        // Automatic BytecastSafe impl for the raw type
-        unsafe impl #byteable_crate::BytecastSafe for #raw_name
-        where #raw_type_wrapper: #byteable_crate::BytecastSafe,
-        {}
+        #raw_impls
 
-        impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
-            type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-        }
-
-        impl #impl_generics #byteable_crate::IntoByteArray for #raw_name #type_generics #where_clause {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                unsafe { ::core::mem::transmute(self) }
-            }
-        }
-
-        impl #impl_generics #byteable_crate::FromByteArray for #raw_name #type_generics #where_clause {
-            #[inline]
-            fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                unsafe { ::core::mem::transmute(byte_array) }
-            }
-        }
-
-        // From original enum to raw
         impl From<#enum_name> for #raw_name {
             #[inline]
             fn from(value: #enum_name) -> Self {
-                // Convert enum to its discriminant value
                 let discriminant: #repr_ty = value as _;
-                // Wrap in the appropriate endianness type
                 Self(discriminant.into())
             }
         }
 
-        // TryFrom raw to enum (fallible because not all byte patterns are valid)
         impl TryFrom<#raw_name> for #enum_name {
-            type Error = #byteable_crate::InvalidDiscriminantError;
-
+            type Error = #bc::InvalidDiscriminantError;
             #[inline]
             fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                 let value = #raw_type_get;
                 match value {
                     #(#from_discriminant_arms)*
-                    invalid => Err(#byteable_crate::InvalidDiscriminantError::new(invalid, ::core::any::type_name::<Self>())),
+                    invalid => Err(#bc::InvalidDiscriminantError::new(invalid, ::core::any::type_name::<Self>())),
                 }
             }
         }
 
-        // Implement TryRawRepr to expose the raw type with fallible conversion
-        // Note: We don't implement RawRepr because enums don't have infallible From<Raw>
-        impl #byteable_crate::TryRawRepr for #enum_name {
-            type Raw = #raw_name;
+        impl #bc::TryRawRepr for #enum_name { type Raw = #raw_name; }
+
+        impl #impl_generics #bc::AssociatedByteArray for #enum_name #type_generics #where_clause {
+            type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
         }
 
-        impl #impl_generics #byteable_crate::AssociatedByteArray for #enum_name #type_generics #where_clause {
-            type ByteArray = <#raw_name as #byteable_crate::AssociatedByteArray>::ByteArray;
-        }
-
-        impl #impl_generics #byteable_crate::IntoByteArray for #enum_name #type_generics #where_clause {
+        impl #impl_generics #bc::IntoByteArray for #enum_name #type_generics #where_clause {
             #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
                 let raw: #raw_name = self.into();
-                <#raw_name as #byteable_crate::IntoByteArray>::into_byte_array(raw)
+                <#raw_name as #bc::IntoByteArray>::into_byte_array(raw)
             }
         }
 
-        // Implement TryFromByteArray instead of FromByteArray
-        // because not all byte patterns may be valid enum variants
-        impl #impl_generics #byteable_crate::TryFromByteArray for #enum_name #type_generics #where_clause {
+        impl #impl_generics #bc::TryFromByteArray for #enum_name #type_generics #where_clause {
             type Error = <Self as TryFrom<#raw_name>>::Error;
-
             #[inline]
-            fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                let raw = <#raw_name as #byteable_crate::FromByteArray>::from_byte_array(byte_array);
+            fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
+                let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
                 raw.try_into()
             }
         }
