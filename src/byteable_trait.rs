@@ -6,12 +6,12 @@
 //! - [`FromByteArray`]: Constructs a value from a byte array
 //! - [`TryIntoByteArray`]: Fallible conversion to a byte array
 //! - [`TryFromByteArray`]: Fallible construction from a byte array
-//! - [`HasRawType`]: For types with a distinct raw representation
+//! - [`RawRepr`]: For types with a distinct raw representation
 //!
 //! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
 //! the crate, along with helper macros for implementing them.
 
-use crate::{LittleEndian, ValidBytecastMarker, byte_array::ByteArray};
+use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
 
 /// Associates a type with its byte array representation.
 ///
@@ -267,7 +267,7 @@ impl<T: FromByteArray> TryFromByteArray for T {
 ///
 /// ```
 /// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, HasRawType};
+/// use byteable::{Byteable, RawRepr};
 ///
 /// #[derive(Clone, Copy, Byteable)]
 /// struct Inner {
@@ -280,13 +280,11 @@ impl<T: FromByteArray> TryFromByteArray for T {
 ///     inner: Inner,  // Uses Inner::Raw instead of [u8; 1]
 /// }
 ///
-/// // Both Inner and Outer automatically implement HasRawType via derive(Byteable)
+/// // Both Inner and Outer automatically implement RawRepr via derive(Byteable)
 /// // The generated raw types are properly nested and type-safe
 /// # }
 /// ```
-pub trait HasRawType:
-    AssociatedByteArray + From<Self::Raw> + IntoByteArray + FromByteArray
-{
+pub trait RawRepr: AssociatedByteArray + From<Self::Raw> + IntoByteArray + FromByteArray {
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
@@ -296,7 +294,7 @@ pub trait HasRawType:
 
 /// A trait for types that have a corresponding raw representation type with fallible conversion.
 ///
-/// This trait is similar to [`HasRawType`], but is designed for types where conversion from
+/// This trait is similar to [`RawRepr`], but is designed for types where conversion from
 /// the raw representation might fail. This is particularly useful for enums, where not all
 /// byte patterns represent valid discriminants.
 ///
@@ -307,7 +305,7 @@ pub trait HasRawType:
 ///
 /// ```
 /// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, TryHasRawType, TryFromByteArray, IntoByteArray};
+/// use byteable::{Byteable, TryRawRepr, TryFromByteArray, IntoByteArray};
 ///
 /// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
 /// #[repr(u8)]
@@ -317,10 +315,10 @@ pub trait HasRawType:
 ///     Completed = 2,
 /// }
 ///
-/// // Enums automatically implement TryHasRawType
+/// // Enums automatically implement TryRawRepr
 /// // Converting enum to raw (always succeeds)
 /// let status = Status::Running;
-/// let raw: <Status as TryHasRawType>::Raw = status.into();
+/// let raw: <Status as TryRawRepr>::Raw = status.into();
 ///
 /// // Converting raw back to enum (might fail for invalid discriminants)
 /// let restored: Status = Status::try_from(raw).unwrap();
@@ -332,7 +330,7 @@ pub trait HasRawType:
 /// assert_eq!(from_bytes, Status::Running);
 /// # }
 /// ```
-pub trait TryHasRawType:
+pub trait TryRawRepr:
     AssociatedByteArray + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray
 {
     /// The raw type used for byte conversion.
@@ -342,12 +340,12 @@ pub trait TryHasRawType:
     type Raw: AssociatedByteArray + From<Self> + IntoByteArray + FromByteArray;
 }
 
-/// Blanket implementation of `TryHasRawType` for types that implement `HasRawType`.
+/// Blanket implementation of `TryRawRepr` for types that implement `RawRepr`.
 ///
 /// Types with infallible raw conversion automatically get fallible conversion
 /// with `Infallible` as the error type (via the blanket `TryFrom` impl for types implementing `From`).
-impl<T: HasRawType> TryHasRawType for T {
-    type Raw = <T as HasRawType>::Raw;
+impl<T: RawRepr> TryRawRepr for T {
+    type Raw = <T as RawRepr>::Raw;
 }
 
 // Implementation of Byteable for fixed-size arrays of Byteable types
@@ -551,28 +549,28 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct BoolRaw(u8);
+pub struct RawBool(u8);
 
-unsafe impl ValidBytecastMarker for BoolRaw {}
+unsafe impl BytecastSafe for RawBool {}
 
-unsafe_byteable_transmute!(BoolRaw);
+unsafe_byteable_transmute!(RawBool);
 
-impl From<bool> for BoolRaw {
+impl From<bool> for RawBool {
     #[inline]
     fn from(value: bool) -> Self {
         Self(value as u8)
     }
 }
 
-impl TryFrom<BoolRaw> for bool {
-    type Error = EnumFromBytesError;
+impl TryFrom<RawBool> for bool {
+    type Error = InvalidDiscriminantError;
 
     #[inline]
-    fn try_from(value: BoolRaw) -> Result<Self, Self::Error> {
+    fn try_from(value: RawBool) -> Result<Self, Self::Error> {
         match value.0 {
             0 => Ok(false),
             1 => Ok(true),
-            invalid => Err(EnumFromBytesError::new(
+            invalid => Err(InvalidDiscriminantError::new(
                 invalid,
                 ::core::any::type_name::<Self>(),
             )),
@@ -581,57 +579,57 @@ impl TryFrom<BoolRaw> for bool {
 }
 
 impl AssociatedByteArray for bool {
-    type ByteArray = <<bool as TryHasRawType>::Raw as AssociatedByteArray>::ByteArray;
+    type ByteArray = <<bool as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
 }
 
 impl IntoByteArray for bool {
     #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
-        let raw: <Self as TryHasRawType>::Raw = self.into();
+        let raw: <Self as TryRawRepr>::Raw = self.into();
         raw.into_byte_array()
     }
 }
 
 impl TryFromByteArray for bool {
-    type Error = EnumFromBytesError;
+    type Error = InvalidDiscriminantError;
 
     #[inline]
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
+        let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
         raw.try_into()
     }
 }
 
-impl TryHasRawType for bool {
-    type Raw = BoolRaw;
+impl TryRawRepr for bool {
+    type Raw = RawBool;
 }
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct CharRaw(LittleEndian<u32>);
+pub struct RawChar(LittleEndian<u32>);
 
 // because of code point representation this should always be little endian, i think
 
-unsafe impl ValidBytecastMarker for CharRaw {}
+unsafe impl BytecastSafe for RawChar {}
 
-unsafe_byteable_transmute!(CharRaw);
+unsafe_byteable_transmute!(RawChar);
 
-impl From<char> for CharRaw {
+impl From<char> for RawChar {
     #[inline]
     fn from(value: char) -> Self {
         Self((value as u32).into())
     }
 }
 
-impl TryFrom<CharRaw> for char {
-    type Error = EnumFromBytesError;
+impl TryFrom<RawChar> for char {
+    type Error = InvalidDiscriminantError;
 
     #[inline]
-    fn try_from(value: CharRaw) -> Result<Self, Self::Error> {
+    fn try_from(value: RawChar) -> Result<Self, Self::Error> {
         let num = value.0.get();
         match char::from_u32(num) {
             Some(c) => Ok(c),
-            None => Err(EnumFromBytesError::new(
+            None => Err(InvalidDiscriminantError::new(
                 num,
                 ::core::any::type_name::<Self>(),
             )),
@@ -640,29 +638,29 @@ impl TryFrom<CharRaw> for char {
 }
 
 impl AssociatedByteArray for char {
-    type ByteArray = <<char as TryHasRawType>::Raw as AssociatedByteArray>::ByteArray;
+    type ByteArray = <<char as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
 }
 
 impl IntoByteArray for char {
     #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
-        let raw: <Self as TryHasRawType>::Raw = self.into();
+        let raw: <Self as TryRawRepr>::Raw = self.into();
         raw.into_byte_array()
     }
 }
 
 impl TryFromByteArray for char {
-    type Error = EnumFromBytesError;
+    type Error = InvalidDiscriminantError;
 
     #[inline]
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let raw = <Self as TryHasRawType>::Raw::from_byte_array(byte_array);
+        let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
         raw.try_into()
     }
 }
 
-impl TryHasRawType for char {
-    type Raw = CharRaw;
+impl TryRawRepr for char {
+    type Raw = RawChar;
 }
 
 /// Represents a discriminant value that can be of various integer types.
@@ -670,7 +668,7 @@ impl TryHasRawType for char {
 /// This enum stores the invalid discriminant value with its original type information,
 /// allowing for proper formatting and type-safe error handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Discriminant {
+pub enum DiscriminantValue {
     U8(u8),
     I8(i8),
     U16(u16),
@@ -683,91 +681,91 @@ pub enum Discriminant {
     I128(i128),
 }
 
-impl core::fmt::Display for Discriminant {
+impl core::fmt::Display for DiscriminantValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Discriminant::U8(v) => write!(f, "{} (u8)", v),
-            Discriminant::I8(v) => write!(f, "{} (i8)", v),
-            Discriminant::U16(v) => write!(f, "{} (u16)", v),
-            Discriminant::I16(v) => write!(f, "{} (i16)", v),
-            Discriminant::U32(v) => write!(f, "{} (u32)", v),
-            Discriminant::I32(v) => write!(f, "{} (i32)", v),
-            Discriminant::U64(v) => write!(f, "{} (u64)", v),
-            Discriminant::I64(v) => write!(f, "{} (i64)", v),
-            Discriminant::U128(v) => write!(f, "{} (u128)", v),
-            Discriminant::I128(v) => write!(f, "{} (i128)", v),
+            DiscriminantValue::U8(v) => write!(f, "{} (u8)", v),
+            DiscriminantValue::I8(v) => write!(f, "{} (i8)", v),
+            DiscriminantValue::U16(v) => write!(f, "{} (u16)", v),
+            DiscriminantValue::I16(v) => write!(f, "{} (i16)", v),
+            DiscriminantValue::U32(v) => write!(f, "{} (u32)", v),
+            DiscriminantValue::I32(v) => write!(f, "{} (i32)", v),
+            DiscriminantValue::U64(v) => write!(f, "{} (u64)", v),
+            DiscriminantValue::I64(v) => write!(f, "{} (i64)", v),
+            DiscriminantValue::U128(v) => write!(f, "{} (u128)", v),
+            DiscriminantValue::I128(v) => write!(f, "{} (i128)", v),
         }
     }
 }
 
 // Implement From for all supported integer types
-impl From<u8> for Discriminant {
+impl From<u8> for DiscriminantValue {
     #[inline]
     fn from(v: u8) -> Self {
-        Discriminant::U8(v)
+        DiscriminantValue::U8(v)
     }
 }
 
-impl From<i8> for Discriminant {
+impl From<i8> for DiscriminantValue {
     #[inline]
     fn from(v: i8) -> Self {
-        Discriminant::I8(v)
+        DiscriminantValue::I8(v)
     }
 }
 
-impl From<u16> for Discriminant {
+impl From<u16> for DiscriminantValue {
     #[inline]
     fn from(v: u16) -> Self {
-        Discriminant::U16(v)
+        DiscriminantValue::U16(v)
     }
 }
 
-impl From<i16> for Discriminant {
+impl From<i16> for DiscriminantValue {
     #[inline]
     fn from(v: i16) -> Self {
-        Discriminant::I16(v)
+        DiscriminantValue::I16(v)
     }
 }
 
-impl From<u32> for Discriminant {
+impl From<u32> for DiscriminantValue {
     #[inline]
     fn from(v: u32) -> Self {
-        Discriminant::U32(v)
+        DiscriminantValue::U32(v)
     }
 }
 
-impl From<i32> for Discriminant {
+impl From<i32> for DiscriminantValue {
     #[inline]
     fn from(v: i32) -> Self {
-        Discriminant::I32(v)
+        DiscriminantValue::I32(v)
     }
 }
 
-impl From<u64> for Discriminant {
+impl From<u64> for DiscriminantValue {
     #[inline]
     fn from(v: u64) -> Self {
-        Discriminant::U64(v)
+        DiscriminantValue::U64(v)
     }
 }
 
-impl From<i64> for Discriminant {
+impl From<i64> for DiscriminantValue {
     #[inline]
     fn from(v: i64) -> Self {
-        Discriminant::I64(v)
+        DiscriminantValue::I64(v)
     }
 }
 
-impl From<u128> for Discriminant {
+impl From<u128> for DiscriminantValue {
     #[inline]
     fn from(v: u128) -> Self {
-        Discriminant::U128(v)
+        DiscriminantValue::U128(v)
     }
 }
 
-impl From<i128> for Discriminant {
+impl From<i128> for DiscriminantValue {
     #[inline]
     fn from(v: i128) -> Self {
-        Discriminant::I128(v)
+        DiscriminantValue::I128(v)
     }
 }
 
@@ -804,17 +802,17 @@ impl From<i128> for Discriminant {
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EnumFromBytesError {
+pub struct InvalidDiscriminantError {
     /// The invalid discriminant value that was encountered
-    pub invalid_discriminant: Discriminant,
+    pub invalid_discriminant: DiscriminantValue,
     /// The name of the enum type that failed to match
     pub enum_type_name: &'static str,
 }
 
-impl EnumFromBytesError {
-    /// Creates a new `EnumFromBytesError` with the given invalid discriminant and type name.
+impl InvalidDiscriminantError {
+    /// Creates a new `InvalidDiscriminantError` with the given invalid discriminant and type name.
     #[inline]
-    pub fn new<T: Into<Discriminant>>(
+    pub fn new<T: Into<DiscriminantValue>>(
         invalid_discriminant: T,
         enum_type_name: &'static str,
     ) -> Self {
@@ -825,7 +823,7 @@ impl EnumFromBytesError {
     }
 }
 
-impl core::fmt::Display for EnumFromBytesError {
+impl core::fmt::Display for InvalidDiscriminantError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
@@ -836,7 +834,7 @@ impl core::fmt::Display for EnumFromBytesError {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for EnumFromBytesError {}
+impl std::error::Error for InvalidDiscriminantError {}
 
 #[cfg(all(test, feature = "derive"))]
 mod tests {

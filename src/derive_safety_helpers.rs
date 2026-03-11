@@ -1,6 +1,6 @@
 //! Safety helpers for validating types suitable for byte casting.
 //!
-//! This module provides the `ValidBytecastMarker` trait, which marks types that are safe
+//! This module provides the `BytecastSafe` trait, which marks types that are safe
 //! to transmute to/from byte arrays. This trait acts as a compile-time safety mechanism
 //! to prevent UB when using the `Byteable` derive macros.
 
@@ -37,8 +37,8 @@ use crate::{BigEndian, LittleEndian};
 ///
 /// - **Single-byte primitives**: `u8`, `i8` (no endianness needed)
 /// - **Endianness wrappers**: `BigEndian<T>` and `LittleEndian<T>` for multi-byte types
-/// - **Arrays**: `[T; N]` where `T: ValidBytecastMarker`
-/// - **Custom structs**: Explicitly marked with `unsafe impl ValidBytecastMarker` (use with caution!)
+/// - **Arrays**: `[T; N]` where `T: BytecastSafe`
+/// - **Custom structs**: Explicitly marked with `unsafe impl BytecastSafe` (use with caution!)
 ///
 /// # Types that should NOT implement this trait
 ///
@@ -57,9 +57,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Safe types (compile successfully):
 ///
 /// ```
-/// use byteable::{ValidBytecastMarker, LittleEndian, BigEndian};
+/// use byteable::{BytecastSafe, LittleEndian, BigEndian};
 ///
-/// fn ensure_valid<T: ValidBytecastMarker>() {}
+/// fn ensure_valid<T: BytecastSafe>() {}
 ///
 /// // Single-byte types - no endianness needed
 /// ensure_valid::<u8>();
@@ -79,9 +79,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Unsafe types (won't compile):
 ///
 /// ```compile_fail
-/// use byteable::ValidBytecastMarker;
+/// use byteable::BytecastSafe;
 ///
-/// fn ensure_valid<T: ValidBytecastMarker>() {}
+/// fn ensure_valid<T: BytecastSafe>() {}
 ///
 /// // Multi-byte primitives without endianness wrapper - REJECTED
 /// ensure_valid::<u16>();      // Error: no explicit endianness
@@ -131,35 +131,35 @@ use crate::{BigEndian, LittleEndian};
 /// # x += 2; // shouldn't compile!
 /// # }
 /// ```
-pub unsafe trait ValidBytecastMarker {}
+pub unsafe trait BytecastSafe {}
 
 // Implement for the one-byte primitive numeric types (all bit patterns valid)
-unsafe impl ValidBytecastMarker for u8 {}
-unsafe impl ValidBytecastMarker for i8 {}
+unsafe impl BytecastSafe for u8 {}
+unsafe impl BytecastSafe for i8 {}
 
 // Implement for LittleEndian wrappers
-unsafe impl ValidBytecastMarker for LittleEndian<u16> {}
-unsafe impl ValidBytecastMarker for LittleEndian<u32> {}
-unsafe impl ValidBytecastMarker for LittleEndian<u64> {}
-unsafe impl ValidBytecastMarker for LittleEndian<u128> {}
-unsafe impl ValidBytecastMarker for LittleEndian<i16> {}
-unsafe impl ValidBytecastMarker for LittleEndian<i32> {}
-unsafe impl ValidBytecastMarker for LittleEndian<i64> {}
-unsafe impl ValidBytecastMarker for LittleEndian<i128> {}
-unsafe impl ValidBytecastMarker for LittleEndian<f32> {}
-unsafe impl ValidBytecastMarker for LittleEndian<f64> {}
+unsafe impl BytecastSafe for LittleEndian<u16> {}
+unsafe impl BytecastSafe for LittleEndian<u32> {}
+unsafe impl BytecastSafe for LittleEndian<u64> {}
+unsafe impl BytecastSafe for LittleEndian<u128> {}
+unsafe impl BytecastSafe for LittleEndian<i16> {}
+unsafe impl BytecastSafe for LittleEndian<i32> {}
+unsafe impl BytecastSafe for LittleEndian<i64> {}
+unsafe impl BytecastSafe for LittleEndian<i128> {}
+unsafe impl BytecastSafe for LittleEndian<f32> {}
+unsafe impl BytecastSafe for LittleEndian<f64> {}
 
 // Implement for BigEndian wrappers
-unsafe impl ValidBytecastMarker for BigEndian<u16> {}
-unsafe impl ValidBytecastMarker for BigEndian<u32> {}
-unsafe impl ValidBytecastMarker for BigEndian<u64> {}
-unsafe impl ValidBytecastMarker for BigEndian<u128> {}
-unsafe impl ValidBytecastMarker for BigEndian<i16> {}
-unsafe impl ValidBytecastMarker for BigEndian<i32> {}
-unsafe impl ValidBytecastMarker for BigEndian<i64> {}
-unsafe impl ValidBytecastMarker for BigEndian<i128> {}
-unsafe impl ValidBytecastMarker for BigEndian<f32> {}
-unsafe impl ValidBytecastMarker for BigEndian<f64> {}
+unsafe impl BytecastSafe for BigEndian<u16> {}
+unsafe impl BytecastSafe for BigEndian<u32> {}
+unsafe impl BytecastSafe for BigEndian<u64> {}
+unsafe impl BytecastSafe for BigEndian<u128> {}
+unsafe impl BytecastSafe for BigEndian<i16> {}
+unsafe impl BytecastSafe for BigEndian<i32> {}
+unsafe impl BytecastSafe for BigEndian<i64> {}
+unsafe impl BytecastSafe for BigEndian<i128> {}
+unsafe impl BytecastSafe for BigEndian<f32> {}
+unsafe impl BytecastSafe for BigEndian<f64> {}
 
 // Arrays of valid types are also valid
-unsafe impl<T: ValidBytecastMarker, const SIZE: usize> ValidBytecastMarker for [T; SIZE] {}
+unsafe impl<T: BytecastSafe, const SIZE: usize> BytecastSafe for [T; SIZE] {}

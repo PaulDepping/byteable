@@ -108,14 +108,14 @@ fn test_unit_struct_size() {
 
 #[test]
 fn test_unit_struct_byteable_raw() {
-    use byteable::HasRawType;
+    use byteable::RawRepr;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
     struct Sentinel;
 
-    // Unit structs should implement HasRawType with Raw = Self
+    // Unit structs should implement RawRepr with Raw = Self
     let sentinel = Sentinel;
 
     // The raw type should be the same as the original for unit structs
-    let _raw: <Sentinel as HasRawType>::Raw = sentinel;
+    let _raw: <Sentinel as RawRepr>::Raw = sentinel;
 }

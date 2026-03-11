@@ -4,8 +4,8 @@
 //! byte conversion, and how to handle both I/O and conversion errors separately.
 
 use byteable::{
-    AssociatedByteArray, ReadTryByteable, TryByteableError, TryFromByteArray, TryIntoByteArray,
-    WriteTryByteable,
+    AssociatedByteArray, ByteableIoError, TryFromByteArray, TryIntoByteArray, TryReadByteable,
+    TryWriteByteable,
 };
 use std::error::Error;
 use std::fmt;
@@ -106,15 +106,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Bytes represent: 150°C");
 
     let mut cursor = Cursor::new(invalid_bytes);
-    let result: Result<Temperature, TryByteableError<TemperatureError>> =
-        cursor.read_try_byteable();
+    let result: Result<Temperature, ByteableIoError<TemperatureError>> = cursor.read_try_byteable();
 
     match result {
         Ok(_) => println!("  Unexpected success"),
-        Err(TryByteableError::Io(err)) => {
+        Err(ByteableIoError::Io(err)) => {
             println!("  ✗ I/O error: {}", err);
         }
-        Err(TryByteableError::Conversion(err)) => {
+        Err(ByteableIoError::Conversion(err)) => {
             println!("  ✗ Conversion error: {}", err);
             println!("  ✓ Error handled correctly!\n");
         }
@@ -126,15 +125,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Bytes represent: -150°C");
 
     let mut cursor = Cursor::new(invalid_bytes);
-    let result: Result<Temperature, TryByteableError<TemperatureError>> =
-        cursor.read_try_byteable();
+    let result: Result<Temperature, ByteableIoError<TemperatureError>> = cursor.read_try_byteable();
 
     match result {
         Ok(_) => println!("  Unexpected success"),
-        Err(TryByteableError::Io(err)) => {
+        Err(ByteableIoError::Io(err)) => {
             println!("  ✗ I/O error: {}", err);
         }
-        Err(TryByteableError::Conversion(err)) => {
+        Err(ByteableIoError::Conversion(err)) => {
             println!("  ✗ Conversion error: {}", err);
             println!("  ✓ Error handled correctly!\n");
         }
@@ -146,16 +144,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Buffer has only {} bytes (need 4)", incomplete.len());
 
     let mut cursor = Cursor::new(incomplete);
-    let result: Result<Temperature, TryByteableError<TemperatureError>> =
-        cursor.read_try_byteable();
+    let result: Result<Temperature, ByteableIoError<TemperatureError>> = cursor.read_try_byteable();
 
     match result {
         Ok(_) => println!("  Unexpected success"),
-        Err(TryByteableError::Io(err)) => {
+        Err(ByteableIoError::Io(err)) => {
             println!("  ✗ I/O error: {}", err);
             println!("  ✓ Error handled correctly!\n");
         }
-        Err(TryByteableError::Conversion(err)) => {
+        Err(ByteableIoError::Conversion(err)) => {
             println!("  ✗ Conversion error: {}", err);
         }
     }
@@ -198,13 +195,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let t: Temperature = temp;
                 println!("    ✓ Success: {}°C", t.celsius);
             }
-            Err(TryByteableError::Io(err)) => {
+            Err(ByteableIoError::Io(err)) => {
                 println!("    ✗ I/O error: {}", err);
             }
-            Err(TryByteableError::Conversion(TemperatureError::TooHot(t))) => {
+            Err(ByteableIoError::Conversion(TemperatureError::TooHot(t))) => {
                 println!("    ✗ Too hot: {}°C > {}°C", t, Temperature::MAX);
             }
-            Err(TryByteableError::Conversion(TemperatureError::TooCold(t))) => {
+            Err(ByteableIoError::Conversion(TemperatureError::TooCold(t))) => {
                 println!("    ✗ Too cold: {}°C < {}°C", t, Temperature::MIN);
             }
         }

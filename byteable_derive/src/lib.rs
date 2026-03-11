@@ -232,7 +232,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
     // Split generics for the impl block (handles generic types correctly)
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    // Extract all field types to add ValidBytecastMarker bounds
+    // Extract all field types to add BytecastSafe bounds
     let field_types: Vec<_> = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => fields.named.iter().map(|f| &f.ty).collect(),
@@ -242,7 +242,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
         _ => Vec::new(),
     };
 
-    // Build where clause that includes ValidBytecastMarker bounds for all fields
+    // Build where clause that includes BytecastSafe bounds for all fields
     let extended_where_clause = if field_types.is_empty() {
         where_clause.cloned()
     } else {
@@ -252,7 +252,7 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 
         for field_ty in &field_types {
             clauses.predicates.push(syn::parse_quote! {
-                #field_ty: #byteable_crate::ValidBytecastMarker
+                #field_ty: #byteable_crate::BytecastSafe
             });
         }
         Some(clauses)
@@ -296,14 +296,14 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 /// For each struct, this macro generates:
 /// 1. A `*Raw` struct with `#[repr(C, packed)]` and endianness wrappers
 /// 2. `From<OriginalStruct>` for `OriginalStructRaw` implementation
-/// 3. `From<OriginalStructRaw>` for `OriginalStruct` implementation  
+/// 3. `From<OriginalStructRaw>` for `OriginalStruct` implementation
 /// 4. A `Byteable` implementation via `impl_byteable_via!` macro
 ///
 /// # Attributes
 ///
 /// - `#[byteable(little_endian)]` - Wraps the field in `LittleEndian<T>`
 /// - `#[byteable(big_endian)]` - Wraps the field in `BigEndian<T>`
-/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `HasRawType`)
+/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `RawRepr`)
 /// - No attribute - Keeps the field type as-is
 ///
 /// # Requirements
@@ -459,14 +459,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-            // Implement HasRawType for unit struct (raw type is itself)
-            impl #byteable_crate::HasRawType for #original_name {
+            // Implement RawRepr for unit struct (raw type is itself)
+            impl #byteable_crate::RawRepr for #original_name {
                 type Raw = Self;
             }
 
-            // Automatic ValidBytecastMarker impl for unit struct
+            // Automatic BytecastSafe impl for unit struct
             // Unit structs are always safe as they have no data
-            unsafe impl #byteable_crate::ValidBytecastMarker for #original_name {}
+            unsafe impl #byteable_crate::BytecastSafe for #original_name {}
         };
         return output.into();
     }
@@ -475,7 +475,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
     // Process each field to determine its type in the raw struct and conversion logic
     let mut raw_fields = Vec::new();
-    let mut raw_field_types = Vec::new(); // Track raw field types for ValidBytecastMarker
+    let mut raw_field_types = Vec::new(); // Track raw field types for BytecastSafe
     let mut from_original_conversions = Vec::new();
     let mut from_raw_conversions = Vec::new();
     let mut has_try_transparent = false; // Track if any field uses try_transparent
@@ -536,8 +536,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 AttributeType::Transparent => {
-                    // Use the HasRawType::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::HasRawType>::Raw };
+                    // Use the RawRepr::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::RawRepr>::Raw };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
                     from_original_conversions.push(quote! {
@@ -549,8 +549,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
                 AttributeType::TryTransparent => {
                     has_try_transparent = true;
-                    // Use the TryHasRawType::Raw type for fallible conversion
-                    let raw_ty = quote! { <#field_type as #byteable_crate::TryHasRawType>::Raw };
+                    // Use the TryRawRepr::Raw type for fallible conversion
+                    let raw_ty = quote! { <#field_type as #byteable_crate::TryRawRepr>::Raw };
                     raw_fields.push(raw_ty.clone());
                     raw_field_types.push(raw_ty);
                     from_original_conversions.push(quote! {
@@ -605,8 +605,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     });
                 }
                 AttributeType::Transparent => {
-                    // Use the HasRawType::Raw type directly for better type safety
-                    let raw_ty = quote! { <#field_type as #byteable_crate::HasRawType>::Raw };
+                    // Use the RawRepr::Raw type directly for better type safety
+                    let raw_ty = quote! { <#field_type as #byteable_crate::RawRepr>::Raw };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
                     });
@@ -620,8 +620,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
                 AttributeType::TryTransparent => {
                     has_try_transparent = true;
-                    // Use the TryHasRawType::Raw type for fallible conversion
-                    let raw_ty = quote! { <#field_type as #byteable_crate::TryHasRawType>::Raw };
+                    // Use the TryRawRepr::Raw type for fallible conversion
+                    let raw_ty = quote! { <#field_type as #byteable_crate::TryRawRepr>::Raw };
                     raw_fields.push(quote! {
                         #field_name: #raw_ty
                     });
@@ -663,11 +663,11 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #[allow(non_camel_case_types)]
                 #vis struct #raw_name(#(#raw_fields),*);
 
-                // Automatic ValidBytecastMarker impl for the raw struct
-                // This is safe because all fields implement ValidBytecastMarker
-                unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+                // Automatic BytecastSafe impl for the raw struct
+                // This is safe because all fields implement BytecastSafe
+                unsafe impl #byteable_crate::BytecastSafe for #raw_name
                 where
-                    #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
                 {}
 
                 impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
@@ -698,7 +698,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // TryFrom raw to original (fallible due to try_transparent fields)
                 impl TryFrom<#raw_name> for #original_name {
-                    type Error = #byteable_crate::EnumFromBytesError;
+                    type Error = #byteable_crate::InvalidDiscriminantError;
 
                     #[inline]
                     fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
@@ -720,7 +720,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // Implement TryFromByteArray instead of FromByteArray
                 impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
-                    type Error = #byteable_crate::EnumFromBytesError;
+                    type Error = #byteable_crate::InvalidDiscriminantError;
 
                     #[inline]
                     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
@@ -729,8 +729,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     }
                 }
 
-                // Implement TryHasRawType to expose the raw type with fallible conversion
-                impl #byteable_crate::TryHasRawType for #original_name {
+                // Implement TryRawRepr to expose the raw type with fallible conversion
+                impl #byteable_crate::TryRawRepr for #original_name {
                     type Raw = #raw_name;
                 }
             }
@@ -743,11 +743,11 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #[allow(non_camel_case_types)]
                 #vis struct #raw_name(#(#raw_fields),*);
 
-                // Automatic ValidBytecastMarker impl for the raw struct
-                // This is safe because all fields implement ValidBytecastMarker
-                unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+                // Automatic BytecastSafe impl for the raw struct
+                // This is safe because all fields implement BytecastSafe
+                unsafe impl #byteable_crate::BytecastSafe for #raw_name
                 where
-                    #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
                 {}
 
                 impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
@@ -804,8 +804,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     }
                 }
 
-                // Implement HasRawType to expose the raw type
-                impl #byteable_crate::HasRawType for #original_name {
+                // Implement RawRepr to expose the raw type
+                impl #byteable_crate::RawRepr for #original_name {
                     type Raw = #raw_name;
                 }
             }
@@ -822,11 +822,11 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     #(#raw_fields),*
                 }
 
-                // Automatic ValidBytecastMarker impl for the raw struct
-                // This is safe because all fields implement ValidBytecastMarker
-                unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+                // Automatic BytecastSafe impl for the raw struct
+                // This is safe because all fields implement BytecastSafe
+                unsafe impl #byteable_crate::BytecastSafe for #raw_name
                 where
-                    #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+                    #(#raw_field_types: #byteable_crate::BytecastSafe),*
                 {}
 
                 impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
@@ -859,7 +859,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // TryFrom raw to original (fallible due to try_transparent fields)
                 impl TryFrom<#raw_name> for #original_name {
-                    type Error = #byteable_crate::EnumFromBytesError;
+                    type Error = #byteable_crate::InvalidDiscriminantError;
 
                     #[inline]
                     fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
@@ -883,7 +883,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
 
                 // Implement TryFromByteArray instead of FromByteArray
                 impl #impl_generics #byteable_crate::TryFromByteArray for #original_name #type_generics #where_clause {
-                    type Error = #byteable_crate::EnumFromBytesError;
+                    type Error = #byteable_crate::InvalidDiscriminantError;
 
                     #[inline]
                     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
@@ -892,8 +892,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                     }
                 }
 
-                // Implement TryHasRawType to expose the raw type with fallible conversion
-                impl #byteable_crate::TryHasRawType for #original_name {
+                // Implement TryRawRepr to expose the raw type with fallible conversion
+                impl #byteable_crate::TryRawRepr for #original_name {
                     type Raw = #raw_name;
                 }
             }
@@ -907,11 +907,11 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #(#raw_fields),*
             }
 
-            // Automatic ValidBytecastMarker impl for the raw struct
-            // This is safe because all fields implement ValidBytecastMarker
-            unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
+            // Automatic BytecastSafe impl for the raw struct
+            // This is safe because all fields implement BytecastSafe
+            unsafe impl #byteable_crate::BytecastSafe for #raw_name
             where
-                #(#raw_field_types: #byteable_crate::ValidBytecastMarker),*
+                #(#raw_field_types: #byteable_crate::BytecastSafe),*
             {}
 
             impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
@@ -972,8 +972,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-                // Implement HasRawType to expose the raw type
-                impl #byteable_crate::HasRawType for #original_name {
+                // Implement RawRepr to expose the raw type
+                impl #byteable_crate::RawRepr for #original_name {
                     type Raw = #raw_name;
                 }
             }
@@ -1109,9 +1109,9 @@ fn handle_enum_derive(
         #[allow(non_camel_case_types)]
         #vis struct #raw_name(#raw_type_wrapper);
 
-        // Automatic ValidBytecastMarker impl for the raw type
-        unsafe impl #byteable_crate::ValidBytecastMarker for #raw_name
-        where #raw_type_wrapper: #byteable_crate::ValidBytecastMarker,
+        // Automatic BytecastSafe impl for the raw type
+        unsafe impl #byteable_crate::BytecastSafe for #raw_name
+        where #raw_type_wrapper: #byteable_crate::BytecastSafe,
         {}
 
         impl #impl_generics #byteable_crate::AssociatedByteArray for #raw_name #type_generics #where_clause {
@@ -1145,21 +1145,21 @@ fn handle_enum_derive(
 
         // TryFrom raw to enum (fallible because not all byte patterns are valid)
         impl TryFrom<#raw_name> for #enum_name {
-            type Error = #byteable_crate::EnumFromBytesError;
+            type Error = #byteable_crate::InvalidDiscriminantError;
 
             #[inline]
             fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                 let value = #raw_type_get;
                 match value {
                     #(#from_discriminant_arms)*
-                    invalid => Err(#byteable_crate::EnumFromBytesError::new(invalid, ::core::any::type_name::<Self>())),
+                    invalid => Err(#byteable_crate::InvalidDiscriminantError::new(invalid, ::core::any::type_name::<Self>())),
                 }
             }
         }
 
-        // Implement TryHasRawType to expose the raw type with fallible conversion
-        // Note: We don't implement HasRawType because enums don't have infallible From<Raw>
-        impl #byteable_crate::TryHasRawType for #enum_name {
+        // Implement TryRawRepr to expose the raw type with fallible conversion
+        // Note: We don't implement RawRepr because enums don't have infallible From<Raw>
+        impl #byteable_crate::TryRawRepr for #enum_name {
             type Raw = #raw_name;
         }
 

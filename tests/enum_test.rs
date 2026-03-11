@@ -32,7 +32,10 @@ fn test_enum_invalid_discriminant() {
     assert!(result.is_err());
 
     if let Err(err) = result {
-        assert_eq!(err.invalid_discriminant, byteable::Discriminant::U8(255));
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::U8(255)
+        );
     }
 }
 
@@ -203,7 +206,7 @@ fn test_enum_error_trait() {
     if let Err(err) = result {
         // Test that it implements std::error::Error
         let _: &dyn Error = &err;
-        assert!(format!("{:?}", err).contains("EnumFromBytesError"));
+        assert!(format!("{:?}", err).contains("InvalidDiscriminantError"));
     } else {
         panic!("Expected an error");
     }
@@ -495,4 +498,183 @@ fn test_big_endian_signed_enum() {
     // Round-trip
     let restored = BigEndianSigned::try_from_byte_array((-1000i16).to_be_bytes()).unwrap();
     assert_eq!(restored, BigEndianSigned::Negative);
+}
+
+// ============================================================================
+// i32 enum tests
+// ============================================================================
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(i32)]
+#[byteable(little_endian)]
+enum SignedI32LE {
+    Min = -2_000_000,
+    Zero = 0,
+    Max = 2_000_000,
+}
+
+#[test]
+fn test_i32_enum_little_endian() {
+    assert_eq!(SignedI32LE::Min.into_byte_array(), (-2_000_000i32).to_le_bytes());
+    assert_eq!(SignedI32LE::Zero.into_byte_array(), 0i32.to_le_bytes());
+    assert_eq!(SignedI32LE::Max.into_byte_array(), 2_000_000i32.to_le_bytes());
+
+    let restored = SignedI32LE::try_from_byte_array((-2_000_000i32).to_le_bytes()).unwrap();
+    assert_eq!(restored, SignedI32LE::Min);
+    let restored = SignedI32LE::try_from_byte_array(2_000_000i32.to_le_bytes()).unwrap();
+    assert_eq!(restored, SignedI32LE::Max);
+}
+
+#[test]
+fn test_i32_enum_invalid_discriminant() {
+    let bytes = 42i32.to_le_bytes();
+    let result = SignedI32LE::try_from_byte_array(bytes);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I32(42));
+    }
+}
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(i32)]
+#[byteable(big_endian)]
+enum SignedI32BE {
+    Negative = -2_000_000,
+    Zero = 0,
+    Positive = 2_000_000,
+}
+
+#[test]
+fn test_i32_enum_big_endian() {
+    assert_eq!(SignedI32BE::Negative.into_byte_array(), (-2_000_000i32).to_be_bytes());
+    assert_eq!(SignedI32BE::Zero.into_byte_array(), 0i32.to_be_bytes());
+    assert_eq!(SignedI32BE::Positive.into_byte_array(), 2_000_000i32.to_be_bytes());
+
+    let restored = SignedI32BE::try_from_byte_array((-2_000_000i32).to_be_bytes()).unwrap();
+    assert_eq!(restored, SignedI32BE::Negative);
+}
+
+#[test]
+fn test_i32_enum_byte_size() {
+    use byteable::AssociatedByteArray;
+    assert_eq!(SignedI32LE::BYTE_SIZE, 4);
+    assert_eq!(SignedI32BE::BYTE_SIZE, 4);
+}
+
+// ============================================================================
+// i64 enum tests
+// ============================================================================
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(i64)]
+#[byteable(little_endian)]
+enum SignedI64LE {
+    LargeNeg = -9_000_000_000_000,
+    Zero = 0,
+    LargePos = 9_000_000_000_000,
+}
+
+#[test]
+fn test_i64_enum_little_endian() {
+    assert_eq!(
+        SignedI64LE::LargeNeg.into_byte_array(),
+        (-9_000_000_000_000i64).to_le_bytes()
+    );
+    assert_eq!(SignedI64LE::Zero.into_byte_array(), 0i64.to_le_bytes());
+    assert_eq!(
+        SignedI64LE::LargePos.into_byte_array(),
+        9_000_000_000_000i64.to_le_bytes()
+    );
+
+    let restored =
+        SignedI64LE::try_from_byte_array((-9_000_000_000_000i64).to_le_bytes()).unwrap();
+    assert_eq!(restored, SignedI64LE::LargeNeg);
+}
+
+#[test]
+fn test_i64_enum_invalid_discriminant() {
+    let bytes = 1i64.to_le_bytes(); // Not a valid variant
+    let result = SignedI64LE::try_from_byte_array(bytes);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I64(1));
+    }
+}
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(i64)]
+#[byteable(big_endian)]
+enum SignedI64BE {
+    LargeNeg = -9_000_000_000_000,
+    Zero = 0,
+    LargePos = 9_000_000_000_000,
+}
+
+#[test]
+fn test_i64_enum_big_endian() {
+    assert_eq!(
+        SignedI64BE::LargeNeg.into_byte_array(),
+        (-9_000_000_000_000i64).to_be_bytes()
+    );
+    assert_eq!(
+        SignedI64BE::LargePos.into_byte_array(),
+        9_000_000_000_000i64.to_be_bytes()
+    );
+
+    let restored =
+        SignedI64BE::try_from_byte_array((-9_000_000_000_000i64).to_be_bytes()).unwrap();
+    assert_eq!(restored, SignedI64BE::LargeNeg);
+}
+
+#[test]
+fn test_i64_enum_byte_size() {
+    use byteable::AssociatedByteArray;
+    assert_eq!(SignedI64LE::BYTE_SIZE, 8);
+    assert_eq!(SignedI64BE::BYTE_SIZE, 8);
+}
+
+// ============================================================================
+// DiscriminantValue variant coverage: U32, U64, I8
+// ============================================================================
+
+#[test]
+fn test_discriminant_value_u32() {
+    // NetworkProtocol is #[repr(u32)] — invalid bytes produce DiscriminantValue::U32
+    let bytes = 0xFFFFFFFFu32.to_le_bytes();
+    let result = NetworkProtocol::try_from_byte_array(bytes);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::U32(0xFFFFFFFF)
+        );
+    }
+}
+
+#[test]
+fn test_discriminant_value_u64() {
+    // LargeValue is #[repr(u64)] — invalid bytes produce DiscriminantValue::U64
+    let bytes = 42u64.to_le_bytes(); // 42 is not a valid LargeValue variant
+    let result = LargeValue::try_from_byte_array(bytes);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::U64(42)
+        );
+    }
+}
+
+#[test]
+fn test_discriminant_value_i8() {
+    // Temperature is #[repr(i8)] — invalid bytes produce DiscriminantValue::I8
+    let bytes = [5i8 as u8]; // 5 is not a valid Temperature variant
+    let result = Temperature::try_from_byte_array(bytes);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::I8(5)
+        );
+    }
 }

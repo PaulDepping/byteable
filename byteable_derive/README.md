@@ -104,7 +104,7 @@ When deriving `Byteable` for enums, you **must**:
    `#[repr(i8)]`, `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`
 2. Have only unit variants (no fields)
 3. Provide explicit discriminant values for all variants
-4. Use `TryFromByteArray` for deserialization (returns `EnumFromBytesError` for invalid discriminants)
+4. Use `TryFromByteArray` for deserialization (returns `InvalidDiscriminantError` for invalid discriminants)
 
 ### Type-Level Attributes for Enums
 
@@ -126,7 +126,7 @@ enum Command {
     Stop = 2,
 }
 
-fn example() -> Result<(), byteable::EnumFromBytesError> {
+fn example() -> Result<(), byteable::InvalidDiscriminantError> {
     // Valid conversion
     let bytes = [1];
     let cmd = Command::try_from_byte_array(bytes)?;

@@ -217,7 +217,7 @@ struct Config {
     port: u16,
 }
 
-fn main() -> Result<(), byteable::EnumFromBytesError> {
+fn main() -> Result<(), byteable::InvalidDiscriminantError> {
     let config = Config {
         enabled: true,
         mode: 'A',
@@ -259,7 +259,7 @@ enum Status {
     Failed = 3,
 }
 
-fn main() -> Result<(), byteable::EnumFromBytesError> {
+fn main() -> Result<(), byteable::InvalidDiscriminantError> {
     let status = Status::Running;
     let bytes = status.into_byte_array();
     assert_eq!(bytes, [1]);

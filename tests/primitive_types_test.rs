@@ -47,7 +47,7 @@ fn test_bool_invalid_byte() {
         if let Err(err) = result {
             assert_eq!(
                 err.invalid_discriminant,
-                byteable::Discriminant::U8(invalid)
+                byteable::DiscriminantValue::U8(invalid)
             );
             let error_string = format!("{}", err);
             assert!(error_string.contains("Invalid discriminant"));
@@ -83,7 +83,7 @@ fn test_bool_error_trait() {
     if let Err(err) = result {
         // Test that it implements std::error::Error
         let _: &dyn Error = &err;
-        assert!(format!("{:?}", err).contains("EnumFromBytesError"));
+        assert!(format!("{:?}", err).contains("InvalidDiscriminantError"));
     } else {
         panic!("Expected an error");
     }
@@ -221,7 +221,7 @@ fn test_char_error_trait() {
     if let Err(err) = result {
         // Test that it implements std::error::Error
         let _: &dyn Error = &err;
-        assert!(format!("{:?}", err).contains("EnumFromBytesError"));
+        assert!(format!("{:?}", err).contains("InvalidDiscriminantError"));
     } else {
         panic!("Expected an error");
     }

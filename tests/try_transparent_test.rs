@@ -1,10 +1,10 @@
 //! Tests for the try_transparent attribute with enums.
 //!
-//! This test demonstrates how enums can be used with the TryHasRawType trait
+//! This test demonstrates how enums can be used with the TryRawRepr trait
 //! for fallible conversion from raw representation.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, IntoByteArray, TryFromByteArray, TryHasRawType};
+use byteable::{Byteable, IntoByteArray, TryFromByteArray, TryRawRepr};
 
 /// A simple enum representing status codes
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -26,11 +26,11 @@ struct Message {
 
 #[test]
 fn test_enum_try_has_raw_type() {
-    // Test that enums implement TryHasRawType
+    // Test that enums implement TryRawRepr
     let status = Status::Running;
 
     // Convert to raw (always succeeds)
-    let raw: <Status as TryHasRawType>::Raw = status.into();
+    let raw: <Status as TryRawRepr>::Raw = status.into();
 
     // Convert back to enum using TryFrom (may fail for invalid discriminants)
     let restored: Status = Status::try_from(raw).unwrap();
@@ -48,7 +48,7 @@ fn test_enum_raw_roundtrip() {
     ];
 
     for &status in &variants {
-        let raw: <Status as TryHasRawType>::Raw = status.into();
+        let raw: <Status as TryRawRepr>::Raw = status.into();
         let restored: Status = Status::try_from(raw).unwrap();
         assert_eq!(restored, status);
     }
@@ -64,7 +64,7 @@ fn test_enum_invalid_discriminant_via_raw() {
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert_eq!(e.invalid_discriminant, byteable::Discriminant::U8(255));
+        assert_eq!(e.invalid_discriminant, byteable::DiscriminantValue::U8(255));
     }
 }
 
@@ -143,7 +143,7 @@ fn test_message_with_invalid_status_discriminant() {
 
     // Verify the error contains the invalid discriminant value
     if let Err(e) = result {
-        assert_eq!(e.invalid_discriminant, byteable::Discriminant::U8(255));
+        assert_eq!(e.invalid_discriminant, byteable::DiscriminantValue::U8(255));
     }
 }
 
@@ -217,7 +217,10 @@ fn test_message_invalid_discriminants() {
         );
 
         if let Err(e) = result {
-            assert_eq!(e.invalid_discriminant, byteable::Discriminant::U8(invalid));
+            assert_eq!(
+                e.invalid_discriminant,
+                byteable::DiscriminantValue::U8(invalid)
+            );
         }
     }
 }
@@ -225,6 +228,105 @@ fn test_message_invalid_discriminants() {
 // =============================================================================
 // Tests for try_transparent with u16 enum in a separate module
 // =============================================================================
+
+// =============================================================================
+// Tests for a struct with TWO try_transparent fields
+// =============================================================================
+
+mod two_try_transparent_tests {
+    use byteable::{Byteable, DiscriminantValue, IntoByteArray, TryFromByteArray};
+
+    #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+    #[repr(u8)]
+    enum StatusA {
+        Ok = 0,
+        Err = 1,
+    }
+
+    #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+    #[repr(u16)]
+    #[byteable(little_endian)]
+    enum CodeB {
+        Alpha = 0x0100,
+        Beta = 0x0200,
+    }
+
+    /// Struct with two try_transparent fields (StatusA u8 + CodeB u16) and a plain u8.
+    #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+    struct Dual {
+        #[byteable(try_transparent)]
+        status: StatusA,
+        #[byteable(try_transparent)]
+        code: CodeB,
+        value: u8,
+    }
+
+    #[test]
+    fn test_dual_roundtrip() {
+        let d = Dual {
+            status: StatusA::Ok,
+            code: CodeB::Beta,
+            value: 99,
+        };
+        let bytes = d.into_byte_array();
+        // layout: 1 (StatusA) + 2 (CodeB LE) + 1 (u8) = 4 bytes
+        assert_eq!(bytes.len(), 4);
+        let restored = Dual::try_from_byte_array(bytes).unwrap();
+        assert_eq!(restored, d);
+    }
+
+    #[test]
+    fn test_dual_all_combinations() {
+        let combos = [
+            (StatusA::Ok, CodeB::Alpha, 0u8),
+            (StatusA::Ok, CodeB::Beta, 255u8),
+            (StatusA::Err, CodeB::Alpha, 128u8),
+            (StatusA::Err, CodeB::Beta, 1u8),
+        ];
+        for (status, code, value) in combos {
+            let d = Dual { status, code, value };
+            let bytes = d.into_byte_array();
+            let restored = Dual::try_from_byte_array(bytes).unwrap();
+            assert_eq!(restored, d);
+        }
+    }
+
+    #[test]
+    fn test_dual_first_field_invalid() {
+        // byte[0] = 255 → invalid StatusA discriminant
+        let bytes = [255u8, 0x00, 0x01, 0x00]; // StatusA=255, CodeB=Alpha, value=0
+        let result = Dual::try_from_byte_array(bytes);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.invalid_discriminant, DiscriminantValue::U8(255));
+        }
+    }
+
+    #[test]
+    fn test_dual_second_field_invalid() {
+        // byte[0] = 0 (StatusA::Ok is valid), bytes[1..3] = 0xFFFF → invalid CodeB
+        let bytes = [0u8, 0xFF, 0xFF, 0x00];
+        let result = Dual::try_from_byte_array(bytes);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.invalid_discriminant, DiscriminantValue::U16(0xFFFF));
+        }
+    }
+
+    #[test]
+    fn test_dual_byte_layout() {
+        let d = Dual {
+            status: StatusA::Err,
+            code: CodeB::Alpha,
+            value: 42,
+        };
+        let bytes = d.into_byte_array();
+        assert_eq!(bytes[0], 1); // StatusA::Err
+        assert_eq!(bytes[1], 0x00); // CodeB::Alpha = 0x0100 LE low byte
+        assert_eq!(bytes[2], 0x01); // CodeB::Alpha = 0x0100 LE high byte
+        assert_eq!(bytes[3], 42); // value
+    }
+}
 
 mod command_packet_tests {
     use byteable::{Byteable, IntoByteArray, TryFromByteArray};
@@ -279,7 +381,10 @@ mod command_packet_tests {
         assert!(result.is_err());
 
         if let Err(e) = result {
-            assert_eq!(e.invalid_discriminant, byteable::Discriminant::U16(0xFFFF));
+            assert_eq!(
+                e.invalid_discriminant,
+                byteable::DiscriminantValue::U16(0xFFFF)
+            );
         }
     }
 

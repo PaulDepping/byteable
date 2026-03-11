@@ -12,11 +12,23 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::io::{Read, Write};
 
-pub trait ByteableReadable: Sized {
+/// Low-level trait for reading a value from a [`std::io::Read`] source.
+///
+/// This trait is implemented for:
+/// - Types implementing [`FromByteArray`] (primitives, fixed-size structs)
+/// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
+/// - [`Option<T>`] where `T: Readable`
+/// - [`String`]
+///
+/// Collections are serialized as a little-endian `u64` length prefix followed by each element.
+///
+/// You typically don't need to implement or call this trait directly — use
+/// [`ReadByteable::read_byteable`] instead.
+pub trait Readable: Sized {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self>;
 }
 
-impl<T: FromByteArray> ByteableReadable for T {
+impl<T: FromByteArray> Readable for T {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let mut b = T::ByteArray::zeroed();
         reader.read_exact(b.as_byte_slice_mut())?;
@@ -24,7 +36,7 @@ impl<T: FromByteArray> ByteableReadable for T {
     }
 }
 
-impl<T: ByteableReadable> ByteableReadable for Vec<T> {
+impl<T: Readable> Readable for Vec<T> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let len: LittleEndian<u64> = reader.read_byteable()?;
         let len = len.get() as usize;
@@ -36,7 +48,7 @@ impl<T: ByteableReadable> ByteableReadable for Vec<T> {
     }
 }
 
-impl<T: ByteableReadable> ByteableReadable for VecDeque<T> {
+impl<T: Readable> Readable for VecDeque<T> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let len: LittleEndian<u64> = reader.read_byteable()?;
         let len = len.get() as usize;
@@ -48,10 +60,10 @@ impl<T: ByteableReadable> ByteableReadable for VecDeque<T> {
     }
 }
 
-impl<K, V, S> ByteableReadable for HashMap<K, V, S>
+impl<K, V, S> Readable for HashMap<K, V, S>
 where
-    K: ByteableReadable + Eq + Hash,
-    V: ByteableReadable,
+    K: Readable + Eq + Hash,
+    V: Readable,
     S: BuildHasher + Default,
 {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
@@ -67,9 +79,9 @@ where
     }
 }
 
-impl<T, S> ByteableReadable for HashSet<T, S>
+impl<T, S> Readable for HashSet<T, S>
 where
-    T: ByteableReadable + Eq + Hash,
+    T: Readable + Eq + Hash,
     S: BuildHasher + Default,
 {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
@@ -83,7 +95,7 @@ where
     }
 }
 
-impl<K: ByteableReadable + Ord, V: ByteableReadable> ByteableReadable for BTreeMap<K, V> {
+impl<K: Readable + Ord, V: Readable> Readable for BTreeMap<K, V> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let len: LittleEndian<u64> = reader.read_byteable()?;
         let len = len.get() as usize;
@@ -97,7 +109,7 @@ impl<K: ByteableReadable + Ord, V: ByteableReadable> ByteableReadable for BTreeM
     }
 }
 
-impl<T: ByteableReadable + Ord> ByteableReadable for BTreeSet<T> {
+impl<T: Readable + Ord> Readable for BTreeSet<T> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let len: LittleEndian<u64> = reader.read_byteable()?;
         let len = len.get() as usize;
@@ -109,7 +121,7 @@ impl<T: ByteableReadable + Ord> ByteableReadable for BTreeSet<T> {
     }
 }
 
-impl<T: ByteableReadable> ByteableReadable for Option<T> {
+impl<T: Readable> Readable for Option<T> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let tag: u8 = reader.read_byteable()?;
         match tag {
@@ -123,7 +135,7 @@ impl<T: ByteableReadable> ByteableReadable for Option<T> {
     }
 }
 
-impl ByteableReadable for String {
+impl Readable for String {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let len: LittleEndian<u64> = reader.read_byteable()?;
         let len = len.get() as usize;
@@ -134,18 +146,30 @@ impl ByteableReadable for String {
     }
 }
 
-pub trait ByteableWritable {
+/// Low-level trait for writing a value to a [`std::io::Write`] sink.
+///
+/// This trait is implemented for:
+/// - Types implementing [`IntoByteArray`] (primitives, fixed-size structs)
+/// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
+/// - [`Option<T>`] where `T: Writable`
+/// - [`str`] and [`String`]
+///
+/// Collections are serialized as a little-endian `u64` length prefix followed by each element.
+///
+/// You typically don't need to implement or call this trait directly — use
+/// [`WriteByteable::write_byteable`] instead.
+pub trait Writable {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()>;
 }
 
-impl<T: IntoByteArray> ByteableWritable for T {
+impl<T: IntoByteArray> Writable for T {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let byte_array = self.into_byte_array();
         writer.write_all(byte_array.as_byte_slice())
     }
 }
 
-impl<T: ByteableWritable> ByteableWritable for Vec<T> {
+impl<T: Writable> Writable for Vec<T> {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let len = LittleEndian::new(self.len() as u64);
         writer.write_byteable(&len)?;
@@ -156,7 +180,7 @@ impl<T: ByteableWritable> ByteableWritable for Vec<T> {
     }
 }
 
-impl<T: ByteableWritable> ByteableWritable for VecDeque<T> {
+impl<T: Writable> Writable for VecDeque<T> {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let len = LittleEndian::new(self.len() as u64);
         writer.write_byteable(&len)?;
@@ -167,10 +191,10 @@ impl<T: ByteableWritable> ByteableWritable for VecDeque<T> {
     }
 }
 
-impl<K, V, S> ByteableWritable for HashMap<K, V, S>
+impl<K, V, S> Writable for HashMap<K, V, S>
 where
-    K: ByteableWritable,
-    V: ByteableWritable,
+    K: Writable,
+    V: Writable,
     S: BuildHasher,
 {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
@@ -184,9 +208,9 @@ where
     }
 }
 
-impl<T, S> ByteableWritable for HashSet<T, S>
+impl<T, S> Writable for HashSet<T, S>
 where
-    T: ByteableWritable,
+    T: Writable,
     S: BuildHasher,
 {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
@@ -199,7 +223,7 @@ where
     }
 }
 
-impl<K: ByteableWritable, V: ByteableWritable> ByteableWritable for BTreeMap<K, V> {
+impl<K: Writable, V: Writable> Writable for BTreeMap<K, V> {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let len = LittleEndian::new(self.len() as u64);
         writer.write_byteable(&len)?;
@@ -211,7 +235,7 @@ impl<K: ByteableWritable, V: ByteableWritable> ByteableWritable for BTreeMap<K, 
     }
 }
 
-impl<T: ByteableWritable> ByteableWritable for BTreeSet<T> {
+impl<T: Writable> Writable for BTreeSet<T> {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let len = LittleEndian::new(self.len() as u64);
         writer.write_byteable(&len)?;
@@ -222,7 +246,7 @@ impl<T: ByteableWritable> ByteableWritable for BTreeSet<T> {
     }
 }
 
-impl<T: ByteableWritable> ByteableWritable for Option<T> {
+impl<T: Writable> Writable for Option<T> {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         match self {
             None => writer.write_byteable(&0u8),
@@ -234,7 +258,7 @@ impl<T: ByteableWritable> ByteableWritable for Option<T> {
     }
 }
 
-impl ByteableWritable for str {
+impl Writable for str {
     fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         let len = LittleEndian::new(self.len() as u64);
         writer.write_byteable(&len)?;
@@ -242,16 +266,22 @@ impl ByteableWritable for str {
     }
 }
 
-impl ByteableWritable for String {
+impl Writable for String {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         self.as_str().write_to(writer)
     }
 }
 
-/// Extension trait for `Read` that adds methods for reading `Byteable` types.
+/// Extension trait for `Read` that adds methods for reading [`Readable`] types.
 ///
 /// This trait is automatically implemented for all types that implement `std::io::Read`,
 /// providing convenient methods for reading binary data directly into Rust types.
+///
+/// The `T` in `read_byteable::<T>()` must implement [`Readable`], which covers:
+/// - Primitive types and fixed-size structs (via [`FromByteArray`])
+/// - Collections ([`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`])
+///   serialized as a little-endian `u64` length prefix followed by each element
+/// - [`Option<T>`], [`String`]
 ///
 /// # Examples
 ///
@@ -316,15 +346,15 @@ impl ByteableWritable for String {
 /// # }
 /// ```
 pub trait ReadByteable: Read {
-    /// Reads a `Byteable` type from this reader.
+    /// Reads a [`Readable`] type from this reader.
     ///
-    /// This method reads exactly `T::BYTE_SIZE` bytes from the reader and converts
-    /// them into a value of type `T`.
+    /// Delegates to `T`'s [`Readable`] implementation. For fixed-size types this reads a
+    /// fixed number of bytes; for collection types this reads a length-prefixed sequence.
     ///
     /// # Errors
     ///
     /// This method returns an error if:
-    /// - The reader reaches EOF before reading `T::BYTE_SIZE` bytes
+    /// - The reader reaches EOF before all required bytes have been read
     /// - Any underlying I/O error occurs
     ///
     /// # Examples
@@ -341,7 +371,7 @@ pub trait ReadByteable: Read {
     /// assert_eq!(value, 0x78563412);
     /// ```
     #[inline]
-    fn read_byteable<T: ByteableReadable>(&mut self) -> std::io::Result<T> {
+    fn read_byteable<T: Readable>(&mut self) -> std::io::Result<T> {
         T::read_from(self)
     }
 }
@@ -349,10 +379,16 @@ pub trait ReadByteable: Read {
 // Blanket implementation: any type that implements Read automatically gets ReadByteable
 impl<T: Read> ReadByteable for T {}
 
-/// Extension trait for `Write` that adds methods for writing `Byteable` types.
+/// Extension trait for `Write` that adds methods for writing [`Writable`] types.
 ///
 /// This trait is automatically implemented for all types that implement `std::io::Write`,
 /// providing convenient methods for writing Rust types directly as binary data.
+///
+/// The `T` in `write_byteable(&value)` must implement [`Writable`], which covers:
+/// - Primitive types and fixed-size structs (via [`IntoByteArray`])
+/// - Collections ([`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`])
+///   serialized as a little-endian `u64` length prefix followed by each element
+/// - [`Option<T>`], [`str`], [`String`]
 ///
 /// # Examples
 ///
@@ -421,10 +457,10 @@ impl<T: Read> ReadByteable for T {}
 /// );
 /// ```
 pub trait WriteByteable: Write {
-    /// Writes a `Byteable` type to this writer.
+    /// Writes a [`Writable`] type to this writer.
     ///
-    /// This method converts the value into its byte array representation and writes
-    /// all bytes to the writer.
+    /// Delegates to `T`'s [`Writable`] implementation. For fixed-size types this writes a
+    /// fixed number of bytes; for collection types this writes a length-prefixed sequence.
     ///
     /// # Errors
     ///
@@ -443,7 +479,7 @@ pub trait WriteByteable: Write {
     /// assert_eq!(buffer.into_inner(), vec![0x78, 0x56, 0x34, 0x12]);
     /// ```
     #[inline]
-    fn write_byteable<T: ByteableWritable>(&mut self, data: &T) -> std::io::Result<()> {
+    fn write_byteable<T: Writable>(&mut self, data: &T) -> std::io::Result<()> {
         data.write_to(self)
     }
 }
@@ -464,95 +500,111 @@ impl<T: Write> WriteByteable for T {}
 /// # Examples
 ///
 /// ```
-/// use byteable::TryByteableError;
+/// use byteable::ByteableIoError;
 /// use std::io;
 ///
-/// fn handle_error<E: std::fmt::Display>(err: TryByteableError<E>) {
+/// fn handle_error<E: std::fmt::Display>(err: ByteableIoError<E>) {
 ///     match err {
-///         TryByteableError::Io(io_err) => {
+///         ByteableIoError::Io(io_err) => {
 ///             eprintln!("I/O error: {}", io_err);
 ///         }
-///         TryByteableError::Conversion(conv_err) => {
+///         ByteableIoError::Conversion(conv_err) => {
 ///             eprintln!("Conversion error: {}", conv_err);
 ///         }
 ///     }
 /// }
 /// ```
 #[derive(Debug)]
-pub enum TryByteableError<E> {
+pub enum ByteableIoError<E> {
     /// An I/O error occurred while reading or writing bytes.
     Io(std::io::Error),
     /// A conversion error occurred while converting between bytes and values.
     Conversion(E),
 }
 
-impl<E: fmt::Display> fmt::Display for TryByteableError<E> {
+impl<E: fmt::Display> fmt::Display for ByteableIoError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TryByteableError::Io(err) => write!(f, "I/O error: {}", err),
-            TryByteableError::Conversion(err) => write!(f, "Conversion error: {}", err),
+            ByteableIoError::Io(err) => write!(f, "I/O error: {}", err),
+            ByteableIoError::Conversion(err) => write!(f, "Conversion error: {}", err),
         }
     }
 }
 
-impl<E: Error + 'static> Error for TryByteableError<E> {
+impl<E: Error + 'static> Error for ByteableIoError<E> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            TryByteableError::Io(err) => Some(err),
-            TryByteableError::Conversion(err) => Some(err),
+            ByteableIoError::Io(err) => Some(err),
+            ByteableIoError::Conversion(err) => Some(err),
         }
     }
 }
 
-impl<E> From<std::io::Error> for TryByteableError<E> {
+impl<E> From<std::io::Error> for ByteableIoError<E> {
     #[inline]
     fn from(err: std::io::Error) -> Self {
-        TryByteableError::Io(err)
+        ByteableIoError::Io(err)
     }
 }
 
-pub trait ByteableTryWritable {
+/// Low-level trait for writing a value to a [`std::io::Write`] sink with fallible conversion.
+///
+/// Implemented for all types that implement [`TryIntoByteArray`]. Unlike [`Writable`], the
+/// conversion to bytes can fail — useful for validated types or enums where not every bit pattern
+/// represents a valid value.
+///
+/// You typically don't need to implement or call this trait directly — use
+/// [`TryWriteByteable::write_try_byteable`] instead.
+pub trait TryWritable {
     type Error;
 
     fn try_write_to(
         &self,
         writer: &mut (impl Write + ?Sized),
-    ) -> Result<(), TryByteableError<Self::Error>>;
+    ) -> Result<(), ByteableIoError<Self::Error>>;
 }
 
-pub trait ByteableTryReadable: Sized {
+/// Low-level trait for reading a value from a [`std::io::Read`] source with fallible conversion.
+///
+/// Implemented for all types that implement [`TryFromByteArray`]. Unlike [`Readable`], the
+/// conversion from bytes can fail — useful for types like `bool`, `char`, or enums where not every
+/// bit pattern represents a valid value.
+///
+/// You typically don't need to implement or call this trait directly — use
+/// [`TryReadByteable::read_try_byteable`] instead.
+pub trait TryReadable: Sized {
     type Error;
 
     fn try_read_from(
         reader: &mut (impl Read + ?Sized),
-    ) -> Result<Self, TryByteableError<Self::Error>>;
+    ) -> Result<Self, ByteableIoError<Self::Error>>;
 }
 
-impl<T: TryIntoByteArray> ByteableTryWritable for T {
+impl<T: TryIntoByteArray> TryWritable for T {
     type Error = <T as TryIntoByteArray>::Error;
 
     fn try_write_to(
         &self,
         writer: &mut (impl Write + ?Sized),
-    ) -> Result<(), TryByteableError<Self::Error>> {
+    ) -> Result<(), ByteableIoError<Self::Error>> {
         let byte_array = self
             .try_into_byte_array()
-            .map_err(TryByteableError::Conversion)?;
+            .map_err(ByteableIoError::Conversion)?;
         writer.write_all(byte_array.as_byte_slice())?;
         Ok(())
     }
 }
 
-impl<T: TryFromByteArray> ByteableTryReadable for T {
+impl<T: TryFromByteArray> TryReadable for T {
     type Error = <T as TryFromByteArray>::Error;
 
     fn try_read_from(
         reader: &mut (impl Read + ?Sized),
-    ) -> Result<Self, TryByteableError<Self::Error>> {
+    ) -> Result<Self, ByteableIoError<Self::Error>> {
         let mut b = T::ByteArray::zeroed();
         reader.read_exact(b.as_byte_slice_mut())?;
 
-        T::try_from_byte_array(b).map_err(TryByteableError::Conversion)
+        T::try_from_byte_array(b).map_err(ByteableIoError::Conversion)
     }
 }
 
@@ -564,7 +616,7 @@ impl<T: TryFromByteArray> ByteableTryReadable for T {
 ///
 /// # Error Handling
 ///
-/// This trait returns [`TryByteableError<E>`] which distinguishes between:
+/// This trait returns [`ByteableIoError<E>`] which distinguishes between:
 /// - I/O errors (failed to read bytes from the source)
 /// - Conversion errors (bytes were read successfully but conversion failed)
 ///
@@ -573,7 +625,7 @@ impl<T: TryFromByteArray> ByteableTryReadable for T {
 /// ## Reading with validation
 ///
 /// ```
-/// use byteable::{AssociatedByteArray, TryFromByteArray, ReadTryByteable};
+/// use byteable::{AssociatedByteArray, TryFromByteArray, TryReadByteable};
 /// use std::io::Cursor;
 ///
 /// // A type that only accepts even values
@@ -622,25 +674,25 @@ impl<T: TryFromByteArray> ByteableTryReadable for T {
 /// # Ok(())
 /// # }
 /// ```
-pub trait ReadTryByteable: Read {
-    /// Reads a type with fallible conversion from this reader.
+pub trait TryReadByteable: Read {
+    /// Reads a [`TryReadable`] type with fallible conversion from this reader.
     ///
-    /// This method reads exactly `T::BYTE_SIZE` bytes from the reader and attempts
-    /// to convert them into a value of type `T`.
+    /// This method reads the number of bytes required by `T`'s [`TryFromByteArray`] implementation
+    /// and attempts to convert them into a value of type `T`.
     ///
     /// # Errors
     ///
-    /// This method returns [`TryByteableError::Io`] if:
-    /// - The reader reaches EOF before reading `T::BYTE_SIZE` bytes
+    /// This method returns [`ByteableIoError::Io`] if:
+    /// - The reader reaches EOF before all required bytes have been read
     /// - Any underlying I/O error occurs
     ///
-    /// This method returns [`TryByteableError::Conversion`] if:
+    /// This method returns [`ByteableIoError::Conversion`] if:
     /// - The bytes were read successfully but `try_from_byte_array` failed
     ///
     /// # Examples
     ///
     /// ```
-    /// use byteable::ReadTryByteable;
+    /// use byteable::TryReadByteable;
     /// use std::io::Cursor;
     ///
     /// let data = vec![42, 0, 0, 0];
@@ -652,15 +704,13 @@ pub trait ReadTryByteable: Read {
     /// assert_eq!(value, 42);
     /// ```
     #[inline]
-    fn read_try_byteable<T: ByteableTryReadable>(
-        &mut self,
-    ) -> Result<T, TryByteableError<T::Error>> {
+    fn read_try_byteable<T: TryReadable>(&mut self) -> Result<T, ByteableIoError<T::Error>> {
         T::try_read_from(self)
     }
 }
 
-// Blanket implementation: any type that implements Read automatically gets ReadTryByteable
-impl<T: Read> ReadTryByteable for T {}
+// Blanket implementation: any type that implements Read automatically gets TryReadByteable
+impl<T: Read> TryReadByteable for T {}
 
 /// Extension trait for `Write` that adds methods for writing types with fallible conversion.
 ///
@@ -670,7 +720,7 @@ impl<T: Read> ReadTryByteable for T {}
 ///
 /// # Error Handling
 ///
-/// This trait returns [`TryByteableError<E>`] which distinguishes between:
+/// This trait returns [`ByteableIoError<E>`] which distinguishes between:
 /// - Conversion errors (failed to convert value to bytes)
 /// - I/O errors (conversion succeeded but writing bytes failed)
 ///
@@ -679,7 +729,7 @@ impl<T: Read> ReadTryByteable for T {}
 /// ## Writing with validation
 ///
 /// ```
-/// use byteable::{AssociatedByteArray, TryIntoByteArray, WriteTryByteable};
+/// use byteable::{AssociatedByteArray, TryIntoByteArray, TryWriteByteable};
 /// use std::io::Cursor;
 ///
 /// // A type that only accepts even values
@@ -722,24 +772,24 @@ impl<T: Read> ReadTryByteable for T {}
 /// # Ok(())
 /// # }
 /// ```
-pub trait WriteTryByteable: Write {
-    /// Writes a type with fallible conversion to this writer.
+pub trait TryWriteByteable: Write {
+    /// Writes a [`TryWritable`] type with fallible conversion to this writer.
     ///
-    /// This method attempts to convert the value into its byte array representation
-    /// and writes all bytes to the writer.
+    /// This method attempts to convert the value to bytes via [`TryIntoByteArray`] and then
+    /// writes all bytes to the writer.
     ///
     /// # Errors
     ///
-    /// This method returns [`TryByteableError::Conversion`] if:
+    /// This method returns [`ByteableIoError::Conversion`] if:
     /// - The value could not be converted to bytes (`try_into_byte_array` failed)
     ///
-    /// This method returns [`TryByteableError::Io`] if:
+    /// This method returns [`ByteableIoError::Io`] if:
     /// - Any underlying I/O error occurs while writing
     ///
     /// # Examples
     ///
     /// ```
-    /// use byteable::WriteTryByteable;
+    /// use byteable::TryWriteByteable;
     /// use std::io::Cursor;
     ///
     /// let mut buffer = Cursor::new(Vec::new());
@@ -751,23 +801,23 @@ pub trait WriteTryByteable: Write {
     /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
     /// ```
     #[inline]
-    fn write_try_byteable<T: ByteableTryWritable>(
+    fn write_try_byteable<T: TryWritable>(
         &mut self,
         data: &T,
-    ) -> Result<(), TryByteableError<T::Error>> {
+    ) -> Result<(), ByteableIoError<T::Error>> {
         data.try_write_to(self)
     }
 }
 
-// Blanket implementation: any type that implements Write automatically gets WriteTryByteable
-impl<T: Write> WriteTryByteable for T {}
+// Blanket implementation: any type that implements Write automatically gets TryWriteByteable
+impl<T: Write> TryWriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
     use byteable_derive::UnsafeByteableTransmute;
     use thiserror::Error;
 
-    use super::{ReadByteable, ReadTryByteable, TryByteableError, WriteByteable, WriteTryByteable};
+    use super::{ByteableIoError, ReadByteable, TryReadByteable, TryWriteByteable, WriteByteable};
     use crate::{
         AssociatedByteArray, BigEndian, LittleEndian, TryFromByteArray, TryIntoByteArray,
         impl_byteable_via,
@@ -884,11 +934,11 @@ mod tests {
         Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
     }
 
-    impl From<TryByteableError<ConversionError>> for MyBiggerError {
-        fn from(value: TryByteableError<ConversionError>) -> Self {
+    impl From<ByteableIoError<ConversionError>> for MyBiggerError {
+        fn from(value: ByteableIoError<ConversionError>) -> Self {
             match value {
-                TryByteableError::Io(error) => error.into(),
-                TryByteableError::Conversion(error) => error.into(),
+                ByteableIoError::Io(error) => error.into(),
+                ByteableIoError::Conversion(error) => error.into(),
             }
         }
     }
@@ -953,8 +1003,8 @@ mod tests {
         let data = vec![43, 0, 0, 0]; // Odd value
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, TryByteableError<ConversionError>> = cursor.read_try_byteable();
-        assert!(matches!(result, Err(TryByteableError::Conversion(_))));
+        let result: Result<EvenU32, ByteableIoError<ConversionError>> = cursor.read_try_byteable();
+        assert!(matches!(result, Err(ByteableIoError::Conversion(_))));
     }
 
     #[test]
@@ -987,11 +1037,11 @@ mod tests {
         let data = vec![1, 2]; // Not enough bytes
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, TryByteableError<ConversionError>> = cursor.read_try_byteable();
+        let result: Result<EvenU32, ByteableIoError<ConversionError>> = cursor.read_try_byteable();
         assert!(result.is_err());
 
         match result {
-            Err(TryByteableError::Io(_)) => {
+            Err(ByteableIoError::Io(_)) => {
                 // Expected
             }
             _ => panic!("Expected I/O error"),
@@ -1017,7 +1067,7 @@ mod tests {
         assert!(result.is_err());
 
         match result {
-            Err(TryByteableError::Conversion(_)) => {
+            Err(ByteableIoError::Conversion(_)) => {
                 // Expected
             }
             _ => panic!("Expected conversion error"),

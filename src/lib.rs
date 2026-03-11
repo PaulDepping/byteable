@@ -257,7 +257,7 @@
 //! 2. **Unit variants only**: All variants must be unit variants (no fields)
 //! 3. **Explicit discriminants**: All variants must have explicit values
 //! 4. **Fallible conversion**: Use `TryFromByteArray` (not `FromByteArray`) because invalid
-//!    discriminants return `EnumFromBytesError`
+//!    discriminants return `InvalidDiscriminantError`
 //!
 //! ### Nested Enums in Structs
 //!
@@ -358,18 +358,18 @@ pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 pub use byte_array::ByteArray;
 
 pub use byteable_trait::{
-    AssociatedByteArray, BoolRaw, CharRaw, Discriminant, EnumFromBytesError, FromByteArray,
-    HasRawType, IntoByteArray, TryFromByteArray, TryHasRawType, TryIntoByteArray,
+    AssociatedByteArray, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
+    RawBool, RawChar, RawRepr, TryFromByteArray, TryIntoByteArray, TryRawRepr,
 };
 
 #[cfg(feature = "std")]
-pub use io::{ReadByteable, ReadTryByteable, TryByteableError, WriteByteable, WriteTryByteable};
+pub use io::{ByteableIoError, ReadByteable, TryReadByteable, TryWriteByteable, WriteByteable};
 
 #[cfg(feature = "tokio")]
 pub use async_io::{
-    AsyncReadByteable, AsyncReadTryByteable, AsyncWriteByteable, AsyncWriteTryByteable,
+    AsyncReadByteable, AsyncTryReadByteable, AsyncTryWriteByteable, AsyncWriteByteable,
 };
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 
-pub use derive_safety_helpers::ValidBytecastMarker;
+pub use derive_safety_helpers::BytecastSafe;

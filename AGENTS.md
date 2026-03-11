@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to AI-Agents when working with code in this repository.
+This file provides guidance to AI agents when working with code in this repository.
 
 ## Project Overview
 
@@ -113,15 +113,16 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 #### Safety Validation ([src/derive_safety_helpers.rs](src/derive_safety_helpers.rs))
 
-- **`ValidBytecastMarker` trait** - Marks types safe for `transmute`-based conversions
-- Automatically implemented for primitive types, endian wrappers, and arrays
-- Raw structs require all fields to implement `ValidBytecastMarker`
+- **`BytecastSafe` trait** - Marks types safe for `transmute`-based conversions
+- Automatically implemented for `u8`, `i8`, endian wrappers, and arrays thereof
+- Multi-byte primitives (`u16`, `u32`, etc.) are **not** implemented — must use `BigEndian<T>`/`LittleEndian<T>` wrappers
+- Raw structs require all fields to implement `BytecastSafe`
 - This prevents unsafe usage with types like `String`, `Vec`, references, etc.
 
 #### I/O Extension Traits
 
-- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadByteable`, `WriteByteable` - Extend `std::io::Read`/`Write`
-- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadByteable`, `AsyncWriteByteable` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
+- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadByteable`, `WriteByteable`, `TryReadByteable`, `TryWriteByteable` - Extend `std::io::Read`/`Write`
+- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadByteable`, `AsyncWriteByteable`, `AsyncTryReadByteable`, `AsyncTryWriteByteable` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
 
 ### Derive Macro Implementation ([byteable_derive/src/lib.rs](byteable_derive/src/lib.rs))
 
@@ -144,8 +145,8 @@ The `#[derive(Byteable)]` macro handles three cases:
 
 - `#[byteable(little_endian)]` - Wrap field in `LittleEndian<T>`
 - `#[byteable(big_endian)]` - Wrap field in `BigEndian<T>`
-- `#[byteable(transparent)]` - Use field's raw type (via `HasRawType::Raw`)
-- `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (via `TryHasRawType::Raw`)
+- `#[byteable(transparent)]` - Use field's raw type (via `RawRepr::Raw`)
+- `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (via `TryRawRepr::Raw`)
 
 When `try_transparent` is used, the struct implements `TryFromByteArray` instead of `FromByteArray`.
 
@@ -200,7 +201,7 @@ Important test files:
 - [tests/enum_test.rs](tests/enum_test.rs) - C-like enum derive validation
 - [tests/primitive_types_test.rs](tests/primitive_types_test.rs) - `bool`, `char` validation
 - [tests/try_transparent_test.rs](tests/try_transparent_test.rs) - Nested enum/validated types
-- [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `ValidBytecastMarker` tests
+- [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `BytecastSafe` tests
 
 ## Common Patterns
 
@@ -209,7 +210,7 @@ Important test files:
 If adding support for a new primitive type that needs validation (like `bool`, `char`):
 
 1. Implement `TryFromByteArray` instead of `FromByteArray`
-2. Add validation logic that returns `EnumFromBytesError` for invalid byte patterns
+2. Add validation logic that returns `InvalidDiscriminantError` for invalid byte patterns
 3. Implement `IntoByteArray` for infallible conversion
 4. Add test coverage in [tests/primitive_types_test.rs](tests/primitive_types_test.rs)
 
