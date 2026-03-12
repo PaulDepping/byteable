@@ -1,9 +1,9 @@
 #![cfg(feature = "derive")]
 
-/// Tests for compile-time safety validation using BytecastSafe
+/// Tests for compile-time safety validation using TransmuteSafe
 ///
 /// This test demonstrates that the Byteable macros now enforce compile-time
-/// safety by requiring all field types to implement BytecastSafe.
+/// safety by requiring all field types to implement TransmuteSafe.
 use byteable::{Byteable, FromByteArray, IntoByteArray};
 
 // This should compile - all fields are safe types
@@ -80,20 +80,20 @@ fn test_nested_safe_types_compile() {
 #[derive(Clone, Copy, Byteable)]
 struct UnsafePacket1 {
     id: u8,
-    is_valid: bool, // ERROR: bool doesn't implement BytecastSafe
+    is_valid: bool, // ERROR: bool doesn't implement TransmuteSafe
 }
 
 // This should NOT compile - char has invalid bit patterns
 #[derive(Clone, Copy, Byteable)]
 struct UnsafePacket2 {
     id: u8,
-    letter: char, // ERROR: char doesn't implement BytecastSafe
+    letter: char, // ERROR: char doesn't implement TransmuteSafe
 }
 
 // This should NOT compile - contains pointer
 #[derive(Clone, Copy, Byteable)]
 struct UnsafePacket3<'a> {
     id: u8,
-    data_ref: &'a [u8], // ERROR: &T doesn't implement BytecastSafe
+    data_ref: &'a [u8], // ERROR: &T doesn't implement TransmuteSafe
 }
 */

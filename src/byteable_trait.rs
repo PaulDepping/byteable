@@ -1,7 +1,7 @@
 //! Core traits for byte-oriented serialization and deserialization.
 //!
 //! This module contains the fundamental traits for converting types to and from byte arrays:
-//! - [`AssociatedByteArray`]: Associates a type with its byte array representation
+//! - [`ByteRepr`]: Associates a type with its byte array representation
 //! - [`IntoByteArray`]: Converts a value into a byte array
 //! - [`FromByteArray`]: Constructs a value from a byte array
 //! - [`TryFromByteArray`]: Fallible construction from a byte array
@@ -10,7 +10,7 @@
 //! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
 //! the crate, along with helper macros for implementing them.
 
-use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
+use crate::{TransmuteSafe, LittleEndian, byte_array::FixedBytes};
 
 /// Associates a type with its byte array representation.
 ///
@@ -21,7 +21,7 @@ use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
 /// # Associated Types
 ///
 /// - `ByteArray`: The type of the byte array representation. Usually `[u8; N]` where `N`
-///   is the size of the type in bytes. This must implement the [`ByteArray`] trait.
+///   is the size of the type in bytes. This must implement the [`FixedBytes`] trait.
 ///
 /// # Associated Constants
 ///
@@ -31,15 +31,15 @@ use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
 /// # Usage
 ///
 /// This trait is typically not implemented directly. Instead, implement the higher-level traits
-/// [`IntoByteArray`] and [`FromByteArray`], which require `AssociatedByteArray` as a supertrait,
+/// [`IntoByteArray`] and [`FromByteArray`], which require `ByteRepr` as a supertrait,
 /// or use the `#[derive(Byteable)]` macro which implements all necessary traits automatically.
 ///
 /// # Examples
 ///
 /// ```
-/// use byteable::{AssociatedByteArray, IntoByteArray, FromByteArray};
+/// use byteable::{ByteRepr, IntoByteArray, FromByteArray};
 ///
-/// // Primitive types implement AssociatedByteArray
+/// // Primitive types implement ByteRepr
 /// assert_eq!(u32::BYTE_SIZE, 4);
 /// assert_eq!(u64::BYTE_SIZE, 8);
 ///
@@ -51,7 +51,7 @@ use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
 ///
 /// ```
 /// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, AssociatedByteArray};
+/// use byteable::{Byteable, ByteRepr};
 ///
 /// #[derive(Byteable, Clone, Copy)]
 /// struct Point {
@@ -59,12 +59,12 @@ use crate::{BytecastSafe, LittleEndian, byte_array::ByteArray};
 ///     y: u8,
 /// }
 ///
-/// // AssociatedByteArray is automatically implemented
+/// // ByteRepr is automatically implemented
 /// assert_eq!(Point::BYTE_SIZE, 2);
 /// # }
 /// ```
-pub trait AssociatedByteArray: Copy {
-    type ByteArray: ByteArray;
+pub trait ByteRepr: Copy {
+    type ByteArray: FixedBytes;
     const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
 }
 
@@ -121,7 +121,7 @@ pub trait AssociatedByteArray: Copy {
 /// assert_eq!(bytes, [255, 128, 64, 255]);
 /// # }
 /// ```
-pub trait IntoByteArray: AssociatedByteArray {
+pub trait IntoByteArray: ByteRepr {
     /// Converts `self` into its byte array representation.
     ///
     /// This method consumes the value and returns its byte representation.
@@ -178,7 +178,7 @@ pub trait IntoByteArray: AssociatedByteArray {
 /// assert_eq!(color, Color { r: 255, g: 128, b: 64, a: 255 });
 /// # }
 /// ```
-pub trait FromByteArray: AssociatedByteArray {
+pub trait FromByteArray: ByteRepr {
     /// Constructs a value from its byte array representation.
     ///
     /// This method consumes the byte array and returns the reconstructed value.
@@ -201,7 +201,7 @@ pub trait FromByteArray: AssociatedByteArray {
 /// let value = u32::try_from_byte_array(bytes).unwrap();
 /// assert_eq!(value, u32::from_byte_array(bytes));
 /// ```
-pub trait TryFromByteArray: AssociatedByteArray + Sized {
+pub trait TryFromByteArray: ByteRepr + Sized {
     /// The type returned in the event of a conversion error.
     type Error;
 
@@ -250,12 +250,12 @@ impl<T: FromByteArray> TryFromByteArray for T {
 /// // The generated raw types are properly nested and type-safe
 /// # }
 /// ```
-pub trait RawRepr: AssociatedByteArray + From<Self::Raw> + IntoByteArray + FromByteArray {
+pub trait RawRepr: ByteRepr + From<Self::Raw> + IntoByteArray + FromByteArray {
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
     /// that handles the actual memory layout and byte-level operations.
-    type Raw: AssociatedByteArray + From<Self> + IntoByteArray + FromByteArray;
+    type Raw: ByteRepr + From<Self> + IntoByteArray + FromByteArray;
 }
 
 /// A trait for types that have a corresponding raw representation type with fallible conversion.
@@ -297,13 +297,13 @@ pub trait RawRepr: AssociatedByteArray + From<Self::Raw> + IntoByteArray + FromB
 /// # }
 /// ```
 pub trait TryRawRepr:
-    AssociatedByteArray + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray
+    ByteRepr + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray
 {
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
     /// that handles the actual memory layout and byte-level operations.
-    type Raw: AssociatedByteArray + From<Self> + IntoByteArray + FromByteArray;
+    type Raw: ByteRepr + From<Self> + IntoByteArray + FromByteArray;
 }
 
 /// Blanket implementation of `TryRawRepr` for types that implement `RawRepr`.
@@ -317,7 +317,7 @@ impl<T: RawRepr> TryRawRepr for T {
 // Implementation of Byteable for fixed-size arrays of Byteable types
 // This allows [T; N] to be Byteable if T is Byteable
 
-impl<T: AssociatedByteArray, const SIZE: usize> AssociatedByteArray for [T; SIZE] {
+impl<T: ByteRepr, const SIZE: usize> ByteRepr for [T; SIZE] {
     type ByteArray = [T::ByteArray; SIZE];
 }
 
@@ -382,7 +382,7 @@ impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
 macro_rules! unsafe_byteable_transmute {
     ($($type:ty),+) => {
         $(
-            impl $crate::AssociatedByteArray for $type {
+            impl $crate::ByteRepr for $type {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
             }
 
@@ -463,8 +463,8 @@ macro_rules! unsafe_byteable_transmute {
 #[macro_export]
 macro_rules! impl_byteable_via {
     ($regular_type:ty => $raw_type:ty) => {
-        impl $crate::AssociatedByteArray for $regular_type {
-            type ByteArray = <$raw_type as $crate::AssociatedByteArray>::ByteArray;
+        impl $crate::ByteRepr for $regular_type {
+            type ByteArray = <$raw_type as $crate::ByteRepr>::ByteArray;
         }
 
         impl $crate::IntoByteArray for $regular_type {
@@ -488,7 +488,7 @@ macro_rules! impl_byteable_via {
 macro_rules! impl_byteable_primitive {
     ($($type:ty),+) => {
         $(
-            impl $crate::AssociatedByteArray for $type {
+            impl $crate::ByteRepr for $type {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
             }
 
@@ -516,7 +516,7 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 #[doc(hidden)]
 pub struct RawBool(u8);
 
-unsafe impl BytecastSafe for RawBool {}
+unsafe impl TransmuteSafe for RawBool {}
 
 unsafe_byteable_transmute!(RawBool);
 
@@ -548,7 +548,7 @@ impl TryFrom<RawBool> for bool {
 #[doc(hidden)]
 pub struct RawChar(LittleEndian<u32>);
 
-unsafe impl BytecastSafe for RawChar {}
+unsafe impl TransmuteSafe for RawChar {}
 
 unsafe_byteable_transmute!(RawChar);
 
@@ -575,12 +575,12 @@ impl TryFrom<RawChar> for char {
     }
 }
 
-// Generates AssociatedByteArray, IntoByteArray, TryFromByteArray, and TryRawRepr for a type
+// Generates ByteRepr, IntoByteArray, TryFromByteArray, and TryRawRepr for a type
 // that delegates to a raw wrapper type via TryRawRepr.
 macro_rules! impl_try_raw_byteable {
     ($type:ty, $raw:ty, $error:ty) => {
-        impl AssociatedByteArray for $type {
-            type ByteArray = <<$type as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
+        impl ByteRepr for $type {
+            type ByteArray = <<$type as TryRawRepr>::Raw as ByteRepr>::ByteArray;
         }
 
         impl IntoByteArray for $type {
@@ -735,7 +735,7 @@ impl std::error::Error for InvalidDiscriminantError {}
 
 #[cfg(all(test, feature = "derive"))]
 mod tests {
-    use crate::{AssociatedByteArray, BigEndian, FromByteArray, IntoByteArray, LittleEndian};
+    use crate::{ByteRepr, BigEndian, FromByteArray, IntoByteArray, LittleEndian};
     use byteable_derive::UnsafeByteableTransmute;
 
     #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]

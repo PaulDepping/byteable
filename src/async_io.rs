@@ -6,36 +6,31 @@
 //!
 //! This module is only available when the `tokio` feature is enabled.
 
-use crate::byte_array::ByteArray;
+use crate::byte_array::FixedBytes;
 use crate::{IntoByteArray, LittleEndian, TryFromByteArray};
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Low-level trait for asynchronously reading a value from a `tokio::io::AsyncRead` source.
+/// Low-level trait for asynchronously reading a fixed-size value from a `tokio::io::AsyncRead` source.
 ///
-/// This trait is the async counterpart of [`crate::io::Readable`]. It is implemented for:
-/// - Types implementing [`FromByteArray`] (primitives, fixed-size structs)
-/// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
-/// - [`Option<T>`] where `T: AsyncReadable`
-/// - [`String`]
+/// This is the async counterpart of [`crate::io::FixedReadable`]. It is implemented for all types
+/// implementing [`TryFromByteArray`] (primitives, fixed-size structs, enums, `bool`, `char`).
+/// These types have a statically-known byte size and need no length prefix.
 ///
-/// Collections are serialized as a little-endian `u64` length prefix followed by each element.
-///
-/// You typically don't need to implement or call this trait directly — use
-/// [`AsyncReadByteable::read_byteable`] instead.
-pub trait AsyncReadable: Sized {
-    fn read_from(
+/// Use the [`AsyncReadFixed`] extension trait to call `read_fixed` on any async reader.
+pub trait AsyncFixedReadable: Sized {
+    fn read_fixed_from(
         reader: &mut (impl tokio::io::AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>>;
 }
 
-impl<T: TryFromByteArray> AsyncReadable for T
+impl<T: TryFromByteArray> AsyncFixedReadable for T
 where
     T::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
 {
-    fn read_from(
+    fn read_fixed_from(
         reader: &mut (impl tokio::io::AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
@@ -47,27 +42,48 @@ where
     }
 }
 
-/// Low-level trait for asynchronously writing a value to a `tokio::io::AsyncWrite` sink.
+/// Low-level trait for asynchronously reading a value from a `tokio::io::AsyncRead` source.
 ///
-/// This trait is the async counterpart of [`crate::io::Writable`]. It is implemented for:
-/// - Types implementing [`IntoByteArray`] (primitives, fixed-size structs)
+/// This trait is the async counterpart of [`crate::io::Readable`]. It is implemented for:
+/// - All types implementing [`AsyncFixedReadable`] (primitives, fixed-size structs, enums, `bool`, `char`)
 /// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
-/// - [`Option<T>`] where `T: AsyncWritable`
-/// - [`str`] and [`String`]
+/// - [`Option<T>`] where `T: AsyncReadable`
+/// - [`String`]
 ///
 /// Collections are serialized as a little-endian `u64` length prefix followed by each element.
 ///
 /// You typically don't need to implement or call this trait directly — use
-/// [`AsyncWriteByteable::write_byteable`] instead.
-pub trait AsyncWritable {
-    fn write_to(
+/// [`AsyncReadValue::read_value`] or [`AsyncReadFixed::read_fixed`] instead.
+pub trait AsyncReadable: Sized {
+    fn read_from(
+        reader: &mut (impl tokio::io::AsyncReadExt + Unpin + ?Sized),
+    ) -> impl Future<Output = tokio::io::Result<Self>>;
+}
+
+impl<T: AsyncFixedReadable> AsyncReadable for T {
+    fn read_from(
+        reader: &mut (impl tokio::io::AsyncReadExt + Unpin + ?Sized),
+    ) -> impl Future<Output = tokio::io::Result<Self>> {
+        T::read_fixed_from(reader)
+    }
+}
+
+/// Low-level trait for asynchronously writing a fixed-size value to a `tokio::io::AsyncWrite` sink.
+///
+/// This is the async counterpart of [`crate::io::FixedWritable`]. It is implemented for all types
+/// implementing [`IntoByteArray`] (primitives, fixed-size structs). These types have a
+/// statically-known byte size and are written without a length prefix.
+///
+/// Use the [`AsyncWriteFixed`] extension trait to call `write_fixed` on any async writer.
+pub trait AsyncFixedWritable {
+    fn write_fixed_to(
         &self,
         writer: &mut (impl tokio::io::AsyncWriteExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<()>>;
 }
 
-impl<T: IntoByteArray> AsyncWritable for T {
-    fn write_to(
+impl<T: IntoByteArray> AsyncFixedWritable for T {
+    fn write_fixed_to(
         &self,
         writer: &mut (impl tokio::io::AsyncWriteExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<()>> {
@@ -78,16 +94,44 @@ impl<T: IntoByteArray> AsyncWritable for T {
     }
 }
 
+/// Low-level trait for asynchronously writing a value to a `tokio::io::AsyncWrite` sink.
+///
+/// This trait is the async counterpart of [`crate::io::Writable`]. It is implemented for:
+/// - All types implementing [`AsyncFixedWritable`] (primitives, fixed-size structs)
+/// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
+/// - [`Option<T>`] where `T: AsyncWritable`
+/// - [`str`] and [`String`]
+///
+/// Collections are serialized as a little-endian `u64` length prefix followed by each element.
+///
+/// You typically don't need to implement or call this trait directly — use
+/// [`AsyncWriteValue::write_value`] or [`AsyncWriteFixed::write_fixed`] instead.
+pub trait AsyncWritable {
+    fn write_to(
+        &self,
+        writer: &mut (impl tokio::io::AsyncWriteExt + Unpin + ?Sized),
+    ) -> impl Future<Output = tokio::io::Result<()>>;
+}
+
+impl<T: AsyncFixedWritable> AsyncWritable for T {
+    fn write_to(
+        &self,
+        writer: &mut (impl tokio::io::AsyncWriteExt + Unpin + ?Sized),
+    ) -> impl Future<Output = tokio::io::Result<()>> {
+        self.write_fixed_to(writer)
+    }
+}
+
 impl<T: AsyncReadable> AsyncReadable for Vec<T> {
     fn read_from(
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut result = Vec::with_capacity(len);
             for _ in 0..len {
-                result.push(reader.read_byteable().await?);
+                result.push(reader.read_value().await?);
             }
             Ok(result)
         }
@@ -101,10 +145,10 @@ impl<T: AsyncWritable> AsyncWritable for Vec<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
-                writer.write_byteable(el).await?;
+                writer.write_value(el).await?;
             }
             Ok(())
         }
@@ -116,11 +160,11 @@ impl<T: AsyncReadable> AsyncReadable for VecDeque<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut result = VecDeque::with_capacity(len);
             for _ in 0..len {
-                result.push_back(reader.read_byteable().await?);
+                result.push_back(reader.read_value().await?);
             }
             Ok(result)
         }
@@ -134,10 +178,10 @@ impl<T: AsyncWritable> AsyncWritable for VecDeque<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
-                writer.write_byteable(el).await?;
+                writer.write_value(el).await?;
             }
             Ok(())
         }
@@ -154,12 +198,12 @@ where
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut map = HashMap::with_capacity_and_hasher(len, S::default());
             for _ in 0..len {
-                let key = reader.read_byteable().await?;
-                let val = reader.read_byteable().await?;
+                let key = reader.read_value().await?;
+                let val = reader.read_value().await?;
                 map.insert(key, val);
             }
             Ok(map)
@@ -179,11 +223,11 @@ where
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for (k, v) in self {
-                writer.write_byteable(k).await?;
-                writer.write_byteable(v).await?;
+                writer.write_value(k).await?;
+                writer.write_value(v).await?;
             }
             Ok(())
         }
@@ -199,11 +243,11 @@ where
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut set = HashSet::with_capacity_and_hasher(len, S::default());
             for _ in 0..len {
-                set.insert(reader.read_byteable().await?);
+                set.insert(reader.read_value().await?);
             }
             Ok(set)
         }
@@ -221,10 +265,10 @@ where
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
-                writer.write_byteable(el).await?;
+                writer.write_value(el).await?;
             }
             Ok(())
         }
@@ -236,12 +280,12 @@ impl<K: AsyncReadable + Ord, V: AsyncReadable> AsyncReadable for BTreeMap<K, V> 
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut map = BTreeMap::new();
             for _ in 0..len {
-                let key = reader.read_byteable().await?;
-                let val = reader.read_byteable().await?;
+                let key = reader.read_value().await?;
+                let val = reader.read_value().await?;
                 map.insert(key, val);
             }
             Ok(map)
@@ -256,11 +300,11 @@ impl<K: AsyncWritable, V: AsyncWritable> AsyncWritable for BTreeMap<K, V> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for (k, v) in self {
-                writer.write_byteable(k).await?;
-                writer.write_byteable(v).await?;
+                writer.write_value(k).await?;
+                writer.write_value(v).await?;
             }
             Ok(())
         }
@@ -272,11 +316,11 @@ impl<T: AsyncReadable + Ord> AsyncReadable for BTreeSet<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut set = BTreeSet::new();
             for _ in 0..len {
-                set.insert(reader.read_byteable().await?);
+                set.insert(reader.read_value().await?);
             }
             Ok(set)
         }
@@ -290,10 +334,10 @@ impl<T: AsyncWritable> AsyncWritable for BTreeSet<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
-                writer.write_byteable(el).await?;
+                writer.write_value(el).await?;
             }
             Ok(())
         }
@@ -305,10 +349,10 @@ impl<T: AsyncReadable> AsyncReadable for Option<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let tag: u8 = reader.read_byteable().await?;
+            let tag: u8 = reader.read_value().await?;
             match tag {
                 0 => Ok(None),
-                1 => Ok(Some(reader.read_byteable().await?)),
+                1 => Ok(Some(reader.read_value().await?)),
                 _ => Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::InvalidData,
                     "invalid Option tag byte",
@@ -325,10 +369,10 @@ impl<T: AsyncWritable> AsyncWritable for Option<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             match self {
-                None => writer.write_byteable(&0u8).await,
+                None => writer.write_value(&0u8).await,
                 Some(val) => {
-                    writer.write_byteable(&1u8).await?;
-                    writer.write_byteable(val).await
+                    writer.write_value(&1u8).await?;
+                    writer.write_value(val).await
                 }
             }
         }
@@ -340,7 +384,7 @@ impl AsyncReadable for String {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_byteable().await?;
+            let len: LittleEndian<u64> = reader.read_value().await?;
             let len = len.get() as usize;
             let mut bytes = vec![0u8; len];
             reader.read_exact(&mut bytes).await?;
@@ -357,7 +401,7 @@ impl AsyncWritable for str {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_byteable(&LittleEndian::new(self.len() as u64))
+                .write_value(&LittleEndian::new(self.len() as u64))
                 .await?;
             writer.write_all(self.as_bytes()).await
         }
@@ -378,7 +422,7 @@ impl AsyncWritable for String {
 /// This trait is automatically implemented for all types that implement `tokio::io::AsyncReadExt`,
 /// providing convenient methods for reading binary data directly into Rust types in async contexts.
 ///
-/// The `T` in `read_byteable::<T>()` must implement [`AsyncReadable`], which covers:
+/// The `T` in `read_value::<T>()` must implement [`AsyncReadable`], which covers:
 /// - Primitive types and fixed-size structs (via [`FromByteArray`])
 /// - Collections ([`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`])
 ///   serialized as a little-endian `u64` length prefix followed by each element
@@ -390,7 +434,7 @@ impl AsyncWritable for String {
 ///
 /// ```no_run
 /// # #![cfg(all(feature = "tokio", feature = "derive"))]
-/// use byteable::{Byteable, AsyncReadByteable};
+/// use byteable::{Byteable, AsyncReadValue};
 /// use tokio::fs::File;
 ///
 /// #[derive(Byteable, Clone, Copy, Debug)]
@@ -406,7 +450,7 @@ impl AsyncWritable for String {
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut file = File::open("data.bin").await?;
-/// let header: Header = file.read_byteable().await?;
+/// let header: Header = file.read_value().await?;
 /// println!("Header: {:?}", header);
 /// # Ok(())
 /// # }
@@ -416,7 +460,7 @@ impl AsyncWritable for String {
 ///
 /// ```no_run
 /// # #![cfg(feature = "tokio")]
-/// use byteable::{AsyncReadByteable, LittleEndian};
+/// use byteable::{AsyncReadValue, LittleEndian};
 /// use tokio::net::TcpStream;
 ///
 /// # #[tokio::main]
@@ -424,7 +468,7 @@ impl AsyncWritable for String {
 /// let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 ///
 /// // Read a u32 length prefix
-/// let length: LittleEndian<u32> = stream.read_byteable().await?;
+/// let length: LittleEndian<u32> = stream.read_value().await?;
 /// println!("Message length: {}", length.get());
 /// # Ok(())
 /// # }
@@ -434,7 +478,7 @@ impl AsyncWritable for String {
 ///
 /// ```no_run
 /// # #![cfg(feature = "tokio")]
-/// use byteable::{AsyncReadByteable, LittleEndian};
+/// use byteable::{AsyncReadValue, LittleEndian};
 /// use std::io::Cursor;
 ///
 /// # #[tokio::main]
@@ -442,15 +486,15 @@ impl AsyncWritable for String {
 /// let data = vec![1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0];
 /// let mut cursor = Cursor::new(data);
 ///
-/// let a: LittleEndian<u32> = cursor.read_byteable().await?;
-/// let b: LittleEndian<u32> = cursor.read_byteable().await?;
-/// let c: LittleEndian<u32> = cursor.read_byteable().await?;
+/// let a: LittleEndian<u32> = cursor.read_value().await?;
+/// let b: LittleEndian<u32> = cursor.read_value().await?;
+/// let c: LittleEndian<u32> = cursor.read_value().await?;
 ///
 /// assert_eq!((a.get(), b.get(), c.get()), (1, 2, 3));
 /// # Ok(())
 /// # }
 /// ```
-pub trait AsyncReadByteable: tokio::io::AsyncReadExt + Unpin {
+pub trait AsyncReadValue: tokio::io::AsyncReadExt + Unpin {
     /// Asynchronously reads an [`AsyncReadable`] type from this reader.
     ///
     /// Delegates to `T`'s [`AsyncReadable`] implementation. For fixed-size types this reads a
@@ -466,7 +510,7 @@ pub trait AsyncReadByteable: tokio::io::AsyncReadExt + Unpin {
     ///
     /// ```no_run
     /// # #![cfg(feature = "tokio")]
-    /// use byteable::{Byteable, AsyncReadByteable};
+    /// use byteable::{Byteable, AsyncReadValue};
     /// use std::io::Cursor;
     ///
     /// # #[tokio::main(flavor = "current_thread")]
@@ -474,26 +518,26 @@ pub trait AsyncReadByteable: tokio::io::AsyncReadExt + Unpin {
     /// let data = vec![0x12, 0x34, 0x56, 0x78];
     /// let mut cursor = Cursor::new(data);
     ///
-    /// let value: u32 = cursor.read_byteable().await?;
+    /// let value: u32 = cursor.read_value().await?;
     /// #[cfg(target_endian = "little")]
     /// assert_eq!(value, 0x78563412);
     /// # Ok(())
     /// # }
     /// ```
-    fn read_byteable<T: AsyncReadable>(&mut self) -> impl Future<Output = std::io::Result<T>> {
+    fn read_value<T: AsyncReadable>(&mut self) -> impl Future<Output = std::io::Result<T>> {
         T::read_from(self)
     }
 }
 
-// Blanket implementation: any type that implements AsyncReadExt automatically gets AsyncReadByteable
-impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
+// Blanket implementation: any type that implements AsyncReadExt automatically gets AsyncReadValue
+impl<T: AsyncReadExt + Unpin> AsyncReadValue for T {}
 
 /// Extension trait for `AsyncWrite` that adds methods for writing [`AsyncWritable`] types asynchronously.
 ///
 /// This trait is automatically implemented for all types that implement `tokio::io::AsyncWriteExt`,
 /// providing convenient methods for writing Rust types directly as binary data in async contexts.
 ///
-/// The `T` in `write_byteable(&value)` must implement [`AsyncWritable`], which covers:
+/// The `T` in `write_value(&value)` must implement [`AsyncWritable`], which covers:
 /// - Primitive types and fixed-size structs (via [`IntoByteArray`])
 /// - Collections ([`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`])
 ///   serialized as a little-endian `u64` length prefix followed by each element
@@ -505,7 +549,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 ///
 /// ```no_run
 /// # #![cfg(all(feature = "tokio", feature = "derive"))]
-/// use byteable::{Byteable, AsyncWriteByteable};
+/// use byteable::{Byteable, AsyncWriteValue};
 /// use tokio::fs::File;
 ///
 /// #[derive(Byteable, Clone, Copy)]
@@ -527,7 +571,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 /// };
 ///
 /// let mut file = File::create("output.bin").await?;
-/// file.write_byteable(&header).await?;
+/// file.write_value(&header).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -536,7 +580,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 ///
 /// ```no_run
 /// # #![cfg(feature = "tokio")]
-/// use byteable::{AsyncWriteByteable, LittleEndian};
+/// use byteable::{AsyncWriteValue, LittleEndian};
 /// use tokio::net::TcpStream;
 ///
 /// # #[tokio::main]
@@ -544,7 +588,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 /// let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 ///
 /// // Write a u32 length prefix
-/// stream.write_byteable(&LittleEndian::new(42u32)).await?;
+/// stream.write_value(&LittleEndian::new(42u32)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -553,16 +597,16 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 ///
 /// ```no_run
 /// # #![cfg(feature = "tokio")]
-/// use byteable::{AsyncWriteByteable, LittleEndian};
+/// use byteable::{AsyncWriteValue, LittleEndian};
 /// use std::io::Cursor;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut buffer = Cursor::new(Vec::new());
 ///
-/// buffer.write_byteable(&LittleEndian::new(1u32)).await?;
-/// buffer.write_byteable(&LittleEndian::new(2u32)).await?;
-/// buffer.write_byteable(&LittleEndian::new(3u32)).await?;
+/// buffer.write_value(&LittleEndian::new(1u32)).await?;
+/// buffer.write_value(&LittleEndian::new(2u32)).await?;
+/// buffer.write_value(&LittleEndian::new(3u32)).await?;
 ///
 /// assert_eq!(
 ///     buffer.into_inner(),
@@ -571,7 +615,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadByteable for T {}
 /// # Ok(())
 /// # }
 /// ```
-pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt + Unpin {
+pub trait AsyncWriteValue: tokio::io::AsyncWriteExt + Unpin {
     /// Asynchronously writes an [`AsyncWritable`] type to this writer.
     ///
     /// Delegates to `T`'s [`AsyncWritable`] implementation. For fixed-size types this writes a
@@ -585,19 +629,19 @@ pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt + Unpin {
     ///
     /// ```no_run
     /// # #![cfg(feature = "tokio")]
-    /// use byteable::{Byteable, AsyncWriteByteable, LittleEndian};
+    /// use byteable::{Byteable, AsyncWriteValue, LittleEndian};
     /// use std::io::Cursor;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let mut buffer = Cursor::new(Vec::new());
-    /// buffer.write_byteable(&LittleEndian::new(0x12345678u32)).await?;
+    /// buffer.write_value(&LittleEndian::new(0x12345678u32)).await?;
     ///
     /// assert_eq!(buffer.into_inner(), vec![0x78, 0x56, 0x34, 0x12]);
     /// # Ok(())
     /// # }
     /// ```
-    fn write_byteable<T: AsyncWritable>(
+    fn write_value<T: AsyncWritable>(
         &mut self,
         data: &T,
     ) -> impl Future<Output = std::io::Result<()>> {
@@ -605,14 +649,50 @@ pub trait AsyncWriteByteable: tokio::io::AsyncWriteExt + Unpin {
     }
 }
 
-// Blanket implementation: any type that implements AsyncWriteExt automatically gets AsyncWriteByteable
-impl<T: AsyncWriteExt + Unpin + ?Sized> AsyncWriteByteable for T {}
+// Blanket implementation: any type that implements AsyncWriteExt automatically gets AsyncWriteValue
+impl<T: AsyncWriteExt + Unpin + ?Sized> AsyncWriteValue for T {}
 
+/// Extension trait for `AsyncRead` that adds a `read_fixed` method for types implementing
+/// [`AsyncFixedReadable`].
+///
+/// Importing this trait instead of (or alongside) [`AsyncReadValue`] signals at the call site
+/// that the type being read has a statically-known, fixed byte size with no length prefix.
+pub trait AsyncReadFixed: tokio::io::AsyncReadExt + Unpin {
+    /// Asynchronously reads an [`AsyncFixedReadable`] type from this reader.
+    ///
+    /// Unlike [`AsyncReadValue::read_value`], this method is only callable for fixed-size
+    /// types — it will not compile for collection types like [`Vec`] or [`String`].
+    fn read_fixed<T: AsyncFixedReadable>(&mut self) -> impl Future<Output = tokio::io::Result<T>> {
+        T::read_fixed_from(self)
+    }
+}
+
+impl<T: AsyncReadExt + Unpin> AsyncReadFixed for T {}
+
+/// Extension trait for `AsyncWrite` that adds a `write_fixed` method for types implementing
+/// [`AsyncFixedWritable`].
+///
+/// Importing this trait instead of (or alongside) [`AsyncWriteValue`] signals at the call site
+/// that the type being written has a statically-known, fixed byte size with no length prefix.
+pub trait AsyncWriteFixed: tokio::io::AsyncWriteExt + Unpin {
+    /// Asynchronously writes an [`AsyncFixedWritable`] type to this writer.
+    ///
+    /// Unlike [`AsyncWriteValue::write_value`], this method is only callable for fixed-size
+    /// types — it will not compile for collection types like [`Vec`] or [`String`].
+    fn write_fixed(
+        &mut self,
+        val: &impl AsyncFixedWritable,
+    ) -> impl Future<Output = tokio::io::Result<()>> {
+        val.write_fixed_to(self)
+    }
+}
+
+impl<T: AsyncWriteExt + Unpin + ?Sized> AsyncWriteFixed for T {}
 
 #[cfg(test)]
 mod tests {
-    use super::{AsyncReadByteable, AsyncWriteByteable};
-    use crate::{AssociatedByteArray, BigEndian, Byteable, LittleEndian, TryFromByteArray};
+    use super::{AsyncReadValue, AsyncWriteValue};
+    use crate::{ByteRepr, BigEndian, Byteable, LittleEndian, TryFromByteArray};
     use std::io::Cursor;
 
     #[derive(Clone, Copy, PartialEq, Debug, Byteable)]
@@ -631,7 +711,7 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_byteable(&packet).await.unwrap();
+        buffer.write_value(&packet).await.unwrap();
         assert_eq!(buffer.into_inner(), vec![123, 0, 4, 3, 2, 1]);
     }
 
@@ -639,7 +719,7 @@ mod tests {
     async fn test_async_read_one() {
         let data = vec![123, 0, 4, 3, 2, 1];
         let mut reader = Cursor::new(data);
-        let packet: AsyncTestPacket = reader.read_byteable().await.unwrap();
+        let packet: AsyncTestPacket = reader.read_value().await.unwrap();
 
         let id = packet.id;
         let value = packet.value;
@@ -655,10 +735,10 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_byteable(&original).await.unwrap();
+        buffer.write_value(&original).await.unwrap();
 
         let mut reader = Cursor::new(buffer.into_inner());
-        let read_packet: AsyncTestPacket = reader.read_byteable().await.unwrap();
+        let read_packet: AsyncTestPacket = reader.read_value().await.unwrap();
 
         assert_eq!(read_packet, original);
     }
@@ -668,11 +748,11 @@ mod tests {
         let mut buffer = Cursor::new(vec![]);
 
         buffer
-            .write_byteable(&BigEndian::new(0x0102u16))
+            .write_value(&BigEndian::new(0x0102u16))
             .await
             .unwrap();
         buffer
-            .write_byteable(&LittleEndian::new(0x0304u16))
+            .write_value(&LittleEndian::new(0x0304u16))
             .await
             .unwrap();
 
@@ -694,7 +774,7 @@ mod tests {
 
     impl std::error::Error for ConversionError {}
 
-    impl AssociatedByteArray for EvenU32 {
+    impl ByteRepr for EvenU32 {
         type ByteArray = [u8; 4];
     }
 
@@ -712,11 +792,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_async_read_byteable_success() {
+    async fn test_async_read_value_success() {
         let data = vec![42, 0, 0, 0]; // Even value
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, _> = cursor.read_byteable().await;
+        let result: Result<EvenU32, _> = cursor.read_value().await;
         assert!(result.is_ok());
 
         #[cfg(target_endian = "little")]
@@ -724,21 +804,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_async_read_byteable_conversion_error() {
+    async fn test_async_read_value_conversion_error() {
         let data = vec![43, 0, 0, 0]; // Odd value
         let mut cursor = Cursor::new(data);
 
-        let result: std::io::Result<EvenU32> = cursor.read_byteable().await;
+        let result: std::io::Result<EvenU32> = cursor.read_value().await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]
-    async fn test_async_read_byteable_io_error() {
+    async fn test_async_read_value_io_error() {
         let data = vec![1, 2]; // Not enough bytes
         let mut cursor = Cursor::new(data);
 
-        let result: std::io::Result<EvenU32> = cursor.read_byteable().await;
+        let result: std::io::Result<EvenU32> = cursor.read_value().await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().kind(),

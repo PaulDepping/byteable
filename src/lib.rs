@@ -11,14 +11,14 @@
 //! ## Features
 //!
 //! - **Byte Conversion Traits**: A modular trait system for byte array conversion:
-//!   - `AssociatedByteArray`: Associates a type with its byte array representation
+//!   - `ByteRepr`: Associates a type with its byte array representation
 //!   - `IntoByteArray`: Converts values into byte arrays
 //!   - `FromByteArray`: Constructs values from byte arrays
 //!   - `TryFromByteArray`: Fallible deserialization variant
-//! - **`ReadByteable` & `WriteByteable` Traits**: Extension traits for `std::io::Read` and
+//! - **`ReadValue` & `WriteValue` Traits**: Extension traits for `std::io::Read` and
 //!   `std::io::Write`, enabling convenient reading and writing of byteable types.
-//! - **`AsyncReadByteable` & `AsyncWriteByteable` Traits** (with `tokio` feature): Asynchronous
-//!   counterparts to `ReadByteable` and `WriteByteable`, designed for use with `tokio`'s async I/O.
+//! - **`AsyncReadValue` & `AsyncWriteValue` Traits** (with `tokio` feature): Asynchronous
+//!   counterparts to `ReadValue` and `WriteValue`, designed for use with `tokio`'s async I/O.
 //! - **`EndianConvert` Trait & Wrappers**: Provides methods for converting primitive types between
 //!   different endianness (little-endian and big-endian), along with `BigEndian<T>` and
 //!   `LittleEndian<T>` wrapper types.
@@ -47,7 +47,7 @@
 //!
 //! ```no_run,ignore
 //! # #![cfg(feature = "std")]
-//! use byteable::{Byteable, ReadByteable, WriteByteable};
+//! use byteable::{Byteable, ReadValue, WriteValue};
 //! use std::fs::File;
 //!
 //! #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
@@ -68,11 +68,11 @@
 //!
 //! // Write to file
 //! let mut file = File::create("packet.bin")?;
-//! file.write_byteable(&packet)?;
+//! file.write_value(&packet)?;
 //!
 //! // Read from file
 //! let mut file = File::open("packet.bin")?;
-//! let restored: Packet = file.read_byteable()?;
+//! let restored: Packet = file.read_value()?;
 //!
 //! assert_eq!(packet, restored);
 //! # Ok(())
@@ -101,7 +101,7 @@
 //!
 //! ```no_run
 //! # #[cfg(all(feature = "std", feature = "derive"))] {
-//! use byteable::{Byteable, ReadByteable, WriteByteable};
+//! use byteable::{Byteable, ReadValue, WriteValue};
 //! use std::net::TcpStream;
 //!
 //! #[derive(Byteable, Debug, Clone, Copy)]
@@ -118,10 +118,10 @@
 //!     msg_type: 1,
 //!     data: [0; 16],
 //! };
-//! stream.write_byteable(&msg)?;
+//! stream.write_value(&msg)?;
 //!
 //! // Read response
-//! let response: Message = stream.read_byteable()?;
+//! let response: Message = stream.read_value()?;
 //! # Ok(())
 //! # }
 //! # }
@@ -142,7 +142,7 @@
 //! ```no_run
 //! # #[cfg(all(feature = "tokio", feature = "derive"))]
 //! # {
-//! use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable};
+//! use byteable::{AsyncReadValue, AsyncWriteValue, Byteable};
 //! use tokio::net::TcpStream;
 //!
 //! #[derive(Byteable, Debug, Clone, Copy)]
@@ -160,8 +160,8 @@
 //!     data: [1, 2, 3, 4, 5, 6, 7, 8],
 //! };
 //!
-//! stream.write_byteable(&packet).await?;
-//! let response: AsyncPacket = stream.read_byteable().await?;
+//! stream.write_value(&packet).await?;
+//! let response: AsyncPacket = stream.read_value().await?;
 //! # Ok(())
 //! # }
 //! # }
@@ -355,19 +355,24 @@ mod async_io;
 #[cfg(feature = "derive")]
 pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 
-pub use byte_array::ByteArray;
+pub use byte_array::FixedBytes;
 
 pub use byteable_trait::{
-    AssociatedByteArray, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
+    ByteRepr, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
     RawRepr, TryFromByteArray, TryRawRepr,
 };
 
 #[cfg(feature = "std")]
-pub use io::{Readable, ReadByteable, Writable, WriteByteable};
+pub use io::{
+    FixedReadable, FixedWritable, ReadFixed, ReadValue, Readable, Writable, WriteFixed, WriteValue,
+};
 
 #[cfg(feature = "tokio")]
-pub use async_io::{AsyncReadByteable, AsyncReadable, AsyncWriteByteable, AsyncWritable};
+pub use async_io::{
+    AsyncFixedReadable, AsyncFixedWritable, AsyncReadFixed, AsyncReadValue, AsyncReadable,
+    AsyncWritable, AsyncWriteFixed, AsyncWriteValue,
+};
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 
-pub use derive_safety_helpers::BytecastSafe;
+pub use derive_safety_helpers::TransmuteSafe;

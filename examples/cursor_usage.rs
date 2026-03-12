@@ -3,7 +3,7 @@
 //! This example shows how to work with in-memory buffers using Cursor,
 //! which is useful for network protocols, packet parsing, and testing.
 
-use byteable::{Byteable, ReadByteable, WriteByteable};
+use byteable::{Byteable, ReadValue, WriteValue};
 use std::io::Cursor;
 
 /// A simple message header for a network protocol
@@ -59,8 +59,8 @@ fn main() -> std::io::Result<()> {
 
     // Write to cursor
     let mut buffer = Cursor::new(Vec::new());
-    buffer.write_byteable(&header)?;
-    buffer.write_byteable(&login)?;
+    buffer.write_value(&header)?;
+    buffer.write_value(&login)?;
 
     let bytes = buffer.into_inner();
     println!("   Written {} bytes", bytes.len());
@@ -70,8 +70,8 @@ fn main() -> std::io::Result<()> {
     println!("2. Reading messages from the buffer:");
     let mut reader = Cursor::new(bytes.clone());
 
-    let read_header: MessageHeader = reader.read_byteable()?;
-    let read_login: LoginRequest = reader.read_byteable()?;
+    let read_header: MessageHeader = reader.read_value()?;
+    let read_login: LoginRequest = reader.read_value()?;
 
     println!("   Header:");
     println!(
@@ -124,7 +124,7 @@ fn main() -> std::io::Result<()> {
     ];
 
     for header in &headers {
-        packet.write_byteable(header)?;
+        packet.write_value(header)?;
     }
 
     let packet_bytes = packet.into_inner();
@@ -138,7 +138,7 @@ fn main() -> std::io::Result<()> {
     let mut reader = Cursor::new(packet_bytes);
     println!("\n   Reading messages:");
     for i in 0..3 {
-        let msg: MessageHeader = reader.read_byteable()?;
+        let msg: MessageHeader = reader.read_value()?;
         println!(
             "      Message {}: {} (type: 0x{:02X}, seq: {})",
             i + 1,
@@ -157,13 +157,13 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut status_buffer = Cursor::new(Vec::new());
-    status_buffer.write_byteable(&status)?;
+    status_buffer.write_value(&status)?;
 
     let status_bytes = status_buffer.into_inner();
     println!("   Status response bytes: {:?}", status_bytes);
 
     let mut status_reader = Cursor::new(status_bytes);
-    let read_status: StatusResponse = status_reader.read_byteable()?;
+    let read_status: StatusResponse = status_reader.read_value()?;
 
     println!("   Status Code: {}", read_status.status_code);
     println!("   Timestamp: {}", read_status.timestamp);

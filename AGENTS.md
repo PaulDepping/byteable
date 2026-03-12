@@ -84,7 +84,7 @@ This is a **dual-crate architecture**:
 
 The crate uses a **modular trait hierarchy** (as of v0.20+):
 
-1. **`AssociatedByteArray`** - Associates a type with its byte array representation
+1. **`ByteRepr`** - Associates a type with its byte array representation
 2. **`IntoByteArray`** - Infallible conversion to bytes
 3. **`FromByteArray`** - Infallible conversion from bytes
 4. **`TryFromByteArray`** - Fallible conversion from bytes (used for `bool`, `char`, enums)
@@ -112,16 +112,16 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 #### Safety Validation ([src/derive_safety_helpers.rs](src/derive_safety_helpers.rs))
 
-- **`BytecastSafe` trait** - Marks types safe for `transmute`-based conversions
+- **`TransmuteSafe` trait** - Marks types safe for `transmute`-based conversions
 - Automatically implemented for `u8`, `i8`, endian wrappers, and arrays thereof
 - Multi-byte primitives (`u16`, `u32`, etc.) are **not** implemented — must use `BigEndian<T>`/`LittleEndian<T>` wrappers
-- Raw structs require all fields to implement `BytecastSafe`
+- Raw structs require all fields to implement `TransmuteSafe`
 - This prevents unsafe usage with types like `String`, `Vec`, references, etc.
 
 #### I/O Extension Traits
 
-- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadByteable`, `WriteByteable` - Extend `std::io::Read`/`Write`
-- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadByteable`, `AsyncWriteByteable` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
+- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadValue`, `WriteValue` - Extend `std::io::Read`/`Write`
+- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadValue`, `AsyncWriteValue` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
 
 ### Derive Macro Implementation ([byteable_derive/src/lib.rs](byteable_derive/src/lib.rs))
 
@@ -200,7 +200,7 @@ Important test files:
 - [tests/enum_test.rs](tests/enum_test.rs) - C-like enum derive validation
 - [tests/primitive_types_test.rs](tests/primitive_types_test.rs) - `bool`, `char` validation
 - [tests/try_transparent_test.rs](tests/try_transparent_test.rs) - Nested enum/validated types
-- [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `BytecastSafe` tests
+- [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `TransmuteSafe` tests
 
 ## Common Patterns
 

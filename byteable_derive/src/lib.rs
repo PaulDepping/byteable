@@ -1,7 +1,7 @@
 //! Procedural macros for deriving byte conversion traits.
 //!
 //! This crate provides procedural macros for automatically implementing the byte conversion traits
-//! (`AssociatedByteArray`, `IntoByteArray`, `FromByteArray`) on structs:
+//! (`ByteRepr`, `IntoByteArray`, `FromByteArray`) on structs:
 //! - `#[derive(Byteable)]` - High-level macro with endianness support
 //! - `#[derive(UnsafeByteableTransmute)]` - Low-level transmute-based implementation
 
@@ -57,7 +57,7 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     AttributeType::None
 }
 
-/// Generates `BytecastSafe`, `AssociatedByteArray`, `IntoByteArray`, and `FromByteArray`
+/// Generates `TransmuteSafe`, `ByteRepr`, `IntoByteArray`, and `FromByteArray`
 /// impls for a raw struct, using `transmute` for zero-cost conversion.
 fn gen_raw_struct_impls(
     raw_name: &Ident,
@@ -65,11 +65,11 @@ fn gen_raw_struct_impls(
     bc: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     quote! {
-        unsafe impl #bc::BytecastSafe for #raw_name
-        where #(#raw_field_types: #bc::BytecastSafe),*
+        unsafe impl #bc::TransmuteSafe for #raw_name
+        where #(#raw_field_types: #bc::TransmuteSafe),*
         {}
 
-        impl #bc::AssociatedByteArray for #raw_name {
+        impl #bc::ByteRepr for #raw_name {
             type ByteArray = [u8; ::core::mem::size_of::<Self>()];
         }
 
@@ -101,10 +101,10 @@ fn gen_struct_field_write(
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
-            writer.write_byteable(&#bc::LittleEndian::new(#field_access))?;
+            writer.write_value(&#bc::LittleEndian::new(#field_access))?;
         },
         AttributeType::BigEndian => quote! {
-            writer.write_byteable(&#bc::BigEndian::new(#field_access))?;
+            writer.write_value(&#bc::BigEndian::new(#field_access))?;
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
@@ -115,11 +115,11 @@ fn gen_struct_field_write(
                     quote!(#field_ty)
                 );
             }
-            quote! { writer.write_byteable(&#field_access)?; }
+            quote! { writer.write_value(&#field_access)?; }
         }
-        AttributeType::IoOnly => panic!(
-            "#[byteable(io_only)] is a struct-level attribute and cannot be used on a field"
-        ),
+        AttributeType::IoOnly => {
+            panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
+        }
         AttributeType::Transparent | AttributeType::TryTransparent => panic!(
             "#[byteable(transparent)] and #[byteable(try_transparent)] are not applicable in \
              io_only mode; remove the annotation or use a plain field"
@@ -132,7 +132,7 @@ fn gen_struct_field_write(
 /// Instead of the transmute-based `IntoByteArray`/`FromByteArray` path, this reads and writes
 /// each field in declaration order using their own `Readable`/`Writable` implementations. This
 /// allows structs to contain types like `Vec<T>`, `String`, and `Option<T>` that are not
-/// `BytecastSafe`.
+/// `TransmuteSafe`.
 fn handle_io_struct_derive(
     name: &syn::Ident,
     generics: &syn::Generics,
@@ -162,28 +162,35 @@ fn handle_io_struct_derive(
         syn::Fields::Unit => unreachable!(),
     };
 
-    let write_stmts: Vec<_> = fields.iter().enumerate().map(|(i, field)| {
-        let field_access = if is_tuple {
-            let idx = syn::Index::from(i);
-            quote! { self.#idx }
-        } else {
-            let fname = field.ident.as_ref().unwrap();
-            quote! { self.#fname }
-        };
-        gen_struct_field_write(&field_access, &field.ty, &field.attrs, bc)
-    }).collect();
+    let write_stmts: Vec<_> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, field)| {
+            let field_access = if is_tuple {
+                let idx = syn::Index::from(i);
+                quote! { self.#idx }
+            } else {
+                let fname = field.ident.as_ref().unwrap();
+                quote! { self.#fname }
+            };
+            gen_struct_field_write(&field_access, &field.ty, &field.attrs, bc)
+        })
+        .collect();
 
     let (read_bindings, construct_expr): (Vec<_>, proc_macro2::TokenStream) = if is_tuple {
         let idents: Vec<_> = (0..fields.len())
             .map(|i| syn::Ident::new(&format!("__field_{i}"), name.span()))
             .collect();
-        let bindings = fields.iter().zip(&idents)
+        let bindings = fields
+            .iter()
+            .zip(&idents)
             .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, bc))
             .collect();
         (bindings, quote! { Ok(Self(#(#idents),*)) })
     } else {
         let field_idents: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
-        let bindings = fields.iter()
+        let bindings = fields
+            .iter()
             .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, bc))
             .collect();
         (bindings, quote! { Ok(Self { #(#field_idents),* }) })
@@ -192,14 +199,14 @@ fn handle_io_struct_derive(
     quote! {
         impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
             fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
-                use #bc::ReadByteable;
+                use #bc::ReadValue;
                 #( #read_bindings )*
                 #construct_expr
             }
         }
         impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                use #bc::WriteByteable;
+                use #bc::WriteValue;
                 #( #write_stmts )*
                 Ok(())
             }
@@ -210,7 +217,7 @@ fn handle_io_struct_derive(
 /// Derives byte conversion traits for a struct using `transmute`.
 ///
 /// This procedural macro automatically implements the byte conversion traits
-/// (`AssociatedByteArray`, `IntoByteArray`, `FromByteArray`) for structs by using
+/// (`ByteRepr`, `IntoByteArray`, `FromByteArray`) for structs by using
 /// `core::mem::transmute` to convert between the struct and a byte array. This provides
 /// zero-overhead serialization but requires careful attention to memory layout and safety.
 ///
@@ -412,13 +419,15 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
             .cloned()
             .unwrap_or_else(|| syn::parse_quote! { where });
         for ty in &field_types {
-            clauses.predicates.push(syn::parse_quote! { #ty: #bc::BytecastSafe });
+            clauses
+                .predicates
+                .push(syn::parse_quote! { #ty: #bc::TransmuteSafe });
         }
         Some(clauses)
     };
 
     quote! {
-        impl #impl_generics #bc::AssociatedByteArray for #ident #type_generics #extended_where {
+        impl #impl_generics #bc::ByteRepr for #ident #type_generics #extended_where {
             type ByteArray = [u8; ::core::mem::size_of::<Self>()];
         }
 
@@ -545,11 +554,29 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     let input: DeriveInput = parse_macro_input!(input);
 
     if let Data::Enum(enum_data) = input.data {
-        let has_field_variants = enum_data.variants.iter().any(|v| !matches!(v.fields, Fields::Unit));
+        let has_field_variants = enum_data
+            .variants
+            .iter()
+            .any(|v| !matches!(v.fields, Fields::Unit));
         if has_field_variants {
-            return handle_field_enum_derive(input.ident, input.generics, input.attrs, &enum_data, bc).into();
+            return handle_field_enum_derive(
+                input.ident,
+                input.generics,
+                input.attrs,
+                &enum_data,
+                bc,
+            )
+            .into();
         }
-        return handle_enum_derive(input.ident, input.generics, input.vis, input.attrs, &enum_data, bc).into();
+        return handle_enum_derive(
+            input.ident,
+            input.generics,
+            input.vis,
+            input.attrs,
+            &enum_data,
+            bc,
+        )
+        .into();
     }
 
     // io_only: generate Readable + Writable by sequential field I/O instead of transmute
@@ -561,10 +588,12 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         return handle_io_struct_derive(&input.ident, &input.generics, fields_data, &bc).into();
     }
 
-
     let original_name = &input.ident;
     let vis = &input.vis;
-    let raw_name = Ident::new(&format!("__byteable_raw_{}", original_name), original_name.span());
+    let raw_name = Ident::new(
+        &format!("__byteable_raw_{}", original_name),
+        original_name.span(),
+    );
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
     let fields_data = match &input.data {
@@ -575,7 +604,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     // Unit structs: zero-sized, implement directly without a raw struct
     if let Fields::Unit = fields_data {
         return quote! {
-            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
+            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
                 type ByteArray = [u8; 0];
             }
             impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
@@ -587,7 +616,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 fn from_byte_array(_: Self::ByteArray) -> Self { #original_name }
             }
             impl #bc::RawRepr for #original_name { type Raw = Self; }
-            unsafe impl #bc::BytecastSafe for #original_name {}
+            unsafe impl #bc::TransmuteSafe for #original_name {}
         }
         .into();
     }
@@ -707,8 +736,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 }
             }
 
-            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
-                type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
+            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
             }
 
             impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
@@ -737,8 +766,8 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 fn from(value: #raw_name) -> Self { #from_raw_body }
             }
 
-            impl #impl_generics #bc::AssociatedByteArray for #original_name #type_generics #where_clause {
-                type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
+            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
+                type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
             }
 
             impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
@@ -777,7 +806,15 @@ fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
                 if let Ok(ident) = syn::parse2::<syn::Ident>(meta_list.tokens.clone()) {
                     if matches!(
                         ident.to_string().as_str(),
-                        "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "u64" | "i64" | "u128" | "i128"
+                        "u8" | "i8"
+                            | "u16"
+                            | "i16"
+                            | "u32"
+                            | "i32"
+                            | "u64"
+                            | "i64"
+                            | "u128"
+                            | "i128"
                     ) {
                         return Some(ident);
                     }
@@ -790,7 +827,7 @@ fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
 
 /// Handles deriving `Byteable` for C-like enums with explicit discriminants.
 ///
-/// Generates `AssociatedByteArray`, `IntoByteArray`, and `TryFromByteArray` impls,
+/// Generates `ByteRepr`, `IntoByteArray`, and `TryFromByteArray` impls,
 /// along with a raw wrapper type for the matching endianness.
 fn handle_enum_derive(
     enum_name: Ident,
@@ -817,7 +854,10 @@ fn handle_enum_derive(
         .expect("Enum must have a #[repr(u8)], #[repr(u16)], #[repr(u32)], or similar attribute");
 
     let endianness = parse_byteable_attr(&attrs);
-    if matches!(endianness, AttributeType::Transparent | AttributeType::TryTransparent) {
+    if matches!(
+        endianness,
+        AttributeType::Transparent | AttributeType::TryTransparent
+    ) {
         panic!("transparent and try_transparent attributes are not supported for enums");
     }
 
@@ -879,8 +919,8 @@ fn handle_enum_derive(
 
         impl #bc::TryRawRepr for #enum_name { type Raw = #raw_name; }
 
-        impl #impl_generics #bc::AssociatedByteArray for #enum_name #type_generics #where_clause {
-            type ByteArray = <#raw_name as #bc::AssociatedByteArray>::ByteArray;
+        impl #impl_generics #bc::ByteRepr for #enum_name #type_generics #where_clause {
+            type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
         }
 
         impl #impl_generics #bc::IntoByteArray for #enum_name #type_generics #where_clause {
@@ -910,8 +950,18 @@ fn is_multibyte_primitive(ty: &syn::Type) -> bool {
             if let Some(ident) = tp.path.get_ident() {
                 return matches!(
                     ident.to_string().as_str(),
-                    "u16" | "i16" | "u32" | "i32" | "u64" | "i64"
-                        | "u128" | "i128" | "f32" | "f64" | "usize" | "isize"
+                    "u16"
+                        | "i16"
+                        | "u32"
+                        | "i32"
+                        | "u64"
+                        | "i64"
+                        | "u128"
+                        | "i128"
+                        | "f32"
+                        | "f64"
+                        | "usize"
+                        | "isize"
                 );
             }
         }
@@ -929,10 +979,10 @@ fn gen_field_write(
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
-            writer.write_byteable(&#bc::LittleEndian::new(*#field_ident))?;
+            writer.write_value(&#bc::LittleEndian::new(*#field_ident))?;
         },
         AttributeType::BigEndian => quote! {
-            writer.write_byteable(&#bc::BigEndian::new(*#field_ident))?;
+            writer.write_value(&#bc::BigEndian::new(*#field_ident))?;
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
@@ -942,7 +992,7 @@ fn gen_field_write(
                     field_ident
                 );
             }
-            quote! { writer.write_byteable(#field_ident)?; }
+            quote! { writer.write_value(#field_ident)?; }
         }
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
@@ -962,11 +1012,11 @@ fn gen_field_read(
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
             let #field_ident: #field_ty =
-                reader.read_byteable::<#bc::LittleEndian<#field_ty>>()?.get();
+                reader.read_value::<#bc::LittleEndian<#field_ty>>()?.get();
         },
         AttributeType::BigEndian => quote! {
             let #field_ident: #field_ty =
-                reader.read_byteable::<#bc::BigEndian<#field_ty>>()?.get();
+                reader.read_value::<#bc::BigEndian<#field_ty>>()?.get();
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
@@ -976,7 +1026,7 @@ fn gen_field_read(
                     field_ident
                 );
             }
-            quote! { let #field_ident: #field_ty = reader.read_byteable()?; }
+            quote! { let #field_ident: #field_ty = reader.read_value()?; }
         }
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
@@ -999,15 +1049,16 @@ fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {
                 }
                 // For non-decimal (hex/bin/oct), parse from the token string
                 let s = li.to_string();
-                let (prefix, rest) = if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                    (16u32, r)
-                } else if let Some(r) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-                    (2, r)
-                } else if let Some(r) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
-                    (8, r)
-                } else {
-                    return None;
-                };
+                let (prefix, rest) =
+                    if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                        (16u32, r)
+                    } else if let Some(r) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
+                        (2, r)
+                    } else if let Some(r) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
+                        (8, r)
+                    } else {
+                        return None;
+                    };
                 // Strip type suffix and digit separators
                 let digits: String = rest
                     .chars()
@@ -1078,7 +1129,10 @@ fn handle_field_enum_derive(
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
     let endianness = parse_byteable_attr(&attrs);
-    if matches!(endianness, AttributeType::Transparent | AttributeType::TryTransparent) {
+    if matches!(
+        endianness,
+        AttributeType::Transparent | AttributeType::TryTransparent
+    ) {
         panic!("transparent and try_transparent attributes are not supported for enums");
     }
 
@@ -1104,8 +1158,10 @@ fn handle_field_enum_derive(
 
     // For multi-byte repr: auto-selected defaults to little-endian; user-specified requires explicit.
     let effective_endianness = if !is_single_byte
-        && !matches!(endianness, AttributeType::LittleEndian | AttributeType::BigEndian)
-    {
+        && !matches!(
+            endianness,
+            AttributeType::LittleEndian | AttributeType::BigEndian
+        ) {
         if repr_auto_selected {
             AttributeType::LittleEndian
         } else {
@@ -1123,120 +1179,142 @@ fn handle_field_enum_derive(
 
     // Tokens that read the discriminant and bind it as `disc: #repr_ty`.
     let read_disc = if is_single_byte {
-        quote! { let disc: #repr_ty = reader.read_byteable()?; }
+        quote! { let disc: #repr_ty = reader.read_value()?; }
     } else {
         match effective_endianness {
             AttributeType::LittleEndian => quote! {
-                let disc: #repr_ty = reader.read_byteable::<#bc::LittleEndian<#repr_ty>>()?.get();
+                let disc: #repr_ty = reader.read_value::<#bc::LittleEndian<#repr_ty>>()?.get();
             },
             AttributeType::BigEndian => quote! {
-                let disc: #repr_ty = reader.read_byteable::<#bc::BigEndian<#repr_ty>>()?.get();
+                let disc: #repr_ty = reader.read_value::<#bc::BigEndian<#repr_ty>>()?.get();
             },
             _ => unreachable!(),
         }
     };
 
-    let write_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc_tokens)| {
-        let variant_name = &variant.ident;
+    let write_arms = enum_data
+        .variants
+        .iter()
+        .zip(&discriminants)
+        .map(|(variant, disc_tokens)| {
+            let variant_name = &variant.ident;
 
-        let write_disc = if is_single_byte {
-            quote! {
-                let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                writer.write_byteable(&disc_val)?;
-            }
-        } else {
-            match effective_endianness {
-                AttributeType::LittleEndian => quote! {
+            let write_disc = if is_single_byte {
+                quote! {
                     let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                    writer.write_byteable(&#bc::LittleEndian::new(disc_val))?;
+                    writer.write_value(&disc_val)?;
+                }
+            } else {
+                match effective_endianness {
+                    AttributeType::LittleEndian => quote! {
+                        let disc_val: #repr_ty = #disc_tokens as #repr_ty;
+                        writer.write_value(&#bc::LittleEndian::new(disc_val))?;
+                    },
+                    AttributeType::BigEndian => quote! {
+                        let disc_val: #repr_ty = #disc_tokens as #repr_ty;
+                        writer.write_value(&#bc::BigEndian::new(disc_val))?;
+                    },
+                    _ => unreachable!(),
+                }
+            };
+
+            match &variant.fields {
+                Fields::Unit => quote! {
+                    #enum_name::#variant_name => { #write_disc }
                 },
-                AttributeType::BigEndian => quote! {
-                    let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                    writer.write_byteable(&#bc::BigEndian::new(disc_val))?;
+                Fields::Named(named) => {
+                    let field_names: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| f.ident.as_ref().unwrap())
+                        .collect();
+                    let field_writes: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| gen_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #enum_name::#variant_name { #(#field_names),* } => {
+                            #write_disc
+                            #( #field_writes )*
+                        }
+                    }
+                }
+                Fields::Unnamed(unnamed) => {
+                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
+                        .collect();
+                    let field_writes: Vec<_> = unnamed
+                        .unnamed
+                        .iter()
+                        .zip(&field_idents)
+                        .map(|(f, ident)| gen_field_write(ident, &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #enum_name::#variant_name(#(#field_idents),*) => {
+                            #write_disc
+                            #( #field_writes )*
+                        }
+                    }
+                }
+            }
+        });
+
+    let read_arms = enum_data
+        .variants
+        .iter()
+        .zip(&discriminants)
+        .map(|(variant, disc_tokens)| {
+            let variant_name = &variant.ident;
+
+            match &variant.fields {
+                Fields::Unit => quote! {
+                    #disc_tokens => Ok(#enum_name::#variant_name),
                 },
-                _ => unreachable!(),
-            }
-        };
-
-        match &variant.fields {
-            Fields::Unit => quote! {
-                #enum_name::#variant_name => { #write_disc }
-            },
-            Fields::Named(named) => {
-                let field_names: Vec<_> = named.named.iter()
-                    .map(|f| f.ident.as_ref().unwrap())
-                    .collect();
-                let field_writes: Vec<_> = named.named.iter()
-                    .map(|f| gen_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
-                    .collect();
-                quote! {
-                    #enum_name::#variant_name { #(#field_names),* } => {
-                        #write_disc
-                        #( #field_writes )*
+                Fields::Named(named) => {
+                    let field_idents: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| f.ident.as_ref().unwrap())
+                        .collect();
+                    let field_reads: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #disc_tokens => {
+                            #( #field_reads )*
+                            Ok(#enum_name::#variant_name { #(#field_idents),* })
+                        }
+                    }
+                }
+                Fields::Unnamed(unnamed) => {
+                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
+                        .collect();
+                    let field_reads: Vec<_> = unnamed
+                        .unnamed
+                        .iter()
+                        .zip(&field_idents)
+                        .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #disc_tokens => {
+                            #( #field_reads )*
+                            Ok(#enum_name::#variant_name(#(#field_idents),*))
+                        }
                     }
                 }
             }
-            Fields::Unnamed(unnamed) => {
-                let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                    .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
-                    .collect();
-                let field_writes: Vec<_> = unnamed.unnamed.iter().zip(&field_idents)
-                    .map(|(f, ident)| gen_field_write(ident, &f.ty, &f.attrs, &bc))
-                    .collect();
-                quote! {
-                    #enum_name::#variant_name(#(#field_idents),*) => {
-                        #write_disc
-                        #( #field_writes )*
-                    }
-                }
-            }
-        }
-    });
-
-    let read_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc_tokens)| {
-        let variant_name = &variant.ident;
-
-        match &variant.fields {
-            Fields::Unit => quote! {
-                #disc_tokens => Ok(#enum_name::#variant_name),
-            },
-            Fields::Named(named) => {
-                let field_idents: Vec<_> = named.named.iter()
-                    .map(|f| f.ident.as_ref().unwrap())
-                    .collect();
-                let field_reads: Vec<_> = named.named.iter()
-                    .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
-                    .collect();
-                quote! {
-                    #disc_tokens => {
-                        #( #field_reads )*
-                        Ok(#enum_name::#variant_name { #(#field_idents),* })
-                    }
-                }
-            }
-            Fields::Unnamed(unnamed) => {
-                let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                    .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
-                    .collect();
-                let field_reads: Vec<_> = unnamed.unnamed.iter().zip(&field_idents)
-                    .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
-                    .collect();
-                quote! {
-                    #disc_tokens => {
-                        #( #field_reads )*
-                        Ok(#enum_name::#variant_name(#(#field_idents),*))
-                    }
-                }
-            }
-        }
-    });
+        });
 
     let enum_name_str = enum_name.to_string();
 
     quote! {
         impl #impl_generics #bc::Writable for #enum_name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                use #bc::WriteByteable;
+                use #bc::WriteValue;
                 match self {
                     #(#write_arms)*
                 }
@@ -1246,7 +1324,7 @@ fn handle_field_enum_derive(
 
         impl #impl_generics #bc::Readable for #enum_name #type_generics #where_clause {
             fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
-                use #bc::ReadByteable;
+                use #bc::ReadValue;
                 #read_disc
                 match disc {
                     #(#read_arms)*

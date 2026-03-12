@@ -1,6 +1,6 @@
 //! Integration tests for async I/O traits.
 //!
-//! Tests AsyncReadByteable and AsyncWriteByteable
+//! Tests AsyncReadValue and AsyncWriteValue
 //! against derived structs using tokio's duplex channel and Cursor.
 #![cfg(feature = "tokio")]
 
@@ -9,7 +9,7 @@ use std::io::Cursor;
 #[cfg(feature = "derive")]
 mod derive_async_io_tests {
     use super::*;
-    use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable, LittleEndian};
+    use byteable::{AsyncReadValue, AsyncWriteValue, Byteable, LittleEndian};
 
     // ============================================================================
     // Simple derived struct (infallible)
@@ -33,35 +33,47 @@ mod derive_async_io_tests {
         };
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).await.unwrap();
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        let restored: Header = buf.read_byteable().await.unwrap();
+        let restored: Header = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
     #[tokio::test]
     async fn test_async_write_multiple_structs() {
         let headers = [
-            Header { version: 1, length: 10, magic: 0x0000_0001 },
-            Header { version: 2, length: 20, magic: 0x0000_0002 },
-            Header { version: 3, length: 30, magic: 0x0000_0003 },
+            Header {
+                version: 1,
+                length: 10,
+                magic: 0x0000_0001,
+            },
+            Header {
+                version: 2,
+                length: 20,
+                magic: 0x0000_0002,
+            },
+            Header {
+                version: 3,
+                length: 30,
+                magic: 0x0000_0003,
+            },
         ];
 
         let mut buf = Cursor::new(Vec::new());
         for h in &headers {
-            buf.write_byteable(h).await.unwrap();
+            buf.write_value(h).await.unwrap();
         }
 
         buf.set_position(0);
         for expected in &headers {
-            let restored: Header = buf.read_byteable().await.unwrap();
+            let restored: Header = buf.read_value().await.unwrap();
             assert_eq!(&restored, expected);
         }
     }
 
     // ============================================================================
-    // Struct with try_transparent enum field (read_byteable handles fallible conversion)
+    // Struct with try_transparent enum field (read_value handles fallible conversion)
     // ============================================================================
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -88,12 +100,12 @@ mod derive_async_io_tests {
         };
 
         let mut buf = Cursor::new(Vec::new());
-        // Frame implements IntoByteArray → write_byteable
-        buf.write_byteable(&original).await.unwrap();
+        // Frame implements IntoByteArray → write_value
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        // Frame implements TryFromByteArray → read_byteable
-        let restored: Frame = buf.read_byteable().await.unwrap();
+        // Frame implements TryFromByteArray → read_value
+        let restored: Frame = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -104,7 +116,7 @@ mod derive_async_io_tests {
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
 
         let mut buf = Cursor::new(bytes.to_vec());
-        let result: std::io::Result<Frame> = buf.read_byteable().await;
+        let result: std::io::Result<Frame> = buf.read_value().await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
@@ -112,12 +124,14 @@ mod derive_async_io_tests {
     #[tokio::test]
     async fn test_async_write_then_read_try_primitives() {
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&LittleEndian::new(0x1234u16)).await.unwrap();
-        buf.write_byteable(&100u8).await.unwrap();
+        buf.write_value(&LittleEndian::new(0x1234u16))
+            .await
+            .unwrap();
+        buf.write_value(&100u8).await.unwrap();
 
         buf.set_position(0);
-        let v1: LittleEndian<u16> = buf.read_byteable().await.unwrap();
-        let v2: u8 = buf.read_byteable().await.unwrap();
+        let v1: LittleEndian<u16> = buf.read_value().await.unwrap();
+        let v2: u8 = buf.read_value().await.unwrap();
 
         assert_eq!(v1.get(), 0x1234);
         assert_eq!(v2, 100);
@@ -132,10 +146,10 @@ mod derive_async_io_tests {
         let original: Vec<u8> = vec![10, 20, 30, 40, 50];
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).await.unwrap();
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        let restored: Vec<u8> = buf.read_byteable().await.unwrap();
+        let restored: Vec<u8> = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -144,10 +158,10 @@ mod derive_async_io_tests {
         let original: Vec<u32> = vec![0xDEAD, 0xBEEF, 0xCAFE];
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).await.unwrap();
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        let restored: Vec<u32> = buf.read_byteable().await.unwrap();
+        let restored: Vec<u32> = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -156,10 +170,10 @@ mod derive_async_io_tests {
         let original: Option<u64> = Some(0xABCD_1234_5678_9ABC);
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).await.unwrap();
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        let restored: Option<u64> = buf.read_byteable().await.unwrap();
+        let restored: Option<u64> = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -168,10 +182,10 @@ mod derive_async_io_tests {
         let original: Option<u64> = None;
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).await.unwrap();
+        buf.write_value(&original).await.unwrap();
 
         buf.set_position(0);
-        let restored: Option<u64> = buf.read_byteable().await.unwrap();
+        let restored: Option<u64> = buf.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -189,10 +203,10 @@ mod derive_async_io_tests {
             magic: 0x1234_5678,
         };
 
-        writer.write_byteable(&original).await.unwrap();
+        writer.write_value(&original).await.unwrap();
         drop(writer); // close the write end
 
-        let restored: Header = reader.read_byteable().await.unwrap();
+        let restored: Header = reader.read_value().await.unwrap();
         assert_eq!(restored, original);
     }
 }

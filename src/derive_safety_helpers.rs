@@ -1,6 +1,6 @@
 //! Safety helpers for validating types suitable for byte casting.
 //!
-//! This module provides the `BytecastSafe` trait, which marks types that are safe
+//! This module provides the `TransmuteSafe` trait, which marks types that are safe
 //! to transmute to/from byte arrays. This trait acts as a compile-time safety mechanism
 //! to prevent UB when using the `Byteable` derive macros.
 
@@ -37,8 +37,8 @@ use crate::{BigEndian, LittleEndian};
 ///
 /// - **Single-byte primitives**: `u8`, `i8` (no endianness needed)
 /// - **Endianness wrappers**: `BigEndian<T>` and `LittleEndian<T>` for multi-byte types
-/// - **Arrays**: `[T; N]` where `T: BytecastSafe`
-/// - **Custom structs**: Explicitly marked with `unsafe impl BytecastSafe` (use with caution!)
+/// - **Arrays**: `[T; N]` where `T: TransmuteSafe`
+/// - **Custom structs**: Explicitly marked with `unsafe impl TransmuteSafe` (use with caution!)
 ///
 /// # Types that should NOT implement this trait
 ///
@@ -57,9 +57,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Safe types (compile successfully):
 ///
 /// ```
-/// use byteable::{BytecastSafe, LittleEndian, BigEndian};
+/// use byteable::{TransmuteSafe, LittleEndian, BigEndian};
 ///
-/// fn ensure_valid<T: BytecastSafe>() {}
+/// fn ensure_valid<T: TransmuteSafe>() {}
 ///
 /// // Single-byte types - no endianness needed
 /// ensure_valid::<u8>();
@@ -79,9 +79,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Unsafe types (won't compile):
 ///
 /// ```compile_fail
-/// use byteable::BytecastSafe;
+/// use byteable::TransmuteSafe;
 ///
-/// fn ensure_valid<T: BytecastSafe>() {}
+/// fn ensure_valid<T: TransmuteSafe>() {}
 ///
 /// // Multi-byte primitives without endianness wrapper - REJECTED
 /// ensure_valid::<u16>();      // Error: no explicit endianness
@@ -131,20 +131,20 @@ use crate::{BigEndian, LittleEndian};
 /// # x += 2; // shouldn't compile!
 /// # }
 /// ```
-pub unsafe trait BytecastSafe {}
+pub unsafe trait TransmuteSafe {}
 
-unsafe impl BytecastSafe for u8 {}
-unsafe impl BytecastSafe for i8 {}
+unsafe impl TransmuteSafe for u8 {}
+unsafe impl TransmuteSafe for i8 {}
 
 macro_rules! impl_bytecast_safe_for_endian {
     ($($ty:ty),+ $(,)?) => {
         $(
-            unsafe impl BytecastSafe for BigEndian<$ty> {}
-            unsafe impl BytecastSafe for LittleEndian<$ty> {}
+            unsafe impl TransmuteSafe for BigEndian<$ty> {}
+            unsafe impl TransmuteSafe for LittleEndian<$ty> {}
         )+
     };
 }
 
 impl_bytecast_safe_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 
-unsafe impl<T: BytecastSafe, const SIZE: usize> BytecastSafe for [T; SIZE] {}
+unsafe impl<T: TransmuteSafe, const SIZE: usize> TransmuteSafe for [T; SIZE] {}

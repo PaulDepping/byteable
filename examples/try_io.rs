@@ -3,7 +3,7 @@
 //! This example shows how to implement types with validation that can fail during
 //! byte deserialization, and how to handle errors using standard `io::Result`.
 
-use byteable::{AssociatedByteArray, IntoByteArray, ReadByteable, TryFromByteArray, WriteByteable};
+use byteable::{ByteRepr, IntoByteArray, ReadValue, TryFromByteArray, WriteValue};
 use std::error::Error;
 use std::fmt;
 use std::io::Cursor;
@@ -52,7 +52,7 @@ impl Temperature {
 }
 
 // Implement the byteable traits for Temperature
-impl AssociatedByteArray for Temperature {
+impl ByteRepr for Temperature {
     type ByteArray = [u8; 4];
 }
 
@@ -80,11 +80,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Created temperature: {}°C", temp.celsius);
 
     let mut buffer = Cursor::new(Vec::new());
-    buffer.write_byteable(&temp)?;
+    buffer.write_value(&temp)?;
     println!("  Written to buffer: {:?}", buffer.get_ref());
 
     buffer.set_position(0);
-    let read_temp: Temperature = buffer.read_byteable()?;
+    let read_temp: Temperature = buffer.read_value()?;
     println!("  Read from buffer: {}°C", read_temp.celsius);
     assert_eq!(temp.celsius, read_temp.celsius);
     println!("  Success!\n");
@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Bytes represent: 150°C");
 
     let mut cursor = Cursor::new(invalid_bytes);
-    match cursor.read_byteable::<Temperature>() {
+    match cursor.read_value::<Temperature>() {
         Ok(t) => println!("  Unexpected success: {}°C", t.celsius),
         Err(err) => {
             println!("  Conversion error: {}", err);
@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Bytes represent: -150°C");
 
     let mut cursor = Cursor::new(invalid_bytes);
-    match cursor.read_byteable::<Temperature>() {
+    match cursor.read_value::<Temperature>() {
         Ok(t) => println!("  Unexpected success: {}°C", t.celsius),
         Err(err) => {
             println!("  Conversion error: {}", err);
@@ -123,7 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("  Buffer has only {} bytes (need 4)", incomplete.len());
 
     let mut cursor = Cursor::new(incomplete);
-    match cursor.read_byteable::<Temperature>() {
+    match cursor.read_value::<Temperature>() {
         Ok(t) => println!("  Unexpected success: {}°C", t.celsius),
         Err(err) => {
             println!("  I/O error: {}", err);
@@ -142,14 +142,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut buffer = Cursor::new(Vec::new());
     for temp in &temps {
-        buffer.write_byteable(temp)?;
+        buffer.write_value(temp)?;
         println!("  Written: {}°C", temp.celsius);
     }
 
     println!("\n  Reading back:");
     buffer.set_position(0);
     for expected in &temps {
-        let temp: Temperature = buffer.read_byteable()?;
+        let temp: Temperature = buffer.read_value()?;
         println!("  Read: {}°C", temp.celsius);
         assert_eq!(temp.celsius, expected.celsius);
     }

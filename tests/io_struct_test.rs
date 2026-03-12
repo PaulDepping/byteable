@@ -6,7 +6,7 @@
 
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use byteable::{Byteable, ReadByteable, WriteByteable};
+use byteable::{Byteable, ReadValue, WriteValue};
 use std::io::Cursor;
 
 // ── Named struct with Vec<u8> ─────────────────────────────────────────────────
@@ -20,19 +20,25 @@ struct VecStruct {
 
 #[test]
 fn vec_field_roundtrip() {
-    let original = VecStruct { tag: 7, data: vec![1, 2, 3, 4, 5] };
+    let original = VecStruct {
+        tag: 7,
+        data: vec![1, 2, 3, 4, 5],
+    };
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
-    let decoded: VecStruct = Cursor::new(&buf).read_byteable().unwrap();
+    buf.write_value(&original).unwrap();
+    let decoded: VecStruct = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
 #[test]
 fn vec_field_byte_layout() {
     // tag: 1 byte; data: 8-byte LE u64 length prefix + payload
-    let v = VecStruct { tag: 42, data: vec![0xAA, 0xBB] };
+    let v = VecStruct {
+        tag: 42,
+        data: vec![0xAA, 0xBB],
+    };
     let mut buf = Vec::new();
-    buf.write_byteable(&v).unwrap();
+    buf.write_value(&v).unwrap();
 
     assert_eq!(buf[0], 42);
     assert_eq!(&buf[1..9], &2u64.to_le_bytes());
@@ -51,10 +57,13 @@ struct StringStruct {
 
 #[test]
 fn string_field_roundtrip() {
-    let original = StringStruct { id: 1, name: "hello".to_string() };
+    let original = StringStruct {
+        id: 1,
+        name: "hello".to_string(),
+    };
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
-    let decoded: StringStruct = Cursor::new(&buf).read_byteable().unwrap();
+    buf.write_value(&original).unwrap();
+    let decoded: StringStruct = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
@@ -70,8 +79,8 @@ struct OptionStruct {
 fn option_some_roundtrip() {
     let original = OptionStruct { value: Some(42) };
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
-    let decoded: OptionStruct = Cursor::new(&buf).read_byteable().unwrap();
+    buf.write_value(&original).unwrap();
+    let decoded: OptionStruct = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
@@ -79,8 +88,8 @@ fn option_some_roundtrip() {
 fn option_none_roundtrip() {
     let original = OptionStruct { value: None };
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
-    let decoded: OptionStruct = Cursor::new(&buf).read_byteable().unwrap();
+    buf.write_value(&original).unwrap();
+    let decoded: OptionStruct = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
@@ -96,15 +105,18 @@ struct MixedStruct {
 
 #[test]
 fn mixed_struct_roundtrip() {
-    let original = MixedStruct { port: 8080, payload: vec![0xDE, 0xAD] };
+    let original = MixedStruct {
+        port: 8080,
+        payload: vec![0xDE, 0xAD],
+    };
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
+    buf.write_value(&original).unwrap();
 
     // port 8080 == 0x1F90, big-endian → [0x1F, 0x90]
     assert_eq!(buf[0], 0x1F);
     assert_eq!(buf[1], 0x90);
 
-    let decoded: MixedStruct = Cursor::new(&buf).read_byteable().unwrap();
+    let decoded: MixedStruct = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
@@ -118,8 +130,8 @@ struct TupleIo(u8, Vec<u8>);
 fn tuple_io_roundtrip() {
     let original = TupleIo(99, vec![1, 2, 3]);
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
-    let decoded: TupleIo = Cursor::new(&buf).read_byteable().unwrap();
+    buf.write_value(&original).unwrap();
+    let decoded: TupleIo = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }
 
@@ -133,8 +145,8 @@ struct UnitIo;
 fn unit_io_roundtrip() {
     let original = UnitIo;
     let mut buf = Vec::new();
-    buf.write_byteable(&original).unwrap();
+    buf.write_value(&original).unwrap();
     assert!(buf.is_empty());
-    let decoded: UnitIo = Cursor::new(&buf).read_byteable().unwrap();
+    let decoded: UnitIo = Cursor::new(&buf).read_value().unwrap();
     assert_eq!(decoded, original);
 }

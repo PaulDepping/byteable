@@ -1,6 +1,6 @@
 //! Integration tests for sync I/O traits.
 //!
-//! Tests ReadByteable and WriteByteable
+//! Tests ReadValue and WriteValue
 //! against derived structs using `std::io::Cursor`.
 #![cfg(feature = "std")]
 
@@ -9,7 +9,7 @@ use std::io::Cursor;
 #[cfg(feature = "derive")]
 mod derive_io_tests {
     use super::*;
-    use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
+    use byteable::{Byteable, LittleEndian, ReadValue, WriteValue};
 
     // ============================================================================
     // Simple derived struct (infallible)
@@ -33,35 +33,47 @@ mod derive_io_tests {
         };
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: Packet = buf.read_byteable().unwrap();
+        let restored: Packet = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
     #[test]
     fn test_write_multiple_structs_sequential_read() {
         let packets = [
-            Packet { id: 1, length: 10, checksum: 0xAAAA_AAAA },
-            Packet { id: 2, length: 20, checksum: 0xBBBB_BBBB },
-            Packet { id: 3, length: 30, checksum: 0xCCCC_CCCC },
+            Packet {
+                id: 1,
+                length: 10,
+                checksum: 0xAAAA_AAAA,
+            },
+            Packet {
+                id: 2,
+                length: 20,
+                checksum: 0xBBBB_BBBB,
+            },
+            Packet {
+                id: 3,
+                length: 30,
+                checksum: 0xCCCC_CCCC,
+            },
         ];
 
         let mut buf = Cursor::new(Vec::new());
         for p in &packets {
-            buf.write_byteable(p).unwrap();
+            buf.write_value(p).unwrap();
         }
 
         buf.set_position(0);
         for expected in &packets {
-            let restored: Packet = buf.read_byteable().unwrap();
+            let restored: Packet = buf.read_value().unwrap();
             assert_eq!(&restored, expected);
         }
     }
 
     // ============================================================================
-    // Struct with try_transparent enum field (read_byteable handles fallible conversion)
+    // Struct with try_transparent enum field (read_value handles fallible conversion)
     // ============================================================================
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -88,12 +100,12 @@ mod derive_io_tests {
         };
 
         let mut buf = Cursor::new(Vec::new());
-        // Frame implements IntoByteArray → use write_byteable
-        buf.write_byteable(&original).unwrap();
+        // Frame implements IntoByteArray → use write_value
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        // Frame implements TryFromByteArray → use read_byteable
-        let restored: Frame = buf.read_byteable().unwrap();
+        // Frame implements TryFromByteArray → use read_value
+        let restored: Frame = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -105,7 +117,7 @@ mod derive_io_tests {
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
 
         let mut buf = Cursor::new(bytes.to_vec());
-        let result: std::io::Result<Frame> = buf.read_byteable();
+        let result: std::io::Result<Frame> = buf.read_value();
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
@@ -114,12 +126,12 @@ mod derive_io_tests {
     fn test_write_then_read_try_primitives() {
         let mut buf = Cursor::new(Vec::new());
 
-        buf.write_byteable(&42u32).unwrap();
-        buf.write_byteable(&LittleEndian::new(0x1234u16)).unwrap();
+        buf.write_value(&42u32).unwrap();
+        buf.write_value(&LittleEndian::new(0x1234u16)).unwrap();
 
         buf.set_position(0);
-        let v1: u32 = buf.read_byteable().unwrap();
-        let v2: LittleEndian<u16> = buf.read_byteable().unwrap();
+        let v1: u32 = buf.read_value().unwrap();
+        let v2: LittleEndian<u16> = buf.read_value().unwrap();
 
         assert_eq!(v1, 42);
         assert_eq!(v2.get(), 0x1234);
@@ -134,10 +146,10 @@ mod derive_io_tests {
         let original: Vec<u8> = vec![1, 2, 3, 4, 5];
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: Vec<u8> = buf.read_byteable().unwrap();
+        let restored: Vec<u8> = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -146,10 +158,10 @@ mod derive_io_tests {
         let original: Vec<u32> = vec![0xDEAD, 0xBEEF, 0xCAFE, 0xBABE];
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: Vec<u32> = buf.read_byteable().unwrap();
+        let restored: Vec<u32> = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -158,10 +170,10 @@ mod derive_io_tests {
         let original: Option<u32> = Some(0xABCD1234);
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: Option<u32> = buf.read_byteable().unwrap();
+        let restored: Option<u32> = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -170,10 +182,10 @@ mod derive_io_tests {
         let original: Option<u32> = None;
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: Option<u32> = buf.read_byteable().unwrap();
+        let restored: Option<u32> = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -182,18 +194,18 @@ mod derive_io_tests {
         let original = String::from("hello, byteable!");
 
         let mut buf = Cursor::new(Vec::new());
-        buf.write_byteable(&original).unwrap();
+        buf.write_value(&original).unwrap();
 
         buf.set_position(0);
-        let restored: String = buf.read_byteable().unwrap();
+        let restored: String = buf.read_value().unwrap();
         assert_eq!(restored, original);
     }
 
     #[test]
-    fn test_read_byteable_io_error() {
+    fn test_read_value_io_error() {
         // Empty buffer → I/O error (EOF) when reading a u32
         let mut buf = Cursor::new(vec![]);
-        let result: std::io::Result<u32> = buf.read_byteable();
+        let result: std::io::Result<u32> = buf.read_value();
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().kind(),

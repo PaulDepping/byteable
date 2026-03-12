@@ -5,7 +5,7 @@
 //! conversion, and the `BigEndian<T>` and `LittleEndian<T>` wrapper types that ensure
 //! values are stored in a specific byte order regardless of the system's native endianness.
 
-use crate::{AssociatedByteArray, FromByteArray, IntoByteArray};
+use crate::{ByteRepr, FromByteArray, IntoByteArray};
 use core::{fmt, hash::Hash};
 
 /// A trait for types that can be converted between different byte orders (endianness).
@@ -37,7 +37,7 @@ use core::{fmt, hash::Hash};
 /// assert_eq!(u32::from_le_bytes(le_bytes), value);
 /// assert_eq!(u32::from_be_bytes(be_bytes), value);
 /// ```
-pub trait EndianConvert: Copy + AssociatedByteArray + IntoByteArray + FromByteArray {
+pub trait EndianConvert: Copy + ByteRepr + IntoByteArray + FromByteArray {
     /// Creates a value from its little-endian representation.
     fn from_le(value: Self) -> Self;
 
@@ -385,8 +385,8 @@ macro_rules! impl_endian_wrapper {
             }
         }
 
-        impl<T: EndianConvert> AssociatedByteArray for $name<T> {
-            type ByteArray = <T as AssociatedByteArray>::ByteArray;
+        impl<T: EndianConvert> ByteRepr for $name<T> {
+            type ByteArray = <T as ByteRepr>::ByteArray;
         }
 
         impl<T: EndianConvert> IntoByteArray for $name<T> {

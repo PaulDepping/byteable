@@ -1,6 +1,6 @@
 #![cfg(feature = "derive")]
 
-use byteable::{AssociatedByteArray, IntoByteArray, TryFromByteArray};
+use byteable::{ByteRepr, IntoByteArray, TryFromByteArray};
 
 // ============================================================================
 // BOOL TESTS

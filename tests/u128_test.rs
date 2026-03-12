@@ -3,7 +3,7 @@
 /// u128/i128 use native-endian byte order for the raw primitive trait implementations,
 /// just like all other multi-byte primitive types in the crate.
 
-use byteable::{AssociatedByteArray, FromByteArray, IntoByteArray};
+use byteable::{ByteRepr, FromByteArray, IntoByteArray};
 
 // ============================================================================
 // u128 primitive tests
@@ -77,7 +77,7 @@ fn test_i128_negative_values() {
 
 #[cfg(feature = "derive")]
 mod derive_tests {
-    use byteable::{AssociatedByteArray, Byteable, DiscriminantValue, IntoByteArray, TryFromByteArray};
+    use byteable::{ByteRepr, Byteable, DiscriminantValue, IntoByteArray, TryFromByteArray};
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
     #[repr(u128)]

@@ -3,7 +3,7 @@
 //! This example shows the most straightforward use case: converting structs
 //! to and from byte arrays for serialization.
 
-use byteable::{AssociatedByteArray, Byteable, FromByteArray, IntoByteArray};
+use byteable::{ByteRepr, Byteable, FromByteArray, IntoByteArray};
 
 /// A simple sensor reading structure
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Byteable)]

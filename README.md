@@ -11,12 +11,12 @@ _A Rust crate for zero-overhead, zero-copy serialization and deserialization of 
 ## Features
 
 - **Byte Conversion Traits**: Modular trait system for byte array conversion:
-  - `AssociatedByteArray`: Associates a type with its byte array representation
+  - `ByteRepr`: Associates a type with its byte array representation
   - `IntoByteArray`: Converts values into byte arrays
   - `FromByteArray`: Constructs values from byte arrays
   - `TryFromByteArray`: Fallible deserialization for types that can fail (e.g., `bool`, `char`, enums)
-- **`ReadByteable` & `WriteByteable`**: Extension traits for `std::io::Read` and `std::io::Write`
-- **`AsyncReadByteable` & `AsyncWriteByteable`**: Async I/O support with tokio (optional)
+- **`ReadValue` & `WriteValue`**: Extension traits for `std::io::Read` and `std::io::Write`
+- **`AsyncReadValue` & `AsyncWriteValue`**: Async I/O support with tokio (optional)
 - **Endianness Support**: `BigEndian<T>` and `LittleEndian<T>` wrappers for explicit byte order
 - **`#[derive(Byteable)]`**: Procedural macro for automatic trait implementation with endianness support (optional)
 - **Extensive Documentation**: Every function, trait, and type is thoroughly documented with examples
@@ -55,7 +55,7 @@ byteable = { version = "0.19", features = ["derive", "tokio"] }
 ### Basic File I/O Example
 
 ```rust
-use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
+use byteable::{Byteable, LittleEndian, ReadValue, WriteValue};
 use std::fs::File;
 
 #[derive(Byteable, Debug, PartialEq)]
@@ -76,12 +76,12 @@ fn main() -> std::io::Result<()> {
 
     // Write packet to a file
     let mut file = File::create("packet.bin")?;
-    file.write_byteable(&packet)?;
+    file.write_value(&packet)?;
     println!("Packet written to file");
 
     // Read packet back from file
     let mut file = File::open("packet.bin")?;
-    let restored: Packet = file.read_byteable()?;
+    let restored: Packet = file.read_value()?;
 
     assert_eq!(packet, restored);
     println!("Packet successfully read back: {:?}", restored);
@@ -121,7 +121,7 @@ let bytes = header.into_byte_array();
 ### Async I/O with Tokio
 
 ```rust
-use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable};
+use byteable::{AsyncReadValue, AsyncWriteValue, Byteable};
 use tokio::net::TcpStream;
 
 #[derive(Byteable, Debug, Clone, Copy)]
@@ -140,10 +140,10 @@ async fn main() -> std::io::Result<()> {
     };
 
     // Async write
-    stream.write_byteable(&msg).await?;
+    stream.write_value(&msg).await?;
 
     // Async read
-    let response: Message = stream.read_byteable().await?;
+    let response: Message = stream.read_value().await?;
 
     Ok(())
 }
@@ -375,15 +375,15 @@ struct MixedEndianData {
 ### Reading Multiple Values
 
 ```rust
-use byteable::ReadByteable;
+use byteable::ReadValue;
 use std::io::Cursor;
 
 let data = vec![/* bytes */];
 let mut reader = Cursor::new(data);
 
-let header: u32 = reader.read_byteable()?;
-let length: u16 = reader.read_byteable()?;
-let checksum: u32 = reader.read_byteable()?;
+let header: u32 = reader.read_value()?;
+let length: u16 = reader.read_value()?;
+let checksum: u32 = reader.read_value()?;
 ```
 
 ## Safety Considerations

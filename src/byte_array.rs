@@ -1,6 +1,6 @@
 //! Low-level byte array abstraction for the `Byteable` trait.
 //!
-//! This module provides the `ByteArray` trait, which is used internally by the `Byteable`
+//! This module provides the `FixedBytes` trait, which is used internally by the `Byteable`
 //! trait to represent the byte array form of types. Most users don't need to interact with
 //! this trait directly.
 
@@ -22,7 +22,7 @@
 ///
 /// This trait is implemented for:
 /// - `[u8; N]` for any constant `N` - representing a fixed-size byte array
-/// - `[T; N]` where `T: ByteArray` - representing nested arrays
+/// - `[T; N]` where `T: FixedBytes` - representing nested arrays
 ///
 /// Most users should not need to implement this trait manually, as the provided
 /// implementations cover common use cases.
@@ -30,10 +30,10 @@
 /// # Examples
 ///
 /// ```
-/// use byteable::ByteArray;
+/// use byteable::FixedBytes;
 ///
 /// // Create a zeroed byte array
-/// let arr: [u8; 4] = ByteArray::zeroed();
+/// let arr: [u8; 4] = FixedBytes::zeroed();
 /// assert_eq!(arr, [0, 0, 0, 0]);
 ///
 /// // Get byte size
@@ -48,16 +48,16 @@
 /// ## Nested arrays
 ///
 /// ```
-/// use byteable::ByteArray;
+/// use byteable::FixedBytes;
 ///
 /// // Nested arrays also work
-/// let nested: [[u8; 2]; 3] = ByteArray::zeroed();
+/// let nested: [[u8; 2]; 3] = FixedBytes::zeroed();
 /// assert_eq!(nested, [[0, 0], [0, 0], [0, 0]]);
 ///
 /// // Byte size is computed correctly
 /// assert_eq!(<[[u8; 2]; 3]>::BYTE_SIZE, 6);
 /// ```
-pub unsafe trait ByteArray: Copy {
+pub unsafe trait FixedBytes: Copy {
     /// The size of this byte array in bytes.
     const BYTE_SIZE: usize;
 
@@ -66,9 +66,9 @@ pub unsafe trait ByteArray: Copy {
     /// # Examples
     ///
     /// ```
-    /// use byteable::ByteArray;
+    /// use byteable::FixedBytes;
     ///
-    /// let arr: [u8; 5] = ByteArray::zeroed();
+    /// let arr: [u8; 5] = FixedBytes::zeroed();
     /// assert_eq!(arr, [0, 0, 0, 0, 0]);
     /// ```
     fn zeroed() -> Self;
@@ -80,7 +80,7 @@ pub unsafe trait ByteArray: Copy {
     /// # Examples
     ///
     /// ```
-    /// use byteable::ByteArray;
+    /// use byteable::FixedBytes;
     ///
     /// let mut arr: [u8; 3] = [1, 2, 3];
     /// let slice = arr.as_byte_slice_mut();
@@ -96,7 +96,7 @@ pub unsafe trait ByteArray: Copy {
     /// # Examples
     ///
     /// ```
-    /// use byteable::ByteArray;
+    /// use byteable::FixedBytes;
     ///
     /// let arr: [u8; 4] = [1, 2, 3, 4];
     /// let slice = arr.as_byte_slice();
@@ -107,7 +107,7 @@ pub unsafe trait ByteArray: Copy {
 
 // Implementation for fixed-size byte arrays [u8; N]
 // This is the base case - a byte array is already bytes
-unsafe impl<const SIZE: usize> ByteArray for [u8; SIZE] {
+unsafe impl<const SIZE: usize> FixedBytes for [u8; SIZE] {
     const BYTE_SIZE: usize = SIZE;
 
     fn zeroed() -> Self {
@@ -126,9 +126,9 @@ unsafe impl<const SIZE: usize> ByteArray for [u8; SIZE] {
     }
 }
 
-// Implementation for nested arrays [T; N] where T implements ByteArray
+// Implementation for nested arrays [T; N] where T implements FixedBytes
 // This allows arrays of Byteable types to also be Byteable
-unsafe impl<T: ByteArray, const SIZE_OUTER: usize> ByteArray for [T; SIZE_OUTER] {
+unsafe impl<T: FixedBytes, const SIZE_OUTER: usize> FixedBytes for [T; SIZE_OUTER] {
     // Total byte size is the size of one element times the number of elements
     const BYTE_SIZE: usize = T::BYTE_SIZE * SIZE_OUTER;
 
@@ -160,11 +160,11 @@ unsafe impl<T: ByteArray, const SIZE_OUTER: usize> ByteArray for [T; SIZE_OUTER]
 
 #[cfg(test)]
 mod tests {
-    use super::ByteArray;
+    use super::FixedBytes;
 
     #[test]
     fn test_create_zeroed() {
-        let arr: [u8; 5] = ByteArray::zeroed();
+        let arr: [u8; 5] = FixedBytes::zeroed();
         assert_eq!(arr, [0, 0, 0, 0, 0]);
     }
 

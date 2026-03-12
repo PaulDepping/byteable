@@ -172,7 +172,7 @@ fn test_enum_roundtrip() {
 
 #[test]
 fn test_enum_byte_size() {
-    use byteable::AssociatedByteArray;
+    use byteable::ByteRepr;
 
     assert_eq!(Status::BYTE_SIZE, 1);
     assert_eq!(Command::BYTE_SIZE, 2);
@@ -556,7 +556,7 @@ fn test_i32_enum_big_endian() {
 
 #[test]
 fn test_i32_enum_byte_size() {
-    use byteable::AssociatedByteArray;
+    use byteable::ByteRepr;
     assert_eq!(SignedI32LE::BYTE_SIZE, 4);
     assert_eq!(SignedI32BE::BYTE_SIZE, 4);
 }
@@ -628,7 +628,7 @@ fn test_i64_enum_big_endian() {
 
 #[test]
 fn test_i64_enum_byte_size() {
-    use byteable::AssociatedByteArray;
+    use byteable::ByteRepr;
     assert_eq!(SignedI64LE::BYTE_SIZE, 8);
     assert_eq!(SignedI64BE::BYTE_SIZE, 8);
 }

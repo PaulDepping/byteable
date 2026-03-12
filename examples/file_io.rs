@@ -6,7 +6,7 @@
 //! - Read byteable structs from a file
 //! - Handle endianness with #[byteable(little_endian)] and #[byteable(big_endian)] attributes
 
-use byteable::{Byteable, FromByteArray, IntoByteArray, ReadByteable, WriteByteable};
+use byteable::{Byteable, FromByteArray, IntoByteArray, ReadValue, WriteValue};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
@@ -72,7 +72,7 @@ fn main() -> io::Result<()> {
     let mut file = File::create("example_data.bin")?;
 
     // Write multiple packets
-    file.write_byteable(&packet)?;
+    file.write_value(&packet)?;
 
     let packet2 = NetworkPacket {
         sequence: 43,
@@ -80,7 +80,7 @@ fn main() -> io::Result<()> {
         payload_length: 2048,
         timestamp: 1638360001,
     };
-    file.write_byteable(&packet2)?;
+    file.write_value(&packet2)?;
 
     // Write a device config
     let config = DeviceConfig {
@@ -90,7 +90,7 @@ fn main() -> io::Result<()> {
         port: 8080,
         calibration: 3.14159,
     };
-    file.write_byteable(&config)?;
+    file.write_value(&config)?;
 
     println!("   Written 2 NetworkPackets and 1 DeviceConfig to 'example_data.bin'");
     println!(
@@ -103,9 +103,9 @@ fn main() -> io::Result<()> {
     let mut file = File::open("example_data.bin")?;
 
     // Read the packets back
-    let read_packet1: NetworkPacket = file.read_byteable()?;
-    let read_packet2: NetworkPacket = file.read_byteable()?;
-    let read_config: DeviceConfig = file.read_byteable()?;
+    let read_packet1: NetworkPacket = file.read_value()?;
+    let read_packet2: NetworkPacket = file.read_value()?;
+    let read_config: DeviceConfig = file.read_value()?;
 
     println!("   First packet: {:?}", read_packet1);
     println!("   Matches original: {}", read_packet1 == packet);
@@ -126,12 +126,12 @@ fn main() -> io::Result<()> {
     // Example 4: Random access with seek
     println!("4. Random access with seek:");
     file.seek(SeekFrom::Start(0))?;
-    let first: NetworkPacket = file.read_byteable()?;
+    let first: NetworkPacket = file.read_value()?;
     println!("   Read first packet again: sequence = {}", first.sequence);
 
     // Seek to the second packet
     file.seek(SeekFrom::Start(core::mem::size_of::<NetworkPacket>() as u64))?;
-    let second: NetworkPacket = file.read_byteable()?;
+    let second: NetworkPacket = file.read_value()?;
     println!("   Seeked to second packet: sequence = {}", second.sequence);
     println!();
 
