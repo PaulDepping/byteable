@@ -19,6 +19,8 @@ enum AttributeType {
     Transparent,
     /// Use field's raw representation via `TryRawRepr` (fallible conversion)
     TryTransparent,
+    /// Struct-level: skip transmute path, generate `Readable`/`Writable` via sequential field I/O
+    IoOnly,
     None,
 }
 
@@ -43,9 +45,10 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                     "big_endian" => AttributeType::BigEndian,
                     "transparent" => AttributeType::Transparent,
                     "try_transparent" => AttributeType::TryTransparent,
+                    "io_only" => AttributeType::IoOnly,
                     other => panic!(
                         "Unknown byteable attribute: {other}. \
-                         Valid attributes are: little_endian, big_endian, transparent, try_transparent"
+                         Valid attributes are: little_endian, big_endian, transparent, try_transparent, io_only"
                     ),
                 };
             }
@@ -81,6 +84,124 @@ fn gen_raw_struct_impls(
             #[inline]
             fn from_byte_array(bytes: Self::ByteArray) -> Self {
                 unsafe { ::core::mem::transmute(bytes) }
+            }
+        }
+    }
+}
+
+/// Generates the token stream for writing a single struct field accessed via `self.field` /
+/// `self.0`. Unlike [`gen_field_write`], which dereferences a move-bound variable, this helper
+/// takes a pre-formed access expression (`self.field_name` or `self.0`) suitable for use inside
+/// `&self` methods.
+fn gen_struct_field_write(
+    field_access: &proc_macro2::TokenStream,
+    field_ty: &syn::Type,
+    attrs: &[syn::Attribute],
+    bc: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match parse_byteable_attr(attrs) {
+        AttributeType::LittleEndian => quote! {
+            writer.write_byteable(&#bc::LittleEndian::new(#field_access))?;
+        },
+        AttributeType::BigEndian => quote! {
+            writer.write_byteable(&#bc::BigEndian::new(#field_access))?;
+        },
+        AttributeType::None => {
+            if is_multibyte_primitive(field_ty) {
+                panic!(
+                    "io_only struct field of type `{}` is a multi-byte primitive and requires \
+                     an endianness annotation: add #[byteable(little_endian)] or \
+                     #[byteable(big_endian)]",
+                    quote!(#field_ty)
+                );
+            }
+            quote! { writer.write_byteable(&#field_access)?; }
+        }
+        AttributeType::IoOnly => panic!(
+            "#[byteable(io_only)] is a struct-level attribute and cannot be used on a field"
+        ),
+        AttributeType::Transparent | AttributeType::TryTransparent => panic!(
+            "#[byteable(transparent)] and #[byteable(try_transparent)] are not applicable in \
+             io_only mode; remove the annotation or use a plain field"
+        ),
+    }
+}
+
+/// Generates `Readable` and `Writable` impls for a struct annotated with `#[byteable(io_only)]`.
+///
+/// Instead of the transmute-based `IntoByteArray`/`FromByteArray` path, this reads and writes
+/// each field in declaration order using their own `Readable`/`Writable` implementations. This
+/// allows structs to contain types like `Vec<T>`, `String`, and `Option<T>` that are not
+/// `BytecastSafe`.
+fn handle_io_struct_derive(
+    name: &syn::Ident,
+    generics: &syn::Generics,
+    fields_data: &syn::Fields,
+    bc: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+
+    if let syn::Fields::Unit = fields_data {
+        return quote! {
+            impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
+                fn read_from(_reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
+                    Ok(#name)
+                }
+            }
+            impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
+                fn write_to(&self, _writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
+                    Ok(())
+                }
+            }
+        };
+    }
+
+    let (fields, is_tuple) = match fields_data {
+        syn::Fields::Named(f) => (&f.named, false),
+        syn::Fields::Unnamed(f) => (&f.unnamed, true),
+        syn::Fields::Unit => unreachable!(),
+    };
+
+    let write_stmts: Vec<_> = fields.iter().enumerate().map(|(i, field)| {
+        let field_access = if is_tuple {
+            let idx = syn::Index::from(i);
+            quote! { self.#idx }
+        } else {
+            let fname = field.ident.as_ref().unwrap();
+            quote! { self.#fname }
+        };
+        gen_struct_field_write(&field_access, &field.ty, &field.attrs, bc)
+    }).collect();
+
+    let (read_bindings, construct_expr): (Vec<_>, proc_macro2::TokenStream) = if is_tuple {
+        let idents: Vec<_> = (0..fields.len())
+            .map(|i| syn::Ident::new(&format!("__field_{i}"), name.span()))
+            .collect();
+        let bindings = fields.iter().zip(&idents)
+            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, bc))
+            .collect();
+        (bindings, quote! { Ok(Self(#(#idents),*)) })
+    } else {
+        let field_idents: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+        let bindings = fields.iter()
+            .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, bc))
+            .collect();
+        (bindings, quote! { Ok(Self { #(#field_idents),* }) })
+    };
+
+    quote! {
+        impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
+                use #bc::ReadByteable;
+                #( #read_bindings )*
+                #construct_expr
+            }
+        }
+        impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
+            fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
+                use #bc::WriteByteable;
+                #( #write_stmts )*
+                Ok(())
             }
         }
     }
@@ -424,8 +545,22 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     let input: DeriveInput = parse_macro_input!(input);
 
     if let Data::Enum(enum_data) = input.data {
+        let has_field_variants = enum_data.variants.iter().any(|v| !matches!(v.fields, Fields::Unit));
+        if has_field_variants {
+            return handle_field_enum_derive(input.ident, input.generics, input.attrs, &enum_data, bc).into();
+        }
         return handle_enum_derive(input.ident, input.generics, input.vis, input.attrs, &enum_data, bc).into();
     }
+
+    // io_only: generate Readable + Writable by sequential field I/O instead of transmute
+    if parse_byteable_attr(&input.attrs) == AttributeType::IoOnly {
+        let fields_data = match &input.data {
+            Data::Struct(data) => &data.fields,
+            _ => panic!("#[byteable(io_only)] is only supported on structs"),
+        };
+        return handle_io_struct_derive(&input.ident, &input.generics, fields_data, &bc).into();
+    }
+
 
     let original_name = &input.ident;
     let vis = &input.vis;
@@ -499,6 +634,9 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 quote! { .try_into()? },
             ),
             AttributeType::None => (quote! { #field_type }, quote! {}, quote! {}),
+            AttributeType::IoOnly => panic!(
+                "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
+            ),
         };
 
         raw_field_types.push(raw_ty.clone());
@@ -759,6 +897,363 @@ fn handle_enum_derive(
             fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
                 let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
                 raw.try_into()
+            }
+        }
+    }
+}
+
+/// Returns `true` if `ty` is a bare multi-byte primitive (`u16`, `u32`, `f32`, etc.) that cannot
+/// be serialized without an explicit endianness annotation.
+fn is_multibyte_primitive(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(tp) = ty {
+        if tp.qself.is_none() {
+            if let Some(ident) = tp.path.get_ident() {
+                return matches!(
+                    ident.to_string().as_str(),
+                    "u16" | "i16" | "u32" | "i32" | "u64" | "i64"
+                        | "u128" | "i128" | "f32" | "f64" | "usize" | "isize"
+                );
+            }
+        }
+    }
+    false
+}
+
+/// Generates the token stream for writing a single variant field, respecting its `#[byteable]`
+/// attribute. Panics at compile time if the field is a multi-byte primitive with no annotation.
+fn gen_field_write(
+    field_ident: &Ident,
+    field_ty: &syn::Type,
+    attrs: &[syn::Attribute],
+    bc: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match parse_byteable_attr(attrs) {
+        AttributeType::LittleEndian => quote! {
+            writer.write_byteable(&#bc::LittleEndian::new(*#field_ident))?;
+        },
+        AttributeType::BigEndian => quote! {
+            writer.write_byteable(&#bc::BigEndian::new(*#field_ident))?;
+        },
+        AttributeType::None => {
+            if is_multibyte_primitive(field_ty) {
+                panic!(
+                    "field `{}` is a multi-byte type and requires an endianness annotation: \
+                     add #[byteable(little_endian)] or #[byteable(big_endian)]",
+                    field_ident
+                );
+            }
+            quote! { writer.write_byteable(#field_ident)?; }
+        }
+        other => panic!(
+            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
+             only little_endian and big_endian are supported here"
+        ),
+    }
+}
+
+/// Generates the token stream for reading a single variant field, respecting its `#[byteable]`
+/// attribute. Panics at compile time if the field is a multi-byte primitive with no annotation.
+fn gen_field_read(
+    field_ident: &Ident,
+    field_ty: &syn::Type,
+    attrs: &[syn::Attribute],
+    bc: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match parse_byteable_attr(attrs) {
+        AttributeType::LittleEndian => quote! {
+            let #field_ident: #field_ty =
+                reader.read_byteable::<#bc::LittleEndian<#field_ty>>()?.get();
+        },
+        AttributeType::BigEndian => quote! {
+            let #field_ident: #field_ty =
+                reader.read_byteable::<#bc::BigEndian<#field_ty>>()?.get();
+        },
+        AttributeType::None => {
+            if is_multibyte_primitive(field_ty) {
+                panic!(
+                    "field `{}` is a multi-byte type and requires an endianness annotation: \
+                     add #[byteable(little_endian)] or #[byteable(big_endian)]",
+                    field_ident
+                );
+            }
+            quote! { let #field_ident: #field_ty = reader.read_byteable()?; }
+        }
+        other => panic!(
+            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
+             only little_endian and big_endian are supported here"
+        ),
+    }
+}
+
+/// Attempts to evaluate an integer literal expression to a `u128` value.
+///
+/// Handles decimal, hex (`0x`), octal (`0o`), and binary (`0b`) literals, plus type suffixes.
+/// Returns `None` for non-literal or non-integer expressions.
+fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {
+    match expr {
+        syn::Expr::Lit(el) => {
+            if let syn::Lit::Int(li) = &el.lit {
+                // base10_parse handles decimal literals and strips type suffixes
+                if let Ok(v) = li.base10_parse::<u128>() {
+                    return Some(v);
+                }
+                // For non-decimal (hex/bin/oct), parse from the token string
+                let s = li.to_string();
+                let (prefix, rest) = if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                    (16u32, r)
+                } else if let Some(r) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
+                    (2, r)
+                } else if let Some(r) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
+                    (8, r)
+                } else {
+                    return None;
+                };
+                // Strip type suffix and digit separators
+                let digits: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .filter(|c| *c != '_' && !c.is_alphabetic())
+                    .collect();
+                u128::from_str_radix(&digits, prefix).ok()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Computes discriminant token streams for every variant, auto-assigning values where absent.
+///
+/// Follows Rust's own rule: starts at `0`, increments by one after each variant. If a variant
+/// has an explicit discriminant, that value is used and the counter resets to `explicit + 1`.
+/// When the explicit value cannot be statically evaluated (e.g. a named constant), the counter
+/// falls back to incrementing from the previous known position.
+fn compute_discriminants(
+    variants: &syn::punctuated::Punctuated<syn::Variant, syn::Token![,]>,
+) -> Vec<proc_macro2::TokenStream> {
+    let mut next: u128 = 0;
+    variants
+        .iter()
+        .map(|v| {
+            if let Some((_, expr)) = &v.discriminant {
+                // Try to evaluate to keep the counter accurate
+                if let Some(val) = try_eval_int_expr(expr) {
+                    next = val + 1;
+                } else {
+                    next += 1;
+                }
+                quote! { #expr }
+            } else {
+                let val = next;
+                next += 1;
+                let lit = proc_macro2::Literal::u128_unsuffixed(val);
+                quote! { #lit }
+            }
+        })
+        .collect()
+}
+
+/// Handles deriving `Readable` and `Writable` for enums that have at least one variant with fields.
+///
+/// The discriminant is written/read first (using the `#[repr(...)]` type and optional endianness),
+/// followed by the fields of the matched variant. All variant fields must implement [`Readable`] /
+/// [`Writable`].
+///
+/// ## Optional attributes
+///
+/// - `#[repr(...)]` — if omitted, the repr is auto-selected from the variant count:
+///   ≤256 → `u8`, ≤65536 → `u16`, ≤2³² → `u32`, otherwise `u64`.
+/// - Explicit discriminants — if omitted, values are auto-assigned starting at `0` and
+///   incrementing by one, following Rust's own default discriminant rules.
+/// - Endianness — required for user-supplied multi-byte reprs; auto-selected reprs default
+///   to little-endian.
+fn handle_field_enum_derive(
+    enum_name: Ident,
+    generics: syn::Generics,
+    attrs: Vec<syn::Attribute>,
+    enum_data: &syn::DataEnum,
+    bc: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+
+    let endianness = parse_byteable_attr(&attrs);
+    if matches!(endianness, AttributeType::Transparent | AttributeType::TryTransparent) {
+        panic!("transparent and try_transparent attributes are not supported for enums");
+    }
+
+    // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
+    let repr_auto_selected = extract_repr_type(&attrs).is_none();
+    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
+        let n = enum_data.variants.len();
+        let ty_str = if n <= 256 {
+            "u8"
+        } else if n <= 65_536 {
+            "u16"
+        } else if n as u64 <= u32::MAX as u64 + 1 {
+            "u32"
+        } else {
+            "u64"
+        };
+        Ident::new(ty_str, enum_name.span())
+    });
+
+    let repr_ty_str = repr_ty.to_string();
+    let is_single_byte = matches!(repr_ty_str.as_str(), "u8" | "i8");
+
+    // For multi-byte repr: auto-selected defaults to little-endian; user-specified requires explicit.
+    let effective_endianness = if !is_single_byte
+        && !matches!(endianness, AttributeType::LittleEndian | AttributeType::BigEndian)
+    {
+        if repr_auto_selected {
+            AttributeType::LittleEndian
+        } else {
+            panic!(
+                "Field enums with an explicit multi-byte repr type require an endianness attribute: \
+                 add #[byteable(little_endian)] or #[byteable(big_endian)]"
+            )
+        }
+    } else {
+        endianness
+    };
+
+    // Pre-compute discriminant tokens for every variant (auto-assign where absent).
+    let discriminants = compute_discriminants(&enum_data.variants);
+
+    // Tokens that read the discriminant and bind it as `disc: #repr_ty`.
+    let read_disc = if is_single_byte {
+        quote! { let disc: #repr_ty = reader.read_byteable()?; }
+    } else {
+        match effective_endianness {
+            AttributeType::LittleEndian => quote! {
+                let disc: #repr_ty = reader.read_byteable::<#bc::LittleEndian<#repr_ty>>()?.get();
+            },
+            AttributeType::BigEndian => quote! {
+                let disc: #repr_ty = reader.read_byteable::<#bc::BigEndian<#repr_ty>>()?.get();
+            },
+            _ => unreachable!(),
+        }
+    };
+
+    let write_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc_tokens)| {
+        let variant_name = &variant.ident;
+
+        let write_disc = if is_single_byte {
+            quote! {
+                let disc_val: #repr_ty = #disc_tokens as #repr_ty;
+                writer.write_byteable(&disc_val)?;
+            }
+        } else {
+            match effective_endianness {
+                AttributeType::LittleEndian => quote! {
+                    let disc_val: #repr_ty = #disc_tokens as #repr_ty;
+                    writer.write_byteable(&#bc::LittleEndian::new(disc_val))?;
+                },
+                AttributeType::BigEndian => quote! {
+                    let disc_val: #repr_ty = #disc_tokens as #repr_ty;
+                    writer.write_byteable(&#bc::BigEndian::new(disc_val))?;
+                },
+                _ => unreachable!(),
+            }
+        };
+
+        match &variant.fields {
+            Fields::Unit => quote! {
+                #enum_name::#variant_name => { #write_disc }
+            },
+            Fields::Named(named) => {
+                let field_names: Vec<_> = named.named.iter()
+                    .map(|f| f.ident.as_ref().unwrap())
+                    .collect();
+                let field_writes: Vec<_> = named.named.iter()
+                    .map(|f| gen_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+                    .collect();
+                quote! {
+                    #enum_name::#variant_name { #(#field_names),* } => {
+                        #write_disc
+                        #( #field_writes )*
+                    }
+                }
+            }
+            Fields::Unnamed(unnamed) => {
+                let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                    .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
+                    .collect();
+                let field_writes: Vec<_> = unnamed.unnamed.iter().zip(&field_idents)
+                    .map(|(f, ident)| gen_field_write(ident, &f.ty, &f.attrs, &bc))
+                    .collect();
+                quote! {
+                    #enum_name::#variant_name(#(#field_idents),*) => {
+                        #write_disc
+                        #( #field_writes )*
+                    }
+                }
+            }
+        }
+    });
+
+    let read_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc_tokens)| {
+        let variant_name = &variant.ident;
+
+        match &variant.fields {
+            Fields::Unit => quote! {
+                #disc_tokens => Ok(#enum_name::#variant_name),
+            },
+            Fields::Named(named) => {
+                let field_idents: Vec<_> = named.named.iter()
+                    .map(|f| f.ident.as_ref().unwrap())
+                    .collect();
+                let field_reads: Vec<_> = named.named.iter()
+                    .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+                    .collect();
+                quote! {
+                    #disc_tokens => {
+                        #( #field_reads )*
+                        Ok(#enum_name::#variant_name { #(#field_idents),* })
+                    }
+                }
+            }
+            Fields::Unnamed(unnamed) => {
+                let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                    .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
+                    .collect();
+                let field_reads: Vec<_> = unnamed.unnamed.iter().zip(&field_idents)
+                    .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
+                    .collect();
+                quote! {
+                    #disc_tokens => {
+                        #( #field_reads )*
+                        Ok(#enum_name::#variant_name(#(#field_idents),*))
+                    }
+                }
+            }
+        }
+    });
+
+    let enum_name_str = enum_name.to_string();
+
+    quote! {
+        impl #impl_generics #bc::Writable for #enum_name #type_generics #where_clause {
+            fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
+                use #bc::WriteByteable;
+                match self {
+                    #(#write_arms)*
+                }
+                Ok(())
+            }
+        }
+
+        impl #impl_generics #bc::Readable for #enum_name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
+                use #bc::ReadByteable;
+                #read_disc
+                match disc {
+                    #(#read_arms)*
+                    _ => Err(::std::io::Error::new(
+                        ::std::io::ErrorKind::InvalidData,
+                        format!("invalid discriminant for enum {}", #enum_name_str),
+                    )),
+                }
             }
         }
     }

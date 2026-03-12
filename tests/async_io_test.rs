@@ -1,6 +1,6 @@
 //! Integration tests for async I/O traits.
 //!
-//! Tests AsyncReadByteable, AsyncWriteByteable, AsyncTryReadByteable, AsyncTryWriteByteable
+//! Tests AsyncReadByteable and AsyncWriteByteable
 //! against derived structs using tokio's duplex channel and Cursor.
 #![cfg(feature = "tokio")]
 
@@ -9,10 +9,7 @@ use std::io::Cursor;
 #[cfg(feature = "derive")]
 mod derive_async_io_tests {
     use super::*;
-    use byteable::{
-        AsyncReadByteable, AsyncTryReadByteable, AsyncTryWriteByteable, AsyncWriteByteable,
-        Byteable, ByteableIoError, LittleEndian,
-    };
+    use byteable::{AsyncReadByteable, AsyncWriteByteable, Byteable, LittleEndian};
 
     // ============================================================================
     // Simple derived struct (infallible)
@@ -64,7 +61,7 @@ mod derive_async_io_tests {
     }
 
     // ============================================================================
-    // Struct with try_transparent enum field (AsyncTryReadByteable)
+    // Struct with try_transparent enum field (read_byteable handles fallible conversion)
     // ============================================================================
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -95,8 +92,8 @@ mod derive_async_io_tests {
         buf.write_byteable(&original).await.unwrap();
 
         buf.set_position(0);
-        // Frame implements TryFromByteArray → read_try_byteable
-        let restored: Frame = buf.read_try_byteable().await.unwrap();
+        // Frame implements TryFromByteArray → read_byteable
+        let restored: Frame = buf.read_byteable().await.unwrap();
         assert_eq!(restored, original);
     }
 
@@ -107,24 +104,20 @@ mod derive_async_io_tests {
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
 
         let mut buf = Cursor::new(bytes.to_vec());
-        let result: Result<Frame, ByteableIoError<_>> = buf.read_try_byteable().await;
+        let result: std::io::Result<Frame> = buf.read_byteable().await;
         assert!(result.is_err());
-
-        match result.unwrap_err() {
-            ByteableIoError::Conversion(_) => {} // expected
-            ByteableIoError::Io(_) => panic!("Expected conversion error, not I/O error"),
-        }
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]
-    async fn test_async_try_write_primitives() {
+    async fn test_async_write_then_read_try_primitives() {
         let mut buf = Cursor::new(Vec::new());
-        buf.write_try_byteable(&LittleEndian::new(0x1234u16)).await.unwrap();
-        buf.write_try_byteable(&100u8).await.unwrap();
+        buf.write_byteable(&LittleEndian::new(0x1234u16)).await.unwrap();
+        buf.write_byteable(&100u8).await.unwrap();
 
         buf.set_position(0);
-        let v1: LittleEndian<u16> = buf.read_try_byteable().await.unwrap();
-        let v2: u8 = buf.read_try_byteable().await.unwrap();
+        let v1: LittleEndian<u16> = buf.read_byteable().await.unwrap();
+        let v2: u8 = buf.read_byteable().await.unwrap();
 
         assert_eq!(v1.get(), 0x1234);
         assert_eq!(v2, 100);

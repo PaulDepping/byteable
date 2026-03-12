@@ -14,7 +14,7 @@
 //!   - `AssociatedByteArray`: Associates a type with its byte array representation
 //!   - `IntoByteArray`: Converts values into byte arrays
 //!   - `FromByteArray`: Constructs values from byte arrays
-//!   - `TryIntoByteArray` & `TryFromByteArray`: Fallible conversion variants
+//!   - `TryFromByteArray`: Fallible deserialization variant
 //! - **`ReadByteable` & `WriteByteable` Traits**: Extension traits for `std::io::Read` and
 //!   `std::io::Write`, enabling convenient reading and writing of byteable types.
 //! - **`AsyncReadByteable` & `AsyncWriteByteable` Traits** (with `tokio` feature): Asynchronous
@@ -359,16 +359,14 @@ pub use byte_array::ByteArray;
 
 pub use byteable_trait::{
     AssociatedByteArray, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
-    RawBool, RawChar, RawRepr, TryFromByteArray, TryIntoByteArray, TryRawRepr,
+    RawBool, RawChar, RawRepr, TryFromByteArray, TryRawRepr,
 };
 
 #[cfg(feature = "std")]
-pub use io::{ByteableIoError, ReadByteable, TryReadByteable, TryWriteByteable, WriteByteable};
+pub use io::{Readable, ReadByteable, Writable, WriteByteable};
 
 #[cfg(feature = "tokio")]
-pub use async_io::{
-    AsyncReadByteable, AsyncTryReadByteable, AsyncTryWriteByteable, AsyncWriteByteable,
-};
+pub use async_io::{AsyncReadByteable, AsyncWriteByteable};
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 

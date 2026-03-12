@@ -14,7 +14,7 @@ _A Rust crate for zero-overhead, zero-copy serialization and deserialization of 
   - `AssociatedByteArray`: Associates a type with its byte array representation
   - `IntoByteArray`: Converts values into byte arrays
   - `FromByteArray`: Constructs values from byte arrays
-  - `TryIntoByteArray` & `TryFromByteArray`: Fallible conversion variants for types that can fail (e.g., `bool`, `char`, enums)
+  - `TryFromByteArray`: Fallible deserialization for types that can fail (e.g., `bool`, `char`, enums)
 - **`ReadByteable` & `WriteByteable`**: Extension traits for `std::io::Read` and `std::io::Write`
 - **`AsyncReadByteable` & `AsyncWriteByteable`**: Async I/O support with tokio (optional)
 - **Endianness Support**: `BigEndian<T>` and `LittleEndian<T>` wrappers for explicit byte order

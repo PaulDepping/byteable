@@ -15,7 +15,7 @@ std = []
 tokio = ["dep:tokio", "std"]
 
 [dependencies]
-byteable_derive = { version = "0.12.1", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.13.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 
 [dev-dependencies]

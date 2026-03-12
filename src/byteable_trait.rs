@@ -4,7 +4,6 @@
 //! - [`AssociatedByteArray`]: Associates a type with its byte array representation
 //! - [`IntoByteArray`]: Converts a value into a byte array
 //! - [`FromByteArray`]: Constructs a value from a byte array
-//! - [`TryIntoByteArray`]: Fallible conversion to a byte array
 //! - [`TryFromByteArray`]: Fallible construction from a byte array
 //! - [`RawRepr`]: For types with a distinct raw representation
 //!
@@ -186,30 +185,6 @@ pub trait FromByteArray: AssociatedByteArray {
     fn from_byte_array(byte_array: Self::ByteArray) -> Self;
 }
 
-/// Attempts to convert a value into its byte array representation, potentially failing.
-///
-/// This trait provides fallible conversion to byte arrays, useful for types that may need
-/// validation or have constraints that could prevent conversion. Types that implement
-/// [`IntoByteArray`] automatically implement this trait with `Error = Infallible`.
-///
-/// # Examples
-///
-/// ```
-/// use byteable::{IntoByteArray, TryIntoByteArray};
-///
-/// // Types that implement IntoByteArray automatically get TryIntoByteArray
-/// let value: u32 = 42;
-/// let bytes = value.try_into_byte_array().unwrap();
-/// assert_eq!(bytes, value.into_byte_array());
-/// ```
-pub trait TryIntoByteArray: AssociatedByteArray {
-    /// The type returned in the event of a conversion error.
-    type Error;
-
-    /// Attempts to convert `self` into its byte array representation.
-    fn try_into_byte_array(self) -> Result<Self::ByteArray, Self::Error>;
-}
-
 /// Attempts to construct a value from its byte array representation, potentially failing.
 ///
 /// This trait provides fallible construction from byte arrays, useful for types that may need
@@ -232,15 +207,6 @@ pub trait TryFromByteArray: AssociatedByteArray + Sized {
 
     /// Attempts to construct a value from its byte array representation.
     fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error>;
-}
-
-impl<T: IntoByteArray> TryIntoByteArray for T {
-    type Error = core::convert::Infallible;
-
-    #[inline]
-    fn try_into_byte_array(self) -> Result<Self::ByteArray, Self::Error> {
-        Ok(self.into_byte_array())
-    }
 }
 
 impl<T: FromByteArray> TryFromByteArray for T {

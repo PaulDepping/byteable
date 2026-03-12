@@ -87,8 +87,7 @@ The crate uses a **modular trait hierarchy** (as of v0.20+):
 1. **`AssociatedByteArray`** - Associates a type with its byte array representation
 2. **`IntoByteArray`** - Infallible conversion to bytes
 3. **`FromByteArray`** - Infallible conversion from bytes
-4. **`TryIntoByteArray`** - Fallible conversion to bytes
-5. **`TryFromByteArray`** - Fallible conversion from bytes (used for `bool`, `char`, enums)
+4. **`TryFromByteArray`** - Fallible conversion from bytes (used for `bool`, `char`, enums)
 
 These traits replaced the previous monolithic `Byteable` trait to provide more flexibility.
 
@@ -121,8 +120,8 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 #### I/O Extension Traits
 
-- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadByteable`, `WriteByteable`, `TryReadByteable`, `TryWriteByteable` - Extend `std::io::Read`/`Write`
-- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadByteable`, `AsyncWriteByteable`, `AsyncTryReadByteable`, `AsyncTryWriteByteable` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
+- **Sync I/O** ([src/io.rs](src/io.rs)): `ReadByteable`, `WriteByteable` - Extend `std::io::Read`/`Write`
+- **Async I/O** ([src/async_io.rs](src/async_io.rs)): `AsyncReadByteable`, `AsyncWriteByteable` - Extend `tokio::io::AsyncRead`/`AsyncWrite`
 
 ### Derive Macro Implementation ([byteable_derive/src/lib.rs](byteable_derive/src/lib.rs))
 

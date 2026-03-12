@@ -5,17 +5,15 @@
 //! ([`IntoByteArray`] and [`FromByteArray`]).
 
 use crate::byte_array::ByteArray;
-use crate::{FromByteArray, IntoByteArray, LittleEndian, TryFromByteArray, TryIntoByteArray};
+use crate::{IntoByteArray, LittleEndian, TryFromByteArray};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::error::Error;
-use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::io::{Read, Write};
 
 /// Low-level trait for reading a value from a [`std::io::Read`] source.
 ///
 /// This trait is implemented for:
-/// - Types implementing [`FromByteArray`] (primitives, fixed-size structs)
+/// - Types implementing [`TryFromByteArray`] (primitives, fixed-size structs, enums, `bool`, `char`)
 /// - Collection types: [`Vec`], [`VecDeque`], [`HashMap`], [`HashSet`], [`BTreeMap`], [`BTreeSet`]
 /// - [`Option<T>`] where `T: Readable`
 /// - [`String`]
@@ -28,11 +26,16 @@ pub trait Readable: Sized {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self>;
 }
 
-impl<T: FromByteArray> Readable for T {
+impl<T: TryFromByteArray> Readable for T
+where
+    T::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+{
+    #[inline]
     fn read_from(reader: &mut (impl Read + ?Sized)) -> std::io::Result<Self> {
         let mut b = T::ByteArray::zeroed();
         reader.read_exact(b.as_byte_slice_mut())?;
-        Ok(T::from_byte_array(b))
+        T::try_from_byte_array(b)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -145,6 +148,7 @@ impl Readable for String {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
+
 
 /// Low-level trait for writing a value to a [`std::io::Write`] sink.
 ///
@@ -487,340 +491,14 @@ pub trait WriteByteable: Write {
 // Blanket implementation: any type that implements Write automatically gets WriteByteable
 impl<T: Write> WriteByteable for T {}
 
-/// Error type for fallible byteable I/O operations.
-///
-/// This error type distinguishes between I/O errors that occur when reading/writing bytes,
-/// and conversion errors that occur when converting between byte arrays and values.
-///
-/// # Type Parameter
-///
-/// - `E`: The error type from the conversion operation (from `TryFromByteArray::Error` or
-///   `TryIntoByteArray::Error`)
-///
-/// # Examples
-///
-/// ```
-/// use byteable::ByteableIoError;
-/// use std::io;
-///
-/// fn handle_error<E: std::fmt::Display>(err: ByteableIoError<E>) {
-///     match err {
-///         ByteableIoError::Io(io_err) => {
-///             eprintln!("I/O error: {}", io_err);
-///         }
-///         ByteableIoError::Conversion(conv_err) => {
-///             eprintln!("Conversion error: {}", conv_err);
-///         }
-///     }
-/// }
-/// ```
-#[derive(Debug)]
-pub enum ByteableIoError<E> {
-    /// An I/O error occurred while reading or writing bytes.
-    Io(std::io::Error),
-    /// A conversion error occurred while converting between bytes and values.
-    Conversion(E),
-}
-
-impl<E: fmt::Display> fmt::Display for ByteableIoError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ByteableIoError::Io(err) => write!(f, "I/O error: {}", err),
-            ByteableIoError::Conversion(err) => write!(f, "Conversion error: {}", err),
-        }
-    }
-}
-
-impl<E: Error + 'static> Error for ByteableIoError<E> {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            ByteableIoError::Io(err) => Some(err),
-            ByteableIoError::Conversion(err) => Some(err),
-        }
-    }
-}
-
-impl<E> From<std::io::Error> for ByteableIoError<E> {
-    #[inline]
-    fn from(err: std::io::Error) -> Self {
-        ByteableIoError::Io(err)
-    }
-}
-
-/// Low-level trait for writing a value to a [`std::io::Write`] sink with fallible conversion.
-///
-/// Implemented for all types that implement [`TryIntoByteArray`]. Unlike [`Writable`], the
-/// conversion to bytes can fail — useful for validated types or enums where not every bit pattern
-/// represents a valid value.
-///
-/// You typically don't need to implement or call this trait directly — use
-/// [`TryWriteByteable::write_try_byteable`] instead.
-pub trait TryWritable {
-    type Error;
-
-    fn try_write_to(
-        &self,
-        writer: &mut (impl Write + ?Sized),
-    ) -> Result<(), ByteableIoError<Self::Error>>;
-}
-
-/// Low-level trait for reading a value from a [`std::io::Read`] source with fallible conversion.
-///
-/// Implemented for all types that implement [`TryFromByteArray`]. Unlike [`Readable`], the
-/// conversion from bytes can fail — useful for types like `bool`, `char`, or enums where not every
-/// bit pattern represents a valid value.
-///
-/// You typically don't need to implement or call this trait directly — use
-/// [`TryReadByteable::read_try_byteable`] instead.
-pub trait TryReadable: Sized {
-    type Error;
-
-    fn try_read_from(
-        reader: &mut (impl Read + ?Sized),
-    ) -> Result<Self, ByteableIoError<Self::Error>>;
-}
-
-impl<T: TryIntoByteArray> TryWritable for T {
-    type Error = <T as TryIntoByteArray>::Error;
-
-    fn try_write_to(
-        &self,
-        writer: &mut (impl Write + ?Sized),
-    ) -> Result<(), ByteableIoError<Self::Error>> {
-        let byte_array = self
-            .try_into_byte_array()
-            .map_err(ByteableIoError::Conversion)?;
-        writer.write_all(byte_array.as_byte_slice())?;
-        Ok(())
-    }
-}
-
-impl<T: TryFromByteArray> TryReadable for T {
-    type Error = <T as TryFromByteArray>::Error;
-
-    fn try_read_from(
-        reader: &mut (impl Read + ?Sized),
-    ) -> Result<Self, ByteableIoError<Self::Error>> {
-        let mut b = T::ByteArray::zeroed();
-        reader.read_exact(b.as_byte_slice_mut())?;
-
-        T::try_from_byte_array(b).map_err(ByteableIoError::Conversion)
-    }
-}
-
-/// Extension trait for `Read` that adds methods for reading types with fallible conversion.
-///
-/// This trait is automatically implemented for all types that implement `std::io::Read`,
-/// providing methods for reading types that implement [`TryFromByteArray`]. Unlike
-/// [`ReadByteable`], this trait handles conversion errors explicitly.
-///
-/// # Error Handling
-///
-/// This trait returns [`ByteableIoError<E>`] which distinguishes between:
-/// - I/O errors (failed to read bytes from the source)
-/// - Conversion errors (bytes were read successfully but conversion failed)
-///
-/// # Examples
-///
-/// ## Reading with validation
-///
-/// ```
-/// use byteable::{AssociatedByteArray, TryFromByteArray, TryReadByteable};
-/// use std::io::Cursor;
-///
-/// // A type that only accepts even values
-/// #[derive(Debug, PartialEq, Clone, Copy)]
-/// struct EvenU32(u32);
-///
-/// #[derive(Debug)]
-/// struct NotEvenError;
-///
-/// impl std::fmt::Display for NotEvenError {
-///     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-///         write!(f, "value is not even")
-///     }
-/// }
-///
-/// impl std::error::Error for NotEvenError {}
-///
-/// impl AssociatedByteArray for EvenU32 {
-///     type ByteArray = [u8; 4];
-/// }
-///
-/// impl TryFromByteArray for EvenU32 {
-///     type Error = NotEvenError;
-///
-///     fn try_from_byte_array(bytes: [u8; 4]) -> Result<Self, Self::Error> {
-///         let value = u32::from_ne_bytes(bytes);
-///         if value % 2 == 0 {
-///             Ok(EvenU32(value))
-///         } else {
-///             Err(NotEvenError)
-///         }
-///     }
-/// }
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let data = vec![2, 0, 0, 0]; // Even value
-/// let mut cursor = Cursor::new(data);
-/// let value: EvenU32 = cursor.read_try_byteable()?;
-/// #[cfg(target_endian = "little")]
-/// assert_eq!(value, EvenU32(2));
-///
-/// let odd_data = vec![3, 0, 0, 0]; // Odd value
-/// let mut cursor = Cursor::new(odd_data);
-/// let result: Result<EvenU32, _> = cursor.read_try_byteable();
-/// assert!(result.is_err());
-/// # Ok(())
-/// # }
-/// ```
-pub trait TryReadByteable: Read {
-    /// Reads a [`TryReadable`] type with fallible conversion from this reader.
-    ///
-    /// This method reads the number of bytes required by `T`'s [`TryFromByteArray`] implementation
-    /// and attempts to convert them into a value of type `T`.
-    ///
-    /// # Errors
-    ///
-    /// This method returns [`ByteableIoError::Io`] if:
-    /// - The reader reaches EOF before all required bytes have been read
-    /// - Any underlying I/O error occurs
-    ///
-    /// This method returns [`ByteableIoError::Conversion`] if:
-    /// - The bytes were read successfully but `try_from_byte_array` failed
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::TryReadByteable;
-    /// use std::io::Cursor;
-    ///
-    /// let data = vec![42, 0, 0, 0];
-    /// let mut cursor = Cursor::new(data);
-    ///
-    /// // u32 implements TryFromByteArray (never fails)
-    /// let value: u32 = cursor.read_try_byteable().unwrap();
-    /// #[cfg(target_endian = "little")]
-    /// assert_eq!(value, 42);
-    /// ```
-    #[inline]
-    fn read_try_byteable<T: TryReadable>(&mut self) -> Result<T, ByteableIoError<T::Error>> {
-        T::try_read_from(self)
-    }
-}
-
-// Blanket implementation: any type that implements Read automatically gets TryReadByteable
-impl<T: Read> TryReadByteable for T {}
-
-/// Extension trait for `Write` that adds methods for writing types with fallible conversion.
-///
-/// This trait is automatically implemented for all types that implement `std::io::Write`,
-/// providing methods for writing types that implement [`TryIntoByteArray`]. Unlike
-/// [`WriteByteable`], this trait handles conversion errors explicitly.
-///
-/// # Error Handling
-///
-/// This trait returns [`ByteableIoError<E>`] which distinguishes between:
-/// - Conversion errors (failed to convert value to bytes)
-/// - I/O errors (conversion succeeded but writing bytes failed)
-///
-/// # Examples
-///
-/// ## Writing with validation
-///
-/// ```
-/// use byteable::{AssociatedByteArray, TryIntoByteArray, TryWriteByteable};
-/// use std::io::Cursor;
-///
-/// // A type that only accepts even values
-/// #[derive(Debug, PartialEq, Clone, Copy)]
-/// struct EvenU32(u32);
-///
-/// #[derive(Debug, Clone, Copy)]
-/// struct NotEvenError;
-///
-/// impl std::fmt::Display for NotEvenError {
-///     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-///         write!(f, "value is not even")
-///     }
-/// }
-///
-/// impl std::error::Error for NotEvenError {}
-///
-/// impl AssociatedByteArray for EvenU32 {
-///     type ByteArray = [u8; 4];
-/// }
-///
-/// impl TryIntoByteArray for EvenU32 {
-///     type Error = NotEvenError;
-///
-///     fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
-///         if self.0 % 2 == 0 {
-///             Ok(self.0.to_ne_bytes())
-///         } else {
-///             Err(NotEvenError)
-///         }
-///     }
-/// }
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut buffer = Cursor::new(Vec::new());
-/// buffer.write_try_byteable(&EvenU32(42))?;
-///
-/// #[cfg(target_endian = "little")]
-/// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
-/// # Ok(())
-/// # }
-/// ```
-pub trait TryWriteByteable: Write {
-    /// Writes a [`TryWritable`] type with fallible conversion to this writer.
-    ///
-    /// This method attempts to convert the value to bytes via [`TryIntoByteArray`] and then
-    /// writes all bytes to the writer.
-    ///
-    /// # Errors
-    ///
-    /// This method returns [`ByteableIoError::Conversion`] if:
-    /// - The value could not be converted to bytes (`try_into_byte_array` failed)
-    ///
-    /// This method returns [`ByteableIoError::Io`] if:
-    /// - Any underlying I/O error occurs while writing
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::TryWriteByteable;
-    /// use std::io::Cursor;
-    ///
-    /// let mut buffer = Cursor::new(Vec::new());
-    ///
-    /// // u32 implements TryIntoByteArray (never fails)
-    /// buffer.write_try_byteable(&42u32).unwrap();
-    ///
-    /// #[cfg(target_endian = "little")]
-    /// assert_eq!(buffer.into_inner(), vec![42, 0, 0, 0]);
-    /// ```
-    #[inline]
-    fn write_try_byteable<T: TryWritable>(
-        &mut self,
-        data: &T,
-    ) -> Result<(), ByteableIoError<T::Error>> {
-        data.try_write_to(self)
-    }
-}
-
-// Blanket implementation: any type that implements Write automatically gets TryWriteByteable
-impl<T: Write> TryWriteByteable for T {}
 
 #[cfg(test)]
 mod tests {
     use byteable_derive::UnsafeByteableTransmute;
-    use thiserror::Error;
 
-    use super::{ByteableIoError, ReadByteable, TryReadByteable, TryWriteByteable, WriteByteable};
+    use super::{ReadByteable, WriteByteable};
     use crate::{
-        AssociatedByteArray, BigEndian, LittleEndian, TryFromByteArray, TryIntoByteArray,
-        impl_byteable_via,
+        AssociatedByteArray, BigEndian, LittleEndian, TryFromByteArray, impl_byteable_via,
     };
     use std::io::Cursor;
 
@@ -926,23 +604,6 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Error)]
-    #[error(transparent)]
-    enum MyBiggerError {
-        Io(#[from] std::io::Error),
-        Conversion(#[from] ConversionError),
-        Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-    }
-
-    impl From<ByteableIoError<ConversionError>> for MyBiggerError {
-        fn from(value: ByteableIoError<ConversionError>) -> Self {
-            match value {
-                ByteableIoError::Io(error) => error.into(),
-                ByteableIoError::Conversion(error) => error.into(),
-            }
-        }
-    }
-
     // Test types for fallible conversion
     #[derive(Debug, PartialEq, Clone, Copy)]
     struct EvenU32(u32);
@@ -975,126 +636,49 @@ mod tests {
         }
     }
 
-    impl TryIntoByteArray for EvenU32 {
-        type Error = ConversionError;
-
-        fn try_into_byte_array(self) -> Result<[u8; 4], Self::Error> {
-            if self.0 % 2 == 0 {
-                Ok(self.0.to_le_bytes())
-            } else {
-                Err(ConversionError)
-            }
-        }
-    }
-
     #[test]
-    fn test_read_try_byteable_success() {
+    fn test_read_byteable_success() {
         let data = vec![42, 0, 0, 0]; // Even value
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, _> = cursor.read_try_byteable();
+        let result: std::io::Result<EvenU32> = cursor.read_byteable();
         assert!(result.is_ok());
-
         assert_eq!(result.unwrap(), EvenU32(42));
     }
 
     #[test]
-    fn test_read_try_byteable_conversion_error() {
+    fn test_read_byteable_conversion_error() {
         let data = vec![43, 0, 0, 0]; // Odd value
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, ByteableIoError<ConversionError>> = cursor.read_try_byteable();
-        assert!(matches!(result, Err(ByteableIoError::Conversion(_))));
+        let result: std::io::Result<EvenU32> = cursor.read_byteable();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
-    fn test_read_try_byteable_error_conversion() {
-        fn subfunc_success() -> Result<(), MyBiggerError> {
-            let data = vec![42, 0, 0, 0]; // Odd value
+    fn test_read_byteable_question_mark() {
+        // Demonstrates that ? now works directly with io::Result
+        fn read_even(data: Vec<u8>) -> std::io::Result<EvenU32> {
             let mut cursor = Cursor::new(data);
-
-            let _: EvenU32 = cursor.read_try_byteable()?;
-            Ok(())
+            let value: EvenU32 = cursor.read_byteable()?;
+            Ok(value)
         }
 
-        let r = subfunc_success();
-        assert!(matches!(r, Ok(_)));
-
-        fn subfunc_fail() -> Result<(), MyBiggerError> {
-            let data = vec![43, 0, 0, 0]; // Odd value
-            let mut cursor = Cursor::new(data);
-
-            let _: EvenU32 = cursor.read_try_byteable()?;
-            Ok(())
-        }
-
-        let r = subfunc_fail();
-        assert!(matches!(r, Err(MyBiggerError::Conversion(_))));
+        assert!(read_even(vec![42, 0, 0, 0]).is_ok());
+        assert!(read_even(vec![43, 0, 0, 0]).is_err());
     }
 
     #[test]
-    fn test_read_try_byteable_io_error() {
+    fn test_read_byteable_io_error() {
         let data = vec![1, 2]; // Not enough bytes
         let mut cursor = Cursor::new(data);
 
-        let result: Result<EvenU32, ByteableIoError<ConversionError>> = cursor.read_try_byteable();
+        let result: std::io::Result<EvenU32> = cursor.read_byteable();
         assert!(result.is_err());
-
-        match result {
-            Err(ByteableIoError::Io(_)) => {
-                // Expected
-            }
-            _ => panic!("Expected I/O error"),
-        }
-    }
-
-    #[test]
-    fn test_write_try_byteable_success() {
-        let mut buffer = Cursor::new(Vec::new());
-
-        let result = buffer.write_try_byteable(&EvenU32(100));
-        assert!(result.is_ok());
-
-        #[cfg(target_endian = "little")]
-        assert_eq!(buffer.into_inner(), vec![100, 0, 0, 0]);
-    }
-
-    #[test]
-    fn test_write_try_byteable_conversion_error() {
-        let mut buffer = Cursor::new(Vec::new());
-
-        let result = buffer.write_try_byteable(&EvenU32(101)); // Odd value
-        assert!(result.is_err());
-
-        match result {
-            Err(ByteableIoError::Conversion(_)) => {
-                // Expected
-            }
-            _ => panic!("Expected conversion error"),
-        }
-    }
-
-    #[test]
-    fn test_try_byteable_roundtrip() {
-        let original = EvenU32(1024);
-
-        let mut buffer = Cursor::new(Vec::new());
-        buffer.write_try_byteable(&original).unwrap();
-
-        let mut reader = Cursor::new(buffer.into_inner());
-        let read_value: EvenU32 = reader.read_try_byteable().unwrap();
-
-        assert_eq!(read_value, original);
-    }
-
-    #[test]
-    fn test_try_byteable_with_infallible() {
-        // Test that regular types work with Try traits (should never fail)
-        let mut buffer = Cursor::new(Vec::new());
-        buffer.write_try_byteable(&42u32).unwrap();
-
-        let mut reader = Cursor::new(buffer.into_inner());
-        let value: u32 = reader.read_try_byteable().unwrap();
-        assert_eq!(value, 42);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
     }
 }

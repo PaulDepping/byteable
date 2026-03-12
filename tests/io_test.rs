@@ -1,6 +1,6 @@
 //! Integration tests for sync I/O traits.
 //!
-//! Tests ReadByteable, WriteByteable, TryReadByteable, TryWriteByteable
+//! Tests ReadByteable and WriteByteable
 //! against derived structs using `std::io::Cursor`.
 #![cfg(feature = "std")]
 
@@ -9,10 +9,7 @@ use std::io::Cursor;
 #[cfg(feature = "derive")]
 mod derive_io_tests {
     use super::*;
-    use byteable::{
-        Byteable, ByteableIoError, LittleEndian, ReadByteable, TryReadByteable, TryWriteByteable,
-        WriteByteable,
-    };
+    use byteable::{Byteable, LittleEndian, ReadByteable, WriteByteable};
 
     // ============================================================================
     // Simple derived struct (infallible)
@@ -64,7 +61,7 @@ mod derive_io_tests {
     }
 
     // ============================================================================
-    // Struct with try_transparent enum field (TryReadByteable)
+    // Struct with try_transparent enum field (read_byteable handles fallible conversion)
     // ============================================================================
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -95,8 +92,8 @@ mod derive_io_tests {
         buf.write_byteable(&original).unwrap();
 
         buf.set_position(0);
-        // Frame implements TryFromByteArray → use read_try_byteable
-        let restored: Frame = buf.read_try_byteable().unwrap();
+        // Frame implements TryFromByteArray → use read_byteable
+        let restored: Frame = buf.read_byteable().unwrap();
         assert_eq!(restored, original);
     }
 
@@ -108,26 +105,21 @@ mod derive_io_tests {
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
 
         let mut buf = Cursor::new(bytes.to_vec());
-        let result: Result<Frame, ByteableIoError<_>> = buf.read_try_byteable();
+        let result: std::io::Result<Frame> = buf.read_byteable();
         assert!(result.is_err());
-
-        match result.unwrap_err() {
-            ByteableIoError::Conversion(_) => {} // expected
-            ByteableIoError::Io(_) => panic!("Expected conversion error, not I/O error"),
-        }
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
-    fn test_try_write_then_read_primitives() {
+    fn test_write_then_read_try_primitives() {
         let mut buf = Cursor::new(Vec::new());
 
-        // TryIntoByteArray is implemented for all types that have IntoByteArray
-        buf.write_try_byteable(&42u32).unwrap();
-        buf.write_try_byteable(&LittleEndian::new(0x1234u16)).unwrap();
+        buf.write_byteable(&42u32).unwrap();
+        buf.write_byteable(&LittleEndian::new(0x1234u16)).unwrap();
 
         buf.set_position(0);
-        let v1: u32 = buf.read_try_byteable().unwrap();
-        let v2: LittleEndian<u16> = buf.read_try_byteable().unwrap();
+        let v1: u32 = buf.read_byteable().unwrap();
+        let v2: LittleEndian<u16> = buf.read_byteable().unwrap();
 
         assert_eq!(v1, 42);
         assert_eq!(v2.get(), 0x1234);
@@ -198,15 +190,14 @@ mod derive_io_tests {
     }
 
     #[test]
-    fn test_byteableioerror_io_variant() {
+    fn test_read_byteable_io_error() {
         // Empty buffer → I/O error (EOF) when reading a u32
         let mut buf = Cursor::new(vec![]);
-        let result: Result<u32, ByteableIoError<core::convert::Infallible>> =
-            buf.read_try_byteable();
+        let result: std::io::Result<u32> = buf.read_byteable();
         assert!(result.is_err());
-        match result.unwrap_err() {
-            ByteableIoError::Io(_) => {} // expected
-            ByteableIoError::Conversion(_) => panic!("Expected I/O error, not conversion error"),
-        }
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
     }
 }
