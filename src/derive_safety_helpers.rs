@@ -133,33 +133,18 @@ use crate::{BigEndian, LittleEndian};
 /// ```
 pub unsafe trait BytecastSafe {}
 
-// Implement for the one-byte primitive numeric types (all bit patterns valid)
 unsafe impl BytecastSafe for u8 {}
 unsafe impl BytecastSafe for i8 {}
 
-// Implement for LittleEndian wrappers
-unsafe impl BytecastSafe for LittleEndian<u16> {}
-unsafe impl BytecastSafe for LittleEndian<u32> {}
-unsafe impl BytecastSafe for LittleEndian<u64> {}
-unsafe impl BytecastSafe for LittleEndian<u128> {}
-unsafe impl BytecastSafe for LittleEndian<i16> {}
-unsafe impl BytecastSafe for LittleEndian<i32> {}
-unsafe impl BytecastSafe for LittleEndian<i64> {}
-unsafe impl BytecastSafe for LittleEndian<i128> {}
-unsafe impl BytecastSafe for LittleEndian<f32> {}
-unsafe impl BytecastSafe for LittleEndian<f64> {}
+macro_rules! impl_bytecast_safe_for_endian {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            unsafe impl BytecastSafe for BigEndian<$ty> {}
+            unsafe impl BytecastSafe for LittleEndian<$ty> {}
+        )+
+    };
+}
 
-// Implement for BigEndian wrappers
-unsafe impl BytecastSafe for BigEndian<u16> {}
-unsafe impl BytecastSafe for BigEndian<u32> {}
-unsafe impl BytecastSafe for BigEndian<u64> {}
-unsafe impl BytecastSafe for BigEndian<u128> {}
-unsafe impl BytecastSafe for BigEndian<i16> {}
-unsafe impl BytecastSafe for BigEndian<i32> {}
-unsafe impl BytecastSafe for BigEndian<i64> {}
-unsafe impl BytecastSafe for BigEndian<i128> {}
-unsafe impl BytecastSafe for BigEndian<f32> {}
-unsafe impl BytecastSafe for BigEndian<f64> {}
+impl_bytecast_safe_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 
-// Arrays of valid types are also valid
 unsafe impl<T: BytecastSafe, const SIZE: usize> BytecastSafe for [T; SIZE] {}

@@ -318,21 +318,19 @@ impl<T: RawRepr> TryRawRepr for T {
 // This allows [T; N] to be Byteable if T is Byteable
 
 impl<T: AssociatedByteArray, const SIZE: usize> AssociatedByteArray for [T; SIZE] {
-    // The byte array is an array of the element's byte arrays
     type ByteArray = [T::ByteArray; SIZE];
 }
 
 impl<T: IntoByteArray, const SIZE: usize> IntoByteArray for [T; SIZE] {
     #[inline]
     fn into_byte_array(self) -> Self::ByteArray {
-        // Convert each element to its byte array representation
         self.map(T::into_byte_array)
     }
 }
+
 impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
     #[inline]
     fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        // Convert each byte array back to its element type
         byte_array.map(T::from_byte_array)
     }
 }
@@ -515,6 +513,7 @@ impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, 
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
 pub struct RawBool(u8);
 
 unsafe impl BytecastSafe for RawBool {}
@@ -544,37 +543,10 @@ impl TryFrom<RawBool> for bool {
     }
 }
 
-impl AssociatedByteArray for bool {
-    type ByteArray = <<bool as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
-}
-
-impl IntoByteArray for bool {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        let raw: <Self as TryRawRepr>::Raw = self.into();
-        raw.into_byte_array()
-    }
-}
-
-impl TryFromByteArray for bool {
-    type Error = InvalidDiscriminantError;
-
-    #[inline]
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
-        raw.try_into()
-    }
-}
-
-impl TryRawRepr for bool {
-    type Raw = RawBool;
-}
-
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
 pub struct RawChar(LittleEndian<u32>);
-
-// because of code point representation this should always be little endian, i think
 
 unsafe impl BytecastSafe for RawChar {}
 
@@ -603,31 +575,40 @@ impl TryFrom<RawChar> for char {
     }
 }
 
-impl AssociatedByteArray for char {
-    type ByteArray = <<char as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
+// Generates AssociatedByteArray, IntoByteArray, TryFromByteArray, and TryRawRepr for a type
+// that delegates to a raw wrapper type via TryRawRepr.
+macro_rules! impl_try_raw_byteable {
+    ($type:ty, $raw:ty, $error:ty) => {
+        impl AssociatedByteArray for $type {
+            type ByteArray = <<$type as TryRawRepr>::Raw as AssociatedByteArray>::ByteArray;
+        }
+
+        impl IntoByteArray for $type {
+            #[inline]
+            fn into_byte_array(self) -> Self::ByteArray {
+                let raw: <Self as TryRawRepr>::Raw = self.into();
+                raw.into_byte_array()
+            }
+        }
+
+        impl TryFromByteArray for $type {
+            type Error = $error;
+
+            #[inline]
+            fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
+                let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
+                raw.try_into()
+            }
+        }
+
+        impl TryRawRepr for $type {
+            type Raw = $raw;
+        }
+    };
 }
 
-impl IntoByteArray for char {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        let raw: <Self as TryRawRepr>::Raw = self.into();
-        raw.into_byte_array()
-    }
-}
-
-impl TryFromByteArray for char {
-    type Error = InvalidDiscriminantError;
-
-    #[inline]
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
-        raw.try_into()
-    }
-}
-
-impl TryRawRepr for char {
-    type Raw = RawChar;
-}
+impl_try_raw_byteable!(bool, RawBool, InvalidDiscriminantError);
+impl_try_raw_byteable!(char, RawChar, InvalidDiscriminantError);
 
 /// Represents a discriminant value that can be of various integer types.
 ///
@@ -664,76 +645,26 @@ impl core::fmt::Display for DiscriminantValue {
     }
 }
 
-// Implement From for all supported integer types
-impl From<u8> for DiscriminantValue {
-    #[inline]
-    fn from(v: u8) -> Self {
-        DiscriminantValue::U8(v)
-    }
+macro_rules! impl_discriminant_from {
+    ($($int:ty => $variant:ident),+ $(,)?) => {
+        $(
+            impl From<$int> for DiscriminantValue {
+                #[inline]
+                fn from(v: $int) -> Self {
+                    DiscriminantValue::$variant(v)
+                }
+            }
+        )+
+    };
 }
 
-impl From<i8> for DiscriminantValue {
-    #[inline]
-    fn from(v: i8) -> Self {
-        DiscriminantValue::I8(v)
-    }
-}
-
-impl From<u16> for DiscriminantValue {
-    #[inline]
-    fn from(v: u16) -> Self {
-        DiscriminantValue::U16(v)
-    }
-}
-
-impl From<i16> for DiscriminantValue {
-    #[inline]
-    fn from(v: i16) -> Self {
-        DiscriminantValue::I16(v)
-    }
-}
-
-impl From<u32> for DiscriminantValue {
-    #[inline]
-    fn from(v: u32) -> Self {
-        DiscriminantValue::U32(v)
-    }
-}
-
-impl From<i32> for DiscriminantValue {
-    #[inline]
-    fn from(v: i32) -> Self {
-        DiscriminantValue::I32(v)
-    }
-}
-
-impl From<u64> for DiscriminantValue {
-    #[inline]
-    fn from(v: u64) -> Self {
-        DiscriminantValue::U64(v)
-    }
-}
-
-impl From<i64> for DiscriminantValue {
-    #[inline]
-    fn from(v: i64) -> Self {
-        DiscriminantValue::I64(v)
-    }
-}
-
-impl From<u128> for DiscriminantValue {
-    #[inline]
-    fn from(v: u128) -> Self {
-        DiscriminantValue::U128(v)
-    }
-}
-
-impl From<i128> for DiscriminantValue {
-    #[inline]
-    fn from(v: i128) -> Self {
-        DiscriminantValue::I128(v)
-    }
-}
+impl_discriminant_from!(
+    u8 => U8, i8 => I8,
+    u16 => U16, i16 => I16,
+    u32 => U32, i32 => I32,
+    u64 => U64, i64 => I64,
+    u128 => U128, i128 => I128,
+);
 
 /// Error type for converting bytes to an enum with an invalid discriminant.
 ///

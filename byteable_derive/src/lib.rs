@@ -1083,8 +1083,9 @@ fn handle_field_enum_derive(
     }
 
     // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
-    let repr_auto_selected = extract_repr_type(&attrs).is_none();
-    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
+    let explicit_repr = extract_repr_type(&attrs);
+    let repr_auto_selected = explicit_repr.is_none();
+    let repr_ty = explicit_repr.unwrap_or_else(|| {
         let n = enum_data.variants.len();
         let ty_str = if n <= 256 {
             "u8"

@@ -51,7 +51,7 @@ pub trait EndianConvert: Copy + AssociatedByteArray + IntoByteArray + FromByteAr
     fn to_be(self) -> Self;
 }
 
-macro_rules! impl_endianable_int {
+macro_rules! impl_endian_convert {
     ($($type:ty),+) => {
         $(
             impl $crate::EndianConvert for $type {
@@ -79,7 +79,7 @@ macro_rules! impl_endianable_int {
     };
 }
 
-impl_endianable_int!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+impl_endian_convert!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // Float implementations use to_bits/from_bits for endianness conversion
 impl EndianConvert for f32 {
@@ -204,117 +204,6 @@ impl EndianConvert for f64 {
 #[derive(Clone, Copy)]
 pub struct BigEndian<T: EndianConvert>(pub(crate) T);
 
-impl<T: fmt::Debug + EndianConvert> fmt::Debug for BigEndian<T> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("BigEndian").field(&self.get()).finish()
-    }
-}
-
-impl<T: PartialEq + EndianConvert> PartialEq for BigEndian<T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.get() == other.get()
-    }
-}
-
-impl<T: Eq + EndianConvert> Eq for BigEndian<T> {}
-
-impl<T: PartialOrd + EndianConvert> PartialOrd for BigEndian<T> {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.get().partial_cmp(&other.get())
-    }
-}
-
-impl<T: Ord + EndianConvert> Ord for BigEndian<T> {
-    #[inline]
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.get().cmp(&other.get())
-    }
-}
-
-impl<T: Hash + EndianConvert> Hash for BigEndian<T> {
-    #[inline]
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.get().hash(state);
-    }
-}
-
-impl<T: EndianConvert> BigEndian<T> {
-    /// Creates a new `BigEndian` value from a native value.
-    ///
-    /// The value is converted to big-endian byte order upon construction.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::{BigEndian, IntoByteArray};
-    ///
-    /// let be = BigEndian::new(0x1234u16);
-    /// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
-    /// ```
-    #[inline]
-    pub fn new(value: T) -> Self {
-        // Convert to big-endian bytes and store internally
-        Self(value.to_be())
-    }
-
-    /// Extracts the native value from this `BigEndian` wrapper.
-    ///
-    /// The bytes are converted from big-endian to the system's native byte order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::BigEndian;
-    ///
-    /// let be = BigEndian::new(42u32);
-    /// assert_eq!(be.get(), 42);
-    /// ```
-    #[inline]
-    pub fn get(self) -> T {
-        // Convert from big-endian bytes back to native value
-        T::from_be(self.0)
-    }
-}
-
-impl<T: EndianConvert + Default> Default for BigEndian<T> {
-    #[inline]
-    fn default() -> Self {
-        // Create a BigEndian wrapper with the default value of T
-        Self::new(T::default())
-    }
-}
-
-impl<T: EndianConvert> AssociatedByteArray for BigEndian<T> {
-    type ByteArray = <T as AssociatedByteArray>::ByteArray;
-}
-
-impl<T: EndianConvert> IntoByteArray for BigEndian<T> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        // Return the stored big-endian bytes directly (no conversion needed)
-        self.0.into_byte_array()
-    }
-}
-
-impl<T: EndianConvert> FromByteArray for BigEndian<T> {
-    #[inline]
-    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        // Wrap the bytes directly (they're already in big-endian format)
-        Self(T::from_byte_array(byte_array))
-    }
-}
-
-impl<T: EndianConvert> From<T> for BigEndian<T> {
-    #[inline]
-    fn from(value: T) -> Self {
-        // Convenient conversion from native value to BigEndian
-        BigEndian::new(value)
-    }
-}
-
 /// A wrapper type that stores a value in little-endian byte order.
 ///
 /// This type ensures that the wrapped value is always stored in little-endian format,
@@ -407,116 +296,117 @@ impl<T: EndianConvert> From<T> for BigEndian<T> {
 #[derive(Clone, Copy)]
 pub struct LittleEndian<T: EndianConvert>(T);
 
-impl<T: fmt::Debug + EndianConvert> fmt::Debug for LittleEndian<T> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("LittleEndian").field(&self.get()).finish()
-    }
+// Shared impls for both endian wrappers — only the conversion direction differs.
+macro_rules! impl_endian_wrapper {
+    ($name:ident, $to_fn:ident, $from_fn:ident) => {
+        impl<T: EndianConvert> $name<T> {
+            /// Creates a new wrapper from a native-endian value, converting to the target byte order.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use byteable::{BigEndian, LittleEndian, IntoByteArray};
+            ///
+            /// let be = BigEndian::new(0x1234u16);
+            /// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
+            ///
+            /// let le = LittleEndian::new(0x1234u16);
+            /// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
+            /// ```
+            #[inline]
+            pub fn new(value: T) -> Self {
+                Self(value.$to_fn())
+            }
+
+            /// Extracts the native-endian value from this wrapper.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use byteable::{BigEndian, LittleEndian};
+            ///
+            /// assert_eq!(BigEndian::new(42u32).get(), 42);
+            /// assert_eq!(LittleEndian::new(42u32).get(), 42);
+            /// ```
+            #[inline]
+            pub fn get(self) -> T {
+                T::$from_fn(self.0)
+            }
+        }
+
+        impl<T: fmt::Debug + EndianConvert> fmt::Debug for $name<T> {
+            #[inline]
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.get()).finish()
+            }
+        }
+
+        impl<T: PartialEq + EndianConvert> PartialEq for $name<T> {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.get() == other.get()
+            }
+        }
+
+        impl<T: Eq + EndianConvert> Eq for $name<T> {}
+
+        impl<T: PartialOrd + EndianConvert> PartialOrd for $name<T> {
+            #[inline]
+            fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+                self.get().partial_cmp(&other.get())
+            }
+        }
+
+        impl<T: Ord + EndianConvert> Ord for $name<T> {
+            #[inline]
+            fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+                self.get().cmp(&other.get())
+            }
+        }
+
+        impl<T: Hash + EndianConvert> Hash for $name<T> {
+            #[inline]
+            fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+                self.get().hash(state);
+            }
+        }
+
+        impl<T: EndianConvert + Default> Default for $name<T> {
+            #[inline]
+            fn default() -> Self {
+                Self::new(T::default())
+            }
+        }
+
+        impl<T: EndianConvert> From<T> for $name<T> {
+            #[inline]
+            fn from(value: T) -> Self {
+                $name::new(value)
+            }
+        }
+
+        impl<T: EndianConvert> AssociatedByteArray for $name<T> {
+            type ByteArray = <T as AssociatedByteArray>::ByteArray;
+        }
+
+        impl<T: EndianConvert> IntoByteArray for $name<T> {
+            #[inline]
+            fn into_byte_array(self) -> Self::ByteArray {
+                self.0.into_byte_array()
+            }
+        }
+
+        impl<T: EndianConvert> FromByteArray for $name<T> {
+            #[inline]
+            fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                Self(T::from_byte_array(byte_array))
+            }
+        }
+    };
 }
 
-impl<T: PartialEq + EndianConvert> PartialEq for LittleEndian<T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.get() == other.get()
-    }
-}
-
-impl<T: Eq + EndianConvert> Eq for LittleEndian<T> {}
-
-impl<T: PartialOrd + EndianConvert> PartialOrd for LittleEndian<T> {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.get().partial_cmp(&other.get())
-    }
-}
-
-impl<T: Ord + EndianConvert> Ord for LittleEndian<T> {
-    #[inline]
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.get().cmp(&other.get())
-    }
-}
-
-impl<T: Hash + EndianConvert> Hash for LittleEndian<T> {
-    #[inline]
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.get().hash(state);
-    }
-}
-
-impl<T: EndianConvert> LittleEndian<T> {
-    /// Creates a new `LittleEndian` value from a native value.
-    ///
-    /// The value is converted to little-endian byte order upon construction.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::{LittleEndian, IntoByteArray};
-    ///
-    /// let le = LittleEndian::new(0x1234u16);
-    /// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
-    /// ```
-    #[inline]
-    pub fn new(value: T) -> Self {
-        // Convert to little-endian bytes and store internally
-        Self(value.to_le())
-    }
-
-    /// Extracts the native value from this `LittleEndian` wrapper.
-    ///
-    /// The bytes are converted from little-endian to the system's native byte order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use byteable::LittleEndian;
-    ///
-    /// let le = LittleEndian::new(42u32);
-    /// assert_eq!(le.get(), 42);
-    /// ```
-    #[inline]
-    pub fn get(self) -> T {
-        // Convert from little-endian bytes back to native value
-        T::from_le(self.0)
-    }
-}
-
-impl<T: EndianConvert + Default> Default for LittleEndian<T> {
-    #[inline]
-    fn default() -> Self {
-        // Create a LittleEndian wrapper with the default value of T
-        Self::new(T::default())
-    }
-}
-
-impl<T: EndianConvert> AssociatedByteArray for LittleEndian<T> {
-    type ByteArray = <T as AssociatedByteArray>::ByteArray;
-}
-
-impl<T: EndianConvert> IntoByteArray for LittleEndian<T> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        // Return the stored little-endian bytes directly (no conversion needed)
-        self.0.into_byte_array()
-    }
-}
-
-impl<T: EndianConvert> FromByteArray for LittleEndian<T> {
-    #[inline]
-    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        // Wrap the bytes directly (they're already in little-endian format)
-        Self(T::from_byte_array(byte_array))
-    }
-}
-
-impl<T: EndianConvert> From<T> for LittleEndian<T> {
-    #[inline]
-    fn from(value: T) -> Self {
-        // Convenient conversion from native value to LittleEndian
-        LittleEndian::new(value)
-    }
-}
+impl_endian_wrapper!(BigEndian, to_be, from_be);
+impl_endian_wrapper!(LittleEndian, to_le, from_le);
 
 #[cfg(test)]
 mod tests {

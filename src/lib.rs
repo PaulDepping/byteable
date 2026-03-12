@@ -359,14 +359,14 @@ pub use byte_array::ByteArray;
 
 pub use byteable_trait::{
     AssociatedByteArray, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
-    RawBool, RawChar, RawRepr, TryFromByteArray, TryRawRepr,
+    RawRepr, TryFromByteArray, TryRawRepr,
 };
 
 #[cfg(feature = "std")]
 pub use io::{Readable, ReadByteable, Writable, WriteByteable};
 
 #[cfg(feature = "tokio")]
-pub use async_io::{AsyncReadByteable, AsyncWriteByteable};
+pub use async_io::{AsyncReadByteable, AsyncReadable, AsyncWriteByteable, AsyncWritable};
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 
