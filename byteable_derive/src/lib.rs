@@ -1,9 +1,18 @@
 //! Procedural macros for deriving byte conversion traits.
 //!
-//! This crate provides procedural macros for automatically implementing the byte conversion traits
-//! (`ByteRepr`, `IntoByteArray`, `FromByteArray`) on structs:
-//! - `#[derive(Byteable)]` - High-level macro with endianness support
-//! - `#[derive(UnsafeByteableTransmute)]` - Low-level transmute-based implementation
+//! This crate provides procedural macros for automatically implementing byte conversion traits
+//! and I/O support on types.
+//!
+//! ## Main Macros
+//!
+//! - **`#[derive(Byteable)]`** - Generates byte conversion traits and I/O support
+//!   - Fixed-size structs → `IntoByteArray`, `FromByteArray` (transmute-based)
+//!   - Dynamic structs with `#[byteable(io_only)]` → `Readable`, `Writable` (field I/O)
+//!   - C-like enums → `IntoByteArray`, `TryFromByteArray` (transmute-based)
+//!   - Enums with variant fields → `Readable`, `Writable` (stream I/O)
+//!
+//! - **`#[derive(UnsafeByteableTransmute)]`** - Lower-level transmute-based implementation
+//!   (rarely needed; normally use `#[derive(Byteable)]` instead)
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
@@ -448,44 +457,83 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
     .into()
 }
 
-/// Derives a delegate pattern for `Byteable` by generating a raw struct with endianness markers.
+/// Derives byte conversion and I/O traits for structs and enums.
 ///
-/// This macro creates a companion `*Raw` struct with `#[repr(C, packed)]` that handles the actual
-/// byte conversion, while keeping your original struct clean and easy to work with. Fields can be
-/// annotated with `#[byteable(little_endian)]` or `#[byteable(big_endian)]` to specify endianness.
+/// This is the main derive macro for the `byteable` crate. It automatically generates appropriate
+/// trait implementations based on the annotated type.
 ///
-/// # Generated Code
+/// # Struct Modes
 ///
-/// For each struct, this macro generates:
-/// 1. A `*Raw` struct with `#[repr(C, packed)]` and endianness wrappers
-/// 2. `From<OriginalStruct>` for `OriginalStructRaw` implementation
-/// 3. `From<OriginalStructRaw>` for `OriginalStruct` implementation
-/// 4. A `Byteable` implementation via `impl_byteable_via!` macro
+/// ## Fixed-size structs (default)
+///
+/// For ordinary structs without `#[byteable(io_only)]`, this macro generates a `*Raw` helper
+/// struct with `#[repr(C, packed)]` and implements `IntoByteArray` / `FromByteArray` via
+/// `transmute`. This provides zero-copy conversion but requires all fields to be fixed-size.
+///
+/// Fields can be annotated with `#[byteable(little_endian)]` or `#[byteable(big_endian)]`
+/// to control byte order.
+///
+/// Supports:
+/// - Named structs
+/// - Tuple structs
+/// - Unit structs
+///
+/// ## Dynamic-size structs with `#[byteable(io_only)]`
+///
+/// For structs containing `Vec<T>`, `String`, `Option<T>`, or other dynamically-sized types,
+/// annotate with `#[byteable(io_only)]`. This generates `Readable` / `Writable` implementations
+/// that perform sequential field I/O, allowing arbitrary field types.
+///
+/// Supports:
+/// - Named structs
+/// - Tuple structs
+/// - Unit structs
+///
+/// # Enum Modes
+///
+/// ## C-like enums (unit variants only)
+///
+/// Enums with only unit variants and explicit discriminants implement `IntoByteArray` /
+/// `TryFromByteArray` via transmute. Supports:
+/// - Explicit `#[repr(u8)]`, `#[repr(u16)]`, etc.
+/// - Auto-repr inference (when `#[repr]` is omitted)
+/// - Auto-discriminant assignment (when discriminants are omitted)
+/// - Type-level endianness: `#[byteable(big_endian)]` / `#[byteable(little_endian)]`
+///
+/// ## Enums with variant fields
+///
+/// Enums where any variant has fields implement `Readable` / `Writable` via stream-based I/O.
+/// Discriminant is written first (respecting endianness), then the variant's fields in order.
+/// Supports:
+/// - Mix of unit, named-field, and tuple-field variants
+/// - Auto-repr and auto-discriminant assignment
+/// - Per-field endianness annotations
 ///
 /// # Attributes
 ///
-/// - `#[byteable(little_endian)]` - Wraps the field in `LittleEndian<T>`
-/// - `#[byteable(big_endian)]` - Wraps the field in `BigEndian<T>`
-/// - `#[byteable(transparent)]` - Uses the field's raw representation type directly (for nested `Byteable` types implementing `RawRepr`)
-/// - No attribute - Keeps the field type as-is
+/// ## Struct/Enum-level
 ///
-/// # Requirements
+/// - `#[byteable(io_only)]` - Generate `Readable`/`Writable` via field I/O instead of transmute
+/// - `#[byteable(little_endian)]` - Set type-level endianness (enums only)
+/// - `#[byteable(big_endian)]` - Set type-level endianness (enums only)
 ///
-/// - The struct must have named fields (not a tuple struct)
-/// - Fields with endianness attributes must be numeric types that implement `EndianConvert`
-/// - Fields with `transparent` attribute must implement `Byteable`
-/// - The struct should derive `Clone` and `Copy` for convenience
+/// ## Field-level
+///
+/// - `#[byteable(little_endian)]` - Wrap field in `LittleEndian<T>`
+/// - `#[byteable(big_endian)]` - Wrap field in `BigEndian<T>`
+/// - `#[byteable(transparent)]` - Use field's raw type (transmute path only)
+/// - `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (transmute path only)
 ///
 /// # Examples
 ///
-/// ## Basic usage
+/// ## Fixed-size struct with endianness
 ///
 /// ```
 /// # #[cfg(feature = "derive")]
 /// use byteable::Byteable;
 ///
 /// # #[cfg(feature = "derive")]
-/// #[derive(Clone, Copy, Byteable)]
+/// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
 /// struct Packet {
 ///     id: u8,
 ///     #[byteable(little_endian)]
@@ -503,50 +551,70 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
 ///     checksum: 0x12345678,
 ///     data: [1, 2, 3, 4],
 /// };
-///
-/// // Byteable is automatically implemented
 /// let bytes = packet.into_byte_array();
 /// let restored = Packet::from_byte_array(bytes);
 /// # }
 /// ```
 ///
-/// ## Generated code
+/// ## Dynamic-size struct with `io_only`
 ///
-/// The above example generates approximately:
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::Byteable;
 ///
-/// ```ignore
-/// #[derive(Clone, Copy, Debug, UnsafeByteableTransmute)]
-/// #[repr(C, packed)]
-/// struct PacketRaw {
-///     id: u8,
-///     length: LittleEndian<u16>,
-///     checksum: BigEndian<u32>,
-///     data: [u8; 4],
+/// # #[cfg(feature = "derive")]
+/// #[derive(Byteable, Debug, PartialEq)]
+/// #[byteable(io_only)]
+/// struct Message {
+///     tag: u8,
+///     payload: Vec<u8>,
+///     label: String,
 /// }
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// // io_only structs implement Readable/Writable (not IntoByteArray)
+/// # }
+/// ```
 ///
-/// impl From<Packet> for PacketRaw {
-///     fn from(value: Packet) -> Self {
-///         Self {
-///             id: value.id,
-///             length: value.length.into(),
-///             checksum: value.checksum.into(),
-///             data: value.data,
-///         }
-///     }
+/// ## C-like enum
+///
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::Byteable;
+///
+/// # #[cfg(feature = "derive")]
+/// #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+/// #[repr(u8)]
+/// enum Status {
+///     Idle = 0,
+///     Running = 1,
+///     Done = 2,
 /// }
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// let status = Status::Running;
+/// let bytes = status.into_byte_array();
+/// # }
+/// ```
 ///
-/// impl From<PacketRaw> for Packet {
-///     fn from(value: PacketRaw) -> Self {
-///         Self {
-///             id: value.id,
-///             length: value.length.get(),
-///             checksum: value.checksum.get(),
-///             data: value.data,
-///         }
-///     }
+/// ## Enum with variant fields
+///
+/// ```
+/// # #[cfg(feature = "derive")]
+/// use byteable::Byteable;
+///
+/// # #[cfg(feature = "derive")]
+/// #[derive(Byteable, Debug, PartialEq)]
+/// #[repr(u8)]
+/// enum Message {
+///     Ping = 0,
+///     Pong { id: u8 } = 1,
+///     Data { len: u8, value: [u8; 4] } = 2,
 /// }
-///
-/// impl_byteable_via!(Packet => PacketRaw);
+/// # #[cfg(feature = "derive")]
+/// # fn example() {
+/// // Enums with fields implement Readable/Writable (not IntoByteArray)
+/// # }
 /// ```
 #[proc_macro_derive(Byteable, attributes(byteable))]
 pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

@@ -125,20 +125,33 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 ### Derive Macro Implementation ([byteable_derive/src/lib.rs](byteable_derive/src/lib.rs))
 
-The `#[derive(Byteable)]` macro handles three cases:
+The `#[derive(Byteable)]` macro handles two code paths:
 
+**Transmute path** (default for structs and C-like enums):
 1. **Named structs** - Generates raw struct with field-level endianness attributes
 2. **Tuple structs** - Similar to named structs but with positional fields
 3. **Unit structs** - Direct implementation (zero-sized type, empty byte array)
-4. **Enums** - Only C-like enums with explicit discriminants
+4. **C-like enums** - Implements `TryFromByteArray`/`IntoByteArray` via a transparent wrapper
+
+**Stream I/O path** (for dynamic/variable-size types):
+5. **`io_only` structs** - Annotated with `#[byteable(io_only)]`; generates `Readable`/`Writable` impls via sequential field I/O. Supports `Vec<T>`, `String`, `Option<T>`, and any other `Readable`/`Writable` type.
+6. **Field enums** - Enums with variant fields (named or tuple); generates `Readable`/`Writable` impls. The discriminant is written first, then the variant's fields in declaration order.
 
 #### Enum Support
 
-- Requires `#[repr(u8)]`, `#[repr(u16)]`, etc.
+**C-like enums (transmute path):**
+- Requires `#[repr(u8)]`, `#[repr(u16)]`, etc. (or auto-inferred)
 - All variants must be unit variants (no fields)
-- All variants must have explicit discriminant values
+- Discriminants are auto-assigned from 0 if not explicit
 - Implements `TryFromByteArray` (not `FromByteArray`) because invalid discriminants are possible
 - Supports type-level endianness: `#[byteable(big_endian)]` or `#[byteable(little_endian)]`
+
+**Field enums (stream I/O path):**
+- Triggered automatically when any variant has fields
+- Supports unit, named-field, and tuple-field variants in any combination
+- Discriminant written first (endianness-aware), then fields written in order
+- `#[repr]` is optional; auto-inferred as `u8` for ≤256 variants, `u16` otherwise
+- Invalid discriminants on read return `io::ErrorKind::InvalidData`
 
 #### Field Attributes
 
@@ -164,7 +177,9 @@ The crate is `no_std` compatible when built with `--no-default-features`. The I/
 
 ### Safety Requirements for Byteable Types
 
-**Safe to use:**
+The safety requirements differ depending on which derive path is used.
+
+**Transmute path** — safe field types:
 
 - Primitive numeric types (`u8`, `i32`, `f64`, etc.)
 - `bool`, `char` (with `TryFromByteArray` validation)
@@ -173,13 +188,15 @@ The crate is `no_std` compatible when built with `--no-default-features`. The I/
 - Structs with `#[repr(C, packed)]`
 - C-like enums with explicit discriminants (with `TryFromByteArray`)
 
-**Never use:**
+**Transmute path** — never use as struct fields:
 
-- `String`, `Vec`, or heap-allocated types
+- `String`, `Vec`, or heap-allocated types — use `#[byteable(io_only)]` instead
 - References or pointers (`&T`, `Box<T>`, `*const T`)
-- Complex enums with fields
+- Enums with variant fields (use field enum derive instead, which uses the stream I/O path)
 - Types with `Drop` implementations
 - `NonZero*` types or types with invariants
+
+**Stream I/O path** (`io_only` structs and field enums) — no transmute; any `Readable`/`Writable` type works as a field, including `Vec`, `String`, `Option`, `HashMap`, etc.
 
 ### When Adding New Features
 
@@ -198,6 +215,10 @@ The crate is `no_std` compatible when built with `--no-default-features`. The I/
 Important test files:
 
 - [tests/enum_test.rs](tests/enum_test.rs) - C-like enum derive validation
+- [tests/field_enum_test.rs](tests/field_enum_test.rs) - Field enum derive (variants with data)
+- [tests/io_struct_test.rs](tests/io_struct_test.rs) - `io_only` struct derive
+- [tests/collections_io_test.rs](tests/collections_io_test.rs) - Collection `Readable`/`Writable` impls
+- [tests/std_types_test.rs](tests/std_types_test.rs) - Standard library type support
 - [tests/primitive_types_test.rs](tests/primitive_types_test.rs) - `bool`, `char` validation
 - [tests/try_transparent_test.rs](tests/try_transparent_test.rs) - Nested enum/validated types
 - [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `TransmuteSafe` tests

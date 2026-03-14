@@ -172,3 +172,11 @@ fn main() -> io::Result<()> {
     println!("\n=== Example completed successfully! ===");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn main() {
+        super::main().unwrap()
+    }
+}

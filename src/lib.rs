@@ -248,56 +248,59 @@
 //! # }
 //! ```
 //!
-//! ### Enum Requirements
+//! ### Enum Types
 //!
-//! When deriving `Byteable` for enums:
+//! The `#[derive(Byteable)]` macro supports two kinds of enums:
 //!
-//! 1. **Explicit repr type required**: `#[repr(u8)]`, `#[repr(u16)]`, `#[repr(u32)]`, `#[repr(u64)]`,
-//!    `#[repr(i8)]`, `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`
-//! 2. **Unit variants only**: All variants must be unit variants (no fields)
-//! 3. **Explicit discriminants**: All variants must have explicit values
-//! 4. **Fallible conversion**: Use `TryFromByteArray` (not `FromByteArray`) because invalid
-//!    discriminants return `InvalidDiscriminantError`
+//! **C-like enums** (unit variants only):
+//! - Implement `IntoByteArray` / `TryFromByteArray` (transmute-based, fixed-size)
+//! - `#[repr]` is optional; auto-inferred from variant count
+//! - Discriminants are optional; auto-assigned from 0 like normal Rust enums
+//! - Invalid discriminants on conversion return `InvalidDiscriminantError`
 //!
-//! ### Nested Enums in Structs
+//! **Enums with variant fields**:
+//! - Implement `Readable` / `Writable` (stream-based I/O, variable-size)
+//! - Discriminant written first, then variant fields in order
+//! - `#[repr]` and discriminants both optional (auto-inferred)
 //!
-//! Use the `#[byteable(try_transparent)]` attribute for enum fields in structs:
+//! ### Dynamic Types: `Vec`, `String`, and Collections
+//!
+//! The `Readable` and `Writable` traits are implemented for many standard library types:
+//! - Collections: `Vec<T>`, `VecDeque<T>`, `HashMap<K, V>`, `HashSet<T>`, `BTreeMap<K, V>`, `BTreeSet<T>`
+//! - Optional/Result: `Option<T>`, `Result<T, E>`
+//! - Text/Path: `String`, `str`, `Path`, `PathBuf`, `CStr`, `CString`
+//!
+//! For structs containing these types, use `#[byteable(io_only)]`:
 //!
 //! ```
 //! # #[cfg(feature = "derive")] {
 //! use byteable::Byteable;
 //!
-//! #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-//! #[repr(u8)]
-//! enum MessageType {
-//!     Data = 1,
-//!     Control = 2,
-//!     ErrorMsg = 3,
-//! }
-//!
-//! #[derive(Byteable, Clone, Copy)]
+//! #[derive(Byteable, Debug, PartialEq)]
+//! #[byteable(io_only)]
 //! struct Message {
-//!     #[byteable(try_transparent)]
-//!     msg_type: MessageType,
-//!     #[byteable(big_endian)]
-//!     sequence: u32,
-//!     payload: [u8; 16],
+//!     id: u8,
+//!     payload: Vec<u8>,
+//!     label: String,
 //! }
 //! # }
 //! ```
 //!
 //! ## Safety Considerations
 //!
-//! The `#[derive(Byteable)]` macro uses `core::mem::transmute` internally, which is unsafe.
-//! When using this macro, ensure that:
+//! The `#[derive(Byteable)]` macro uses two code paths with different safety profiles:
 //!
-//! 1. All fields are primitive types or have endianness attributes (`#[byteable(big_endian)]`, `#[byteable(little_endian)]`)
-//! 2. The struct doesn't contain types with invalid bit patterns (e.g., `bool`, `char`)
-//! 3. C-like enums with explicit discriminants are safe (supported via derive)
-//! 4. Complex enums with fields are **not** safe
+//! **Transmute path** (default for fixed-size structs and C-like enums):
+//! - Uses `core::mem::transmute`, so all fields must be fixed-size
+//! - Supports: primitives, bool, char, enums, arrays, `BigEndian<T>`, `LittleEndian<T>`
+//! - **Do not use with**: `Vec`, `String`, references, pointers, types with `Drop`
 //!
-//! For types with complex invariants (like `String`, `Vec`, references, etc.), do **not** use
-//! the `Byteable` derive macro. Use only with plain old data (POD) types.
+//! **Stream I/O path** (`#[byteable(io_only)]` structs and enums with fields):
+//! - No `transmute` involved; reads/writes fields sequentially
+//! - Supports all `Readable`/`Writable` types including `Vec`, `String`, `Option`, `HashMap`, etc.
+//!
+//! For structs containing dynamic types like `String`, `Vec`, references, etc., use
+//! `#[byteable(io_only)]` instead of relying on the default transmute path.
 //!
 //! ## Advanced Usage
 //!

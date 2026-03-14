@@ -18,10 +18,12 @@ _A Rust crate for zero-overhead, zero-copy serialization and deserialization of 
 - **`ReadValue` & `WriteValue`**: Extension traits for `std::io::Read` and `std::io::Write`
 - **`AsyncReadValue` & `AsyncWriteValue`**: Async I/O support with tokio (optional)
 - **Endianness Support**: `BigEndian<T>` and `LittleEndian<T>` wrappers for explicit byte order
-- **`#[derive(Byteable)]`**: Procedural macro for automatic trait implementation with endianness support (optional)
-- **Extensive Documentation**: Every function, trait, and type is thoroughly documented with examples
-- **Inline Comments**: All implementations include detailed explanatory comments
-- **Zero Overhead**: Compiles down to simple memory operations with no runtime cost
+- **`#[derive(Byteable)]`**: Procedural macro for automatic trait implementation with endianness support (optional):
+  - Fixed-size structs via zero-copy transmute
+  - `#[byteable(io_only)]` structs for types containing `Vec`, `String`, `Option`, etc.
+  - C-like enums and enums with variant fields
+- **Standard Collection I/O**: Built-in `Readable`/`Writable` for `Vec`, `String`, `Option`, `HashMap`, `BTreeMap`, and more
+- **Zero Overhead**: Fixed-size types compile down to simple memory operations with no runtime cost
 
 ## Why byteable?
 
@@ -37,14 +39,14 @@ Add `byteable` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-byteable = "0.19"  # Or latest version
+byteable = "0.25"  # Or latest version
 ```
 
 ### Optional Features
 
 ```toml
 [dependencies]
-byteable = { version = "0.19", features = ["derive", "tokio"] }
+byteable = { version = "0.25", features = ["derive", "tokio"] }
 ```
 
 - **`derive`** (default): Enables the `#[derive(Byteable)]` procedural macro
@@ -243,9 +245,11 @@ fn main() -> Result<(), byteable::InvalidDiscriminantError> {
 
 ## Enum Support
 
-The `#[derive(Byteable)]` macro now supports C-like enums with explicit discriminants! This is perfect for encoding protocol status codes, command types, and other enumerated values in binary formats.
+The `#[derive(Byteable)]` macro supports two kinds of enums: **C-like enums** (unit variants only, with fixed-size byte array conversion) and **field enums** (variants with data, using stream-based I/O).
 
-### Basic Enum Usage
+### C-Like Enums
+
+C-like enums (unit variants with explicit discriminants) implement `IntoByteArray` / `TryFromByteArray` for zero-copy fixed-size conversion.
 
 ```rust
 use byteable::{Byteable, IntoByteArray, TryFromByteArray};
@@ -276,58 +280,6 @@ fn main() -> Result<(), byteable::InvalidDiscriminantError> {
 }
 ```
 
-### Enum with Endianness
-
-Enums support the same endianness attributes as structs:
-
-```rust
-use byteable::Byteable;
-
-// Little-endian enum (common for file formats)
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u16)]
-#[byteable(little_endian)]
-enum FileType {
-    Text = 0x1000,
-    Binary = 0x2000,
-    Archive = 0x3000,
-}
-
-// Big-endian enum (common for network protocols)
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u32)]
-#[byteable(big_endian)]
-enum HttpStatus {
-    Ok = 200,
-    NotFound = 404,
-    InternalError = 500,
-}
-
-fn main() {
-    let file_type = FileType::Binary;
-    let bytes = file_type.into_byte_array();
-    // Always [0x00, 0x20] regardless of platform
-    assert_eq!(bytes, [0x00, 0x20]);
-
-    let status = HttpStatus::Ok;
-    let bytes = status.into_byte_array();
-    // Always [0x00, 0x00, 0x00, 0xC8] regardless of platform
-    assert_eq!(bytes, [0x00, 0x00, 0x00, 0xC8]);
-}
-```
-
-### Enum Requirements
-
-When deriving `Byteable` for enums, you **must** ensure:
-
-1. **Explicit repr type**: Use `#[repr(u8)]`, `#[repr(u16)]`, `#[repr(u32)]`, `#[repr(u64)]`,
-   `#[repr(i8)]`, `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`
-2. **Unit variants only**: All variants must be unit variants (no fields)
-3. **Explicit discriminants**: All variants must have explicit discriminant values
-4. **Error handling**: Use `TryFromByteArray` instead of `FromByteArray` since invalid byte patterns return errors
-
-### Sparse Enums
-
 Enums with non-sequential discriminants are fully supported:
 
 ```rust
@@ -342,13 +294,151 @@ enum Priority {
     Critical = 100,
 }
 
-// Only the defined discriminants are valid
+// Only the defined discriminants are valid; all others return errors
 assert_eq!(Priority::Low.into_byte_array(), [1]);
-assert_eq!(Priority::Critical.into_byte_array(), [100]);
-
-// Values 2, 3, 4, 6, 7, etc. will return errors
 assert!(Priority::try_from_byte_array([2]).is_err());
 ```
+
+### Enums with Fields
+
+Enums with variant fields (named or tuple) implement `Readable` / `Writable` for stream-based I/O. The discriminant is written first, followed by the variant's fields in order.
+
+```rust
+use byteable::{Byteable, ReadValue, WriteValue};
+use std::io::Cursor;
+
+#[derive(Byteable, Debug, PartialEq)]
+#[repr(u8)]
+enum Message {
+    Ping = 0,
+    Pong { id: u8 } = 1,
+    Data { length: u8, value: [u8; 4] } = 2,
+}
+
+let original = Message::Data { length: 4, value: [0xDE, 0xAD, 0xBE, 0xEF] };
+
+let mut buf = Vec::new();
+buf.write_value(&original).unwrap();
+assert_eq!(buf, [2, 4, 0xDE, 0xAD, 0xBE, 0xEF]); // discriminant + fields
+
+let decoded: Message = Cursor::new(&buf).read_value().unwrap();
+assert_eq!(decoded, original);
+```
+
+Discriminants and fields both support endianness annotations:
+
+```rust
+use byteable::Byteable;
+
+// Little-endian u16 discriminant
+#[derive(Byteable, Debug, PartialEq)]
+#[repr(u16)]
+#[byteable(little_endian)]
+enum Request {
+    Ping = 0x0001,
+    GetValue { key: u8 } = 0x0002,
+    SetValue { key: u8, val: u8 } = 0x0003,
+}
+
+// Individual fields can have per-field endianness
+#[derive(Byteable, Debug, PartialEq)]
+#[repr(u8)]
+enum Typed {
+    Small { val: u8 } = 0,
+    Wide { #[byteable(little_endian)] val: u32 } = 1,
+    Network {
+        #[byteable(big_endian)] port: u16,
+        #[byteable(big_endian)] addr: u32,
+    } = 2,
+}
+```
+
+If `#[repr]` is omitted, the macro infers the smallest integer type that fits all variants (e.g. `u8` for up to 255 variants), and discriminants auto-increment from 0 like ordinary Rust enums.
+
+### Enum Endianness (C-like)
+
+C-like enums also support type-level endianness for their fixed-size representation:
+
+```rust
+use byteable::Byteable;
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(u16)]
+#[byteable(little_endian)]
+enum FileType {
+    Text = 0x1000,
+    Binary = 0x2000,
+}
+
+let bytes = FileType::Binary.into_byte_array();
+assert_eq!(bytes, [0x00, 0x20]); // little-endian, platform-independent
+```
+
+## `io_only` Structs
+
+The standard `#[derive(Byteable)]` path uses `transmute`-based zero-copy conversion and requires every field to be a fixed-size, `TransmuteSafe` type. For structs that contain `Vec<T>`, `String`, `Option<T>`, or other dynamically-sized types, annotate the struct with `#[byteable(io_only)]` to generate sequential field I/O instead:
+
+```rust
+use byteable::{Byteable, ReadValue, WriteValue};
+use std::io::Cursor;
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Packet {
+    tag: u8,
+    payload: Vec<u8>,
+    label: String,
+    optional: Option<u8>,
+}
+
+let original = Packet {
+    tag: 1,
+    payload: vec![0xDE, 0xAD, 0xBE, 0xEF],
+    label: "hello".to_string(),
+    optional: Some(42),
+};
+
+let mut buf = Vec::new();
+buf.write_value(&original).unwrap();
+
+let decoded: Packet = Cursor::new(&buf).read_value().unwrap();
+assert_eq!(decoded, original);
+```
+
+`io_only` structs implement `Readable` / `Writable` (not `IntoByteArray` / `FromByteArray`), so they always require a reader or writer. Fields are written in declaration order. Field-level endianness attributes still apply:
+
+```rust
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct MixedPacket {
+    #[byteable(big_endian)]
+    port: u16,          // written as big-endian u16
+    payload: Vec<u8>,   // length-prefixed sequence
+}
+```
+
+Tuple structs and unit structs are also supported with `#[byteable(io_only)]`.
+
+## Standard Collection I/O
+
+The `Readable` and `Writable` traits are implemented for common standard library collection types. All collections are serialized as a **little-endian `u64` length** (number of elements) followed by each element in sequence.
+
+| Type | Notes |
+|---|---|
+| `Vec<T>` | Sequential elements |
+| `VecDeque<T>` | Sequential elements |
+| `LinkedList<T>` | Sequential elements |
+| `HashMap<K, V>` | Sequential key-value pairs |
+| `HashSet<T>` | Sequential elements |
+| `BTreeMap<K, V>` | Sequential key-value pairs |
+| `BTreeSet<T>` | Sequential elements |
+| `Option<T>` | `0u8` for `None`, `1u8` + value for `Some` |
+| `Result<V, E>` | `0u8` + value for `Ok`, `1u8` + error for `Err` |
+| `String` | UTF-8 bytes prefixed by a little-endian `u64` byte-length |
+| `Path` / `PathBuf` | Same encoding as `String` (UTF-8 path) |
+| `CStr` / `CString` | Null-terminated bytes |
+
+These implementations are used automatically by `ReadValue::read_value` / `WriteValue::write_value` and are composed transparently within `io_only` structs and field enums.
 
 ## Usage Patterns
 
@@ -388,31 +478,30 @@ let checksum: u32 = reader.read_value()?;
 
 ## Safety Considerations
 
-The `#[derive(Byteable)]` macro uses `unsafe` code (`core::mem::transmute`) internally. When using it, you **must** ensure:
+`#[derive(Byteable)]` uses two distinct code-generation paths with different safety profiles:
 
-### Safe to Use With:
+### Transmute path (default)
+
+Used for ordinary structs and C-like enums. Internally uses `core::mem::transmute`, so every field must be a fixed-size, `TransmuteSafe` type.
+
+**Safe to use:**
 
 - Primitive numeric types (`u8`, `i32`, `f64`, etc.)
 - `bool` and `char` (with validation via `TryFromByteArray`)
 - `BigEndian<T>` and `LittleEndian<T>` wrappers
-- Arrays of safe types
-- Structs with `#[repr(C, packed)]` or `#[repr(transparent)]`
-- C-like enums with explicit discriminants (with validation via `TryFromByteArray`)
+- Arrays of the above
+- C-like enums with explicit discriminants
 
-### **Never** Use With:
+**Never use on the transmute path:**
 
-- Complex enums with fields (have invalid bit patterns)
-- `String`, `Vec`, or any heap-allocated types
+- `String`, `Vec`, or any heap-allocated types — use `#[byteable(io_only)]` instead
 - References or pointers (`&T`, `Box<T>`, `*const T`)
 - Types with `Drop` implementations
 - `NonZero*` types or types with invariants
 
-### Requirements:
+### `io_only` / field-enum path
 
-1. **Explicit memory layout**: Always use `#[repr(C, packed)]` or similar
-2. **All byte patterns valid**: Every possible byte combination must be valid for your type
-3. **No padding with undefined values**: Use `packed` to avoid alignment padding
-4. **No drop glue**: Types must be `Copy` and have no cleanup logic
+Used for `#[byteable(io_only)]` structs and enums with variant fields. No `transmute` is involved — values are read/written field by field via the `Readable`/`Writable` traits. Standard library collection types (`Vec`, `String`, `Option`, `HashMap`, etc.) are fully supported on this path.
 
 ## Documentation
 

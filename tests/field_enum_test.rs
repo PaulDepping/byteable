@@ -2,7 +2,7 @@
 //!
 //! Field enums implement `Readable` + `Writable` (stream-based I/O) rather than
 //! `IntoByteArray`/`FromByteArray`, because variant sizes differ.
-
+#![cfg(all(feature = "std", feature = "derive"))]
 use byteable::{Byteable, ReadValue, WriteValue};
 use std::io::Cursor;
 
