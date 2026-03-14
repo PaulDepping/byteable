@@ -284,7 +284,11 @@ mod two_try_transparent_tests {
             (StatusA::Err, CodeB::Beta, 1u8),
         ];
         for (status, code, value) in combos {
-            let d = Dual { status, code, value };
+            let d = Dual {
+                status,
+                code,
+                value,
+            };
             let bytes = d.into_byte_array();
             let restored = Dual::try_from_byte_array(bytes).unwrap();
             assert_eq!(restored, d);

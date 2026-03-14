@@ -136,7 +136,7 @@ pub unsafe trait TransmuteSafe {}
 unsafe impl TransmuteSafe for u8 {}
 unsafe impl TransmuteSafe for i8 {}
 
-macro_rules! impl_bytecast_safe_for_endian {
+macro_rules! impl_transmute_safe_for_endian {
     ($($ty:ty),+ $(,)?) => {
         $(
             unsafe impl TransmuteSafe for BigEndian<$ty> {}
@@ -145,6 +145,6 @@ macro_rules! impl_bytecast_safe_for_endian {
     };
 }
 
-impl_bytecast_safe_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+impl_transmute_safe_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 
 unsafe impl<T: TransmuteSafe, const SIZE: usize> TransmuteSafe for [T; SIZE] {}

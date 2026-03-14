@@ -4,7 +4,7 @@
 //! which is useful for network protocols, packet parsing, and testing.
 
 use byteable::{Byteable, ReadValue, WriteValue};
-use std::io::Cursor;
+use std::io::{self, Cursor};
 
 /// A simple message header for a network protocol
 #[derive(Clone, Copy, PartialEq, Debug, Byteable)]
@@ -37,7 +37,7 @@ struct StatusResponse {
     timestamp: u64,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> io::Result<()> {
     println!("=== Cursor-based Byteable Example ===\n");
 
     // Example 1: Writing to a cursor (in-memory buffer)

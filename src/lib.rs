@@ -343,6 +343,7 @@ mod byte_array;
 mod byteable_trait;
 mod derive_safety_helpers;
 mod endian;
+mod std_types;
 
 #[cfg(feature = "std")]
 mod io;
@@ -358,8 +359,8 @@ pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 pub use byte_array::FixedBytes;
 
 pub use byteable_trait::{
-    ByteRepr, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError,
-    RawRepr, TryFromByteArray, TryRawRepr,
+    ByteRepr, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError, RawRepr,
+    TryFromByteArray, TryRawRepr,
 };
 
 #[cfg(feature = "std")]

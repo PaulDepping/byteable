@@ -96,14 +96,8 @@ fn test_unit_struct_size() {
     assert_eq!(size_of::<AlsoEmpty>(), 0);
 
     // Their byte arrays should also have zero size
-    assert_eq!(
-        size_of::<<Empty as byteable::ByteRepr>::ByteArray>(),
-        0
-    );
-    assert_eq!(
-        size_of::<<AlsoEmpty as byteable::ByteRepr>::ByteArray>(),
-        0
-    );
+    assert_eq!(size_of::<<Empty as byteable::ByteRepr>::ByteArray>(), 0);
+    assert_eq!(size_of::<<AlsoEmpty as byteable::ByteRepr>::ByteArray>(), 0);
 }
 
 #[test]

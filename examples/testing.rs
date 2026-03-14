@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{self, Cursor};
 
 use byteable::{Byteable, WriteValue};
 
@@ -16,7 +16,7 @@ struct Location {
     t: Temperature,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> io::Result<()> {
     let t = Temperature::Celsius(16.8);
     let l = Location {
         s: String::from("Hannover"),

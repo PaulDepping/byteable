@@ -9,8 +9,7 @@
 //!
 //! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
 //! the crate, along with helper macros for implementing them.
-
-use crate::{TransmuteSafe, LittleEndian, byte_array::FixedBytes};
+use crate::byte_array::FixedBytes;
 
 /// Associates a type with its byte array representation.
 ///
@@ -63,7 +62,7 @@ use crate::{TransmuteSafe, LittleEndian, byte_array::FixedBytes};
 /// assert_eq!(Point::BYTE_SIZE, 2);
 /// # }
 /// ```
-pub trait ByteRepr: Copy {
+pub trait ByteRepr {
     type ByteArray: FixedBytes;
     const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
 }
@@ -296,9 +295,7 @@ pub trait RawRepr: ByteRepr + From<Self::Raw> + IntoByteArray + FromByteArray {
 /// assert_eq!(from_bytes, Status::Running);
 /// # }
 /// ```
-pub trait TryRawRepr:
-    ByteRepr + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray
-{
+pub trait TryRawRepr: ByteRepr + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray {
     /// The raw type used for byte conversion.
     ///
     /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
@@ -511,105 +508,6 @@ macro_rules! impl_byteable_primitive {
 
 impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug)]
-#[doc(hidden)]
-pub struct RawBool(u8);
-
-unsafe impl TransmuteSafe for RawBool {}
-
-unsafe_byteable_transmute!(RawBool);
-
-impl From<bool> for RawBool {
-    #[inline]
-    fn from(value: bool) -> Self {
-        Self(value as u8)
-    }
-}
-
-impl TryFrom<RawBool> for bool {
-    type Error = InvalidDiscriminantError;
-
-    #[inline]
-    fn try_from(value: RawBool) -> Result<Self, Self::Error> {
-        match value.0 {
-            0 => Ok(false),
-            1 => Ok(true),
-            invalid => Err(InvalidDiscriminantError::new(
-                invalid,
-                ::core::any::type_name::<Self>(),
-            )),
-        }
-    }
-}
-
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug)]
-#[doc(hidden)]
-pub struct RawChar(LittleEndian<u32>);
-
-unsafe impl TransmuteSafe for RawChar {}
-
-unsafe_byteable_transmute!(RawChar);
-
-impl From<char> for RawChar {
-    #[inline]
-    fn from(value: char) -> Self {
-        Self((value as u32).into())
-    }
-}
-
-impl TryFrom<RawChar> for char {
-    type Error = InvalidDiscriminantError;
-
-    #[inline]
-    fn try_from(value: RawChar) -> Result<Self, Self::Error> {
-        let num = value.0.get();
-        match char::from_u32(num) {
-            Some(c) => Ok(c),
-            None => Err(InvalidDiscriminantError::new(
-                num,
-                ::core::any::type_name::<Self>(),
-            )),
-        }
-    }
-}
-
-// Generates ByteRepr, IntoByteArray, TryFromByteArray, and TryRawRepr for a type
-// that delegates to a raw wrapper type via TryRawRepr.
-macro_rules! impl_try_raw_byteable {
-    ($type:ty, $raw:ty, $error:ty) => {
-        impl ByteRepr for $type {
-            type ByteArray = <<$type as TryRawRepr>::Raw as ByteRepr>::ByteArray;
-        }
-
-        impl IntoByteArray for $type {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                let raw: <Self as TryRawRepr>::Raw = self.into();
-                raw.into_byte_array()
-            }
-        }
-
-        impl TryFromByteArray for $type {
-            type Error = $error;
-
-            #[inline]
-            fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
-                raw.try_into()
-            }
-        }
-
-        impl TryRawRepr for $type {
-            type Raw = $raw;
-        }
-    };
-}
-
-impl_try_raw_byteable!(bool, RawBool, InvalidDiscriminantError);
-impl_try_raw_byteable!(char, RawChar, InvalidDiscriminantError);
-
 /// Represents a discriminant value that can be of various integer types.
 ///
 /// This enum stores the invalid discriminant value with its original type information,
@@ -730,12 +628,11 @@ impl core::fmt::Display for InvalidDiscriminantError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InvalidDiscriminantError {}
+impl core::error::Error for InvalidDiscriminantError {}
 
 #[cfg(all(test, feature = "derive"))]
 mod tests {
-    use crate::{ByteRepr, BigEndian, FromByteArray, IntoByteArray, LittleEndian};
+    use crate::{BigEndian, ByteRepr, FromByteArray, IntoByteArray, LittleEndian};
     use byteable_derive::UnsafeByteableTransmute;
 
     #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]

@@ -515,9 +515,15 @@ enum SignedI32LE {
 
 #[test]
 fn test_i32_enum_little_endian() {
-    assert_eq!(SignedI32LE::Min.into_byte_array(), (-2_000_000i32).to_le_bytes());
+    assert_eq!(
+        SignedI32LE::Min.into_byte_array(),
+        (-2_000_000i32).to_le_bytes()
+    );
     assert_eq!(SignedI32LE::Zero.into_byte_array(), 0i32.to_le_bytes());
-    assert_eq!(SignedI32LE::Max.into_byte_array(), 2_000_000i32.to_le_bytes());
+    assert_eq!(
+        SignedI32LE::Max.into_byte_array(),
+        2_000_000i32.to_le_bytes()
+    );
 
     let restored = SignedI32LE::try_from_byte_array((-2_000_000i32).to_le_bytes()).unwrap();
     assert_eq!(restored, SignedI32LE::Min);
@@ -531,7 +537,10 @@ fn test_i32_enum_invalid_discriminant() {
     let result = SignedI32LE::try_from_byte_array(bytes);
     assert!(result.is_err());
     if let Err(err) = result {
-        assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I32(42));
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::I32(42)
+        );
     }
 }
 
@@ -546,9 +555,15 @@ enum SignedI32BE {
 
 #[test]
 fn test_i32_enum_big_endian() {
-    assert_eq!(SignedI32BE::Negative.into_byte_array(), (-2_000_000i32).to_be_bytes());
+    assert_eq!(
+        SignedI32BE::Negative.into_byte_array(),
+        (-2_000_000i32).to_be_bytes()
+    );
     assert_eq!(SignedI32BE::Zero.into_byte_array(), 0i32.to_be_bytes());
-    assert_eq!(SignedI32BE::Positive.into_byte_array(), 2_000_000i32.to_be_bytes());
+    assert_eq!(
+        SignedI32BE::Positive.into_byte_array(),
+        2_000_000i32.to_be_bytes()
+    );
 
     let restored = SignedI32BE::try_from_byte_array((-2_000_000i32).to_be_bytes()).unwrap();
     assert_eq!(restored, SignedI32BE::Negative);
@@ -586,8 +601,7 @@ fn test_i64_enum_little_endian() {
         9_000_000_000_000i64.to_le_bytes()
     );
 
-    let restored =
-        SignedI64LE::try_from_byte_array((-9_000_000_000_000i64).to_le_bytes()).unwrap();
+    let restored = SignedI64LE::try_from_byte_array((-9_000_000_000_000i64).to_le_bytes()).unwrap();
     assert_eq!(restored, SignedI64LE::LargeNeg);
 }
 
@@ -597,7 +611,10 @@ fn test_i64_enum_invalid_discriminant() {
     let result = SignedI64LE::try_from_byte_array(bytes);
     assert!(result.is_err());
     if let Err(err) = result {
-        assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I64(1));
+        assert_eq!(
+            err.invalid_discriminant,
+            byteable::DiscriminantValue::I64(1)
+        );
     }
 }
 
@@ -621,8 +638,7 @@ fn test_i64_enum_big_endian() {
         9_000_000_000_000i64.to_be_bytes()
     );
 
-    let restored =
-        SignedI64BE::try_from_byte_array((-9_000_000_000_000i64).to_be_bytes()).unwrap();
+    let restored = SignedI64BE::try_from_byte_array((-9_000_000_000_000i64).to_be_bytes()).unwrap();
     assert_eq!(restored, SignedI64BE::LargeNeg);
 }
 
@@ -672,9 +688,6 @@ fn test_discriminant_value_i8() {
     let result = Temperature::try_from_byte_array(bytes);
     assert!(result.is_err());
     if let Err(err) = result {
-        assert_eq!(
-            err.invalid_discriminant,
-            byteable::DiscriminantValue::I8(5)
-        );
+        assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I8(5));
     }
 }

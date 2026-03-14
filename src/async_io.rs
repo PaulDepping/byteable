@@ -11,6 +11,7 @@ use crate::{IntoByteArray, LittleEndian, TryFromByteArray};
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
+use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Low-level trait for asynchronously reading a fixed-size value from a `tokio::io::AsyncRead` source.
@@ -36,8 +37,7 @@ where
         async move {
             let mut b = T::ByteArray::zeroed();
             reader.read_exact(b.as_byte_slice_mut()).await?;
-            T::try_from_byte_array(b)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            T::try_from_byte_array(b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
         }
     }
 }
@@ -82,13 +82,13 @@ pub trait AsyncFixedWritable {
     ) -> impl Future<Output = tokio::io::Result<()>>;
 }
 
-impl<T: IntoByteArray> AsyncFixedWritable for T {
+impl<T: IntoByteArray + Clone> AsyncFixedWritable for T {
     fn write_fixed_to(
         &self,
         writer: &mut (impl tokio::io::AsyncWriteExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
-            let b = self.into_byte_array();
+            let b = self.clone().into_byte_array();
             writer.write_all(b.as_byte_slice()).await
         }
     }
@@ -127,7 +127,7 @@ impl<T: AsyncReadable> AsyncReadable for Vec<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut result = Vec::with_capacity(len);
             for _ in 0..len {
@@ -145,7 +145,7 @@ impl<T: AsyncWritable> AsyncWritable for Vec<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
                 writer.write_value(el).await?;
@@ -160,7 +160,7 @@ impl<T: AsyncReadable> AsyncReadable for VecDeque<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut result = VecDeque::with_capacity(len);
             for _ in 0..len {
@@ -178,7 +178,7 @@ impl<T: AsyncWritable> AsyncWritable for VecDeque<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
                 writer.write_value(el).await?;
@@ -198,7 +198,7 @@ where
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut map = HashMap::with_capacity_and_hasher(len, S::default());
             for _ in 0..len {
@@ -223,7 +223,7 @@ where
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for (k, v) in self {
                 writer.write_value(k).await?;
@@ -243,7 +243,7 @@ where
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut set = HashSet::with_capacity_and_hasher(len, S::default());
             for _ in 0..len {
@@ -265,7 +265,7 @@ where
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
                 writer.write_value(el).await?;
@@ -280,7 +280,7 @@ impl<K: AsyncReadable + Ord, V: AsyncReadable> AsyncReadable for BTreeMap<K, V> 
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut map = BTreeMap::new();
             for _ in 0..len {
@@ -300,7 +300,7 @@ impl<K: AsyncWritable, V: AsyncWritable> AsyncWritable for BTreeMap<K, V> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for (k, v) in self {
                 writer.write_value(k).await?;
@@ -316,7 +316,7 @@ impl<T: AsyncReadable + Ord> AsyncReadable for BTreeSet<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut set = BTreeSet::new();
             for _ in 0..len {
@@ -334,7 +334,7 @@ impl<T: AsyncWritable> AsyncWritable for BTreeSet<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             for el in self {
                 writer.write_value(el).await?;
@@ -349,7 +349,7 @@ impl<T: AsyncReadable> AsyncReadable for Option<T> {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let tag: u8 = reader.read_value().await?;
+            let tag: u8 = reader.read_fixed().await?;
             match tag {
                 0 => Ok(None),
                 1 => Ok(Some(reader.read_value().await?)),
@@ -369,9 +369,9 @@ impl<T: AsyncWritable> AsyncWritable for Option<T> {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             match self {
-                None => writer.write_value(&0u8).await,
+                None => writer.write_fixed(&0u8).await,
                 Some(val) => {
-                    writer.write_value(&1u8).await?;
+                    writer.write_fixed(&1u8).await?;
                     writer.write_value(val).await
                 }
             }
@@ -384,7 +384,7 @@ impl AsyncReadable for String {
         mut reader: &mut (impl AsyncReadExt + Unpin + ?Sized),
     ) -> impl Future<Output = tokio::io::Result<Self>> {
         async move {
-            let len: LittleEndian<u64> = reader.read_value().await?;
+            let len: LittleEndian<u64> = reader.read_fixed().await?;
             let len = len.get() as usize;
             let mut bytes = vec![0u8; len];
             reader.read_exact(&mut bytes).await?;
@@ -401,7 +401,7 @@ impl AsyncWritable for str {
     ) -> impl Future<Output = tokio::io::Result<()>> {
         async move {
             writer
-                .write_value(&LittleEndian::new(self.len() as u64))
+                .write_fixed(&LittleEndian::new(self.len() as u64))
                 .await?;
             writer.write_all(self.as_bytes()).await
         }
@@ -524,7 +524,7 @@ pub trait AsyncReadValue: tokio::io::AsyncReadExt + Unpin {
     /// # Ok(())
     /// # }
     /// ```
-    fn read_value<T: AsyncReadable>(&mut self) -> impl Future<Output = std::io::Result<T>> {
+    fn read_value<T: AsyncReadable>(&mut self) -> impl Future<Output = io::Result<T>> {
         T::read_from(self)
     }
 }
@@ -641,10 +641,7 @@ pub trait AsyncWriteValue: tokio::io::AsyncWriteExt + Unpin {
     /// # Ok(())
     /// # }
     /// ```
-    fn write_value<T: AsyncWritable>(
-        &mut self,
-        data: &T,
-    ) -> impl Future<Output = std::io::Result<()>> {
+    fn write_value<T: AsyncWritable>(&mut self, data: &T) -> impl Future<Output = io::Result<()>> {
         data.write_to(self)
     }
 }
@@ -691,9 +688,10 @@ impl<T: AsyncWriteExt + Unpin + ?Sized> AsyncWriteFixed for T {}
 
 #[cfg(test)]
 mod tests {
-    use super::{AsyncReadValue, AsyncWriteValue};
-    use crate::{ByteRepr, BigEndian, Byteable, LittleEndian, TryFromByteArray};
-    use std::io::Cursor;
+    use super::{AsyncReadFixed, AsyncReadValue, AsyncWriteFixed};
+    use crate::{BigEndian, ByteRepr, Byteable, LittleEndian, TryFromByteArray};
+    use core::{error, fmt};
+    use std::io::{self, Cursor};
 
     #[derive(Clone, Copy, PartialEq, Debug, Byteable)]
     struct AsyncTestPacket {
@@ -711,7 +709,7 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_value(&packet).await.unwrap();
+        buffer.write_fixed(&packet).await.unwrap();
         assert_eq!(buffer.into_inner(), vec![123, 0, 4, 3, 2, 1]);
     }
 
@@ -719,7 +717,7 @@ mod tests {
     async fn test_async_read_one() {
         let data = vec![123, 0, 4, 3, 2, 1];
         let mut reader = Cursor::new(data);
-        let packet: AsyncTestPacket = reader.read_value().await.unwrap();
+        let packet: AsyncTestPacket = reader.read_fixed().await.unwrap();
 
         let id = packet.id;
         let value = packet.value;
@@ -735,10 +733,10 @@ mod tests {
         };
 
         let mut buffer = Cursor::new(vec![]);
-        buffer.write_value(&original).await.unwrap();
+        buffer.write_fixed(&original).await.unwrap();
 
         let mut reader = Cursor::new(buffer.into_inner());
-        let read_packet: AsyncTestPacket = reader.read_value().await.unwrap();
+        let read_packet: AsyncTestPacket = reader.read_fixed().await.unwrap();
 
         assert_eq!(read_packet, original);
     }
@@ -748,11 +746,11 @@ mod tests {
         let mut buffer = Cursor::new(vec![]);
 
         buffer
-            .write_value(&BigEndian::new(0x0102u16))
+            .write_fixed(&BigEndian::new(0x0102u16))
             .await
             .unwrap();
         buffer
-            .write_value(&LittleEndian::new(0x0304u16))
+            .write_fixed(&LittleEndian::new(0x0304u16))
             .await
             .unwrap();
 
@@ -766,13 +764,13 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct ConversionError;
 
-    impl std::fmt::Display for ConversionError {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    impl fmt::Display for ConversionError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "value must be even")
         }
     }
 
-    impl std::error::Error for ConversionError {}
+    impl error::Error for ConversionError {}
 
     impl ByteRepr for EvenU32 {
         type ByteArray = [u8; 4];
@@ -808,9 +806,9 @@ mod tests {
         let data = vec![43, 0, 0, 0]; // Odd value
         let mut cursor = Cursor::new(data);
 
-        let result: std::io::Result<EvenU32> = cursor.read_value().await;
+        let result: io::Result<EvenU32> = cursor.read_value().await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]
@@ -818,11 +816,8 @@ mod tests {
         let data = vec![1, 2]; // Not enough bytes
         let mut cursor = Cursor::new(data);
 
-        let result: std::io::Result<EvenU32> = cursor.read_value().await;
+        let result: io::Result<EvenU32> = cursor.read_value().await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().kind(),
-            std::io::ErrorKind::UnexpectedEof
-        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 }

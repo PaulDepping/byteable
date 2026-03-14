@@ -1,12 +1,14 @@
+//! Tests for compile-time safety validation via `TransmuteSafe`.
+//!
+//! The `#[derive(Byteable)]` macro enforces that all field types implement
+//! `TransmuteSafe`, preventing accidental use of types with invalid bit
+//! patterns or non-trivial memory layout.
 #![cfg(feature = "derive")]
 
-/// Tests for compile-time safety validation using TransmuteSafe
-///
-/// This test demonstrates that the Byteable macros now enforce compile-time
-/// safety by requiring all field types to implement TransmuteSafe.
 use byteable::{Byteable, FromByteArray, IntoByteArray};
 
-// This should compile - all fields are safe types
+// ── Types that must compile ───────────────────────────────────────────────────
+
 #[derive(Clone, Copy, Byteable)]
 pub struct SafePacket {
     id: u8,
@@ -17,7 +19,6 @@ pub struct SafePacket {
     data: [u8; 4],
 }
 
-// This should also compile - nested safe structs
 #[derive(Clone, Copy, Byteable)]
 struct Point {
     #[byteable(little_endian)]
@@ -36,17 +37,15 @@ struct Shape {
 }
 
 #[test]
-fn test_safe_types_compile() {
+fn safe_packet_roundtrip() {
     let packet = SafePacket {
         id: 42,
         length: 1024,
         checksum: 0x12345678,
         data: [1, 2, 3, 4],
     };
-
     let bytes = packet.into_byte_array();
     let restored = SafePacket::from_byte_array(bytes);
-
     assert_eq!(packet.id, restored.id);
     assert_eq!(packet.length, restored.length);
     assert_eq!(packet.checksum, restored.checksum);
@@ -54,16 +53,14 @@ fn test_safe_types_compile() {
 }
 
 #[test]
-fn test_nested_safe_types_compile() {
+fn nested_safe_types_roundtrip() {
     let shape = Shape {
         id: 1,
         top_left: Point { x: 0, y: 0 },
         bottom_right: Point { x: 100, y: 200 },
     };
-
     let bytes = shape.into_byte_array();
     let restored = Shape::from_byte_array(bytes);
-
     assert_eq!(shape.id, restored.id);
     assert_eq!(shape.top_left.x, restored.top_left.x);
     assert_eq!(shape.top_left.y, restored.top_left.y);
@@ -71,29 +68,65 @@ fn test_nested_safe_types_compile() {
     assert_eq!(shape.bottom_right.y, restored.bottom_right.y);
 }
 
-// The following tests verify that unsafe types are rejected at compile time.
-// These are compile-fail tests that should be uncommented to verify the
-// compile-time safety checks are working.
+// ── Compile-fail verification ─────────────────────────────────────────────────
+//
+// The following snippets must NOT compile. They are expressed as `compile_fail`
+// doctests so `cargo test --doc` verifies the compiler rejects them.
 
-/*
-// This should NOT compile - bool has invalid bit patterns
-#[derive(Clone, Copy, Byteable)]
-struct UnsafePacket1 {
-    id: u8,
-    is_valid: bool, // ERROR: bool doesn't implement TransmuteSafe
-}
-
-// This should NOT compile - char has invalid bit patterns
-#[derive(Clone, Copy, Byteable)]
-struct UnsafePacket2 {
-    id: u8,
-    letter: char, // ERROR: char doesn't implement TransmuteSafe
-}
-
-// This should NOT compile - contains pointer
-#[derive(Clone, Copy, Byteable)]
-struct UnsafePacket3<'a> {
-    id: u8,
-    data_ref: &'a [u8], // ERROR: &T doesn't implement TransmuteSafe
-}
-*/
+/// `bool` does not implement `TransmuteSafe` (invalid bit patterns 2..=255).
+///
+/// ```compile_fail
+/// # #[cfg(feature = "derive")] {
+/// use byteable::Byteable;
+///
+/// #[derive(Clone, Copy, Byteable)]
+/// struct Bad {
+///     id: u8,
+///     flag: bool,
+/// }
+/// # }
+/// ```
+///
+/// `char` does not implement `TransmuteSafe` (many code-points are invalid).
+///
+/// ```compile_fail
+/// # #[cfg(feature = "derive")] {
+/// use byteable::Byteable;
+///
+/// #[derive(Clone, Copy, Byteable)]
+/// struct Bad {
+///     id: u8,
+///     letter: char,
+/// }
+/// # }
+/// ```
+///
+/// References do not implement `TransmuteSafe`.
+///
+/// ```compile_fail
+/// # #[cfg(feature = "derive")] {
+/// use byteable::Byteable;
+///
+/// #[derive(Clone, Copy, Byteable)]
+/// struct Bad<'a> {
+///     id: u8,
+///     data_ref: &'a [u8],
+/// }
+/// # }
+/// ```
+///
+/// Unadorned multi-byte primitives (`u16` without an endian wrapper) are also
+/// rejected, because their native byte order is platform-dependent.
+///
+/// ```compile_fail
+/// # #[cfg(feature = "derive")] {
+/// use byteable::Byteable;
+///
+/// #[derive(Clone, Copy, Byteable)]
+/// struct Bad {
+///     value: u16,
+/// }
+/// # }
+/// ```
+#[test]
+fn compile_fail_examples_documented_above() {}

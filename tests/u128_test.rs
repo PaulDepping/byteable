@@ -2,7 +2,6 @@
 ///
 /// u128/i128 use native-endian byte order for the raw primitive trait implementations,
 /// just like all other multi-byte primitive types in the crate.
-
 use byteable::{ByteRepr, FromByteArray, IntoByteArray};
 
 // ============================================================================
@@ -44,13 +43,7 @@ fn test_u128_byte_layout() {
 
 #[test]
 fn test_i128_roundtrip() {
-    let values: [i128; 5] = [
-        0,
-        1,
-        -1,
-        i128::MAX,
-        i128::MIN,
-    ];
+    let values: [i128; 5] = [0, 1, -1, i128::MAX, i128::MIN];
     for val in values {
         let bytes = val.into_byte_array();
         let restored = i128::from_byte_array(bytes);
@@ -149,9 +142,15 @@ mod derive_tests {
 
     #[test]
     fn test_i128_enum_byte_layout() {
-        assert_eq!(SignedI128::MinVal.into_byte_array(), i128::MIN.to_le_bytes());
+        assert_eq!(
+            SignedI128::MinVal.into_byte_array(),
+            i128::MIN.to_le_bytes()
+        );
         assert_eq!(SignedI128::Zero.into_byte_array(), 0i128.to_le_bytes());
-        assert_eq!(SignedI128::MaxVal.into_byte_array(), i128::MAX.to_le_bytes());
+        assert_eq!(
+            SignedI128::MaxVal.into_byte_array(),
+            i128::MAX.to_le_bytes()
+        );
     }
 
     #[test]
@@ -175,8 +174,14 @@ mod derive_tests {
 
     #[test]
     fn test_u128_enum_big_endian() {
-        assert_eq!(BigEndianU128::Low.into_byte_array(), 0x0001u128.to_be_bytes());
-        assert_eq!(BigEndianU128::High.into_byte_array(), 0xFFFFu128.to_be_bytes());
+        assert_eq!(
+            BigEndianU128::Low.into_byte_array(),
+            0x0001u128.to_be_bytes()
+        );
+        assert_eq!(
+            BigEndianU128::High.into_byte_array(),
+            0xFFFFu128.to_be_bytes()
+        );
 
         let restored = BigEndianU128::try_from_byte_array(0x0001u128.to_be_bytes()).unwrap();
         assert_eq!(restored, BigEndianU128::Low);
