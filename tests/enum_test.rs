@@ -691,3 +691,69 @@ fn test_discriminant_value_i8() {
         assert_eq!(err.invalid_discriminant, byteable::DiscriminantValue::I8(5));
     }
 }
+
+// Enums with no #[repr] and no explicit discriminants — both auto-inferred.
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+enum AutoReprEnum {
+    A,
+    B,
+    C,
+}
+
+#[test]
+fn test_auto_repr_and_discriminants() {
+    // Auto-selected repr should be u8 (3 variants ≤ 256).
+    // Auto-assigned discriminants: A=0, B=1, C=2.
+    assert_eq!(AutoReprEnum::A.into_byte_array(), [0u8]);
+    assert_eq!(AutoReprEnum::B.into_byte_array(), [1u8]);
+    assert_eq!(AutoReprEnum::C.into_byte_array(), [2u8]);
+
+    assert_eq!(AutoReprEnum::try_from_byte_array([0u8]), Ok(AutoReprEnum::A));
+    assert_eq!(AutoReprEnum::try_from_byte_array([1u8]), Ok(AutoReprEnum::B));
+    assert_eq!(AutoReprEnum::try_from_byte_array([2u8]), Ok(AutoReprEnum::C));
+    assert!(AutoReprEnum::try_from_byte_array([3u8]).is_err());
+}
+
+// Enum with #[repr] but no explicit discriminants — only discriminants auto-inferred.
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
+enum AutoDiscEnum {
+    X,
+    Y,
+    Z,
+}
+
+#[test]
+fn test_auto_discriminants_explicit_repr() {
+    assert_eq!(AutoDiscEnum::X.into_byte_array(), [0u8]);
+    assert_eq!(AutoDiscEnum::Y.into_byte_array(), [1u8]);
+    assert_eq!(AutoDiscEnum::Z.into_byte_array(), [2u8]);
+
+    assert_eq!(AutoDiscEnum::try_from_byte_array([0u8]), Ok(AutoDiscEnum::X));
+    assert_eq!(AutoDiscEnum::try_from_byte_array([2u8]), Ok(AutoDiscEnum::Z));
+    assert!(AutoDiscEnum::try_from_byte_array([5u8]).is_err());
+}
+
+// Enum with mixed explicit and implicit discriminants, no #[repr].
+
+#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+enum MixedDiscEnum {
+    First = 10,
+    Second,  // auto: 11
+    Third = 20,
+    Fourth,  // auto: 21
+}
+
+#[test]
+fn test_mixed_discriminants_auto_repr() {
+    assert_eq!(MixedDiscEnum::First.into_byte_array(), [10u8]);
+    assert_eq!(MixedDiscEnum::Second.into_byte_array(), [11u8]);
+    assert_eq!(MixedDiscEnum::Third.into_byte_array(), [20u8]);
+    assert_eq!(MixedDiscEnum::Fourth.into_byte_array(), [21u8]);
+
+    assert_eq!(MixedDiscEnum::try_from_byte_array([10u8]), Ok(MixedDiscEnum::First));
+    assert_eq!(MixedDiscEnum::try_from_byte_array([11u8]), Ok(MixedDiscEnum::Second));
+    assert!(MixedDiscEnum::try_from_byte_array([12u8]).is_err());
+}

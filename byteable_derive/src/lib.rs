@@ -918,8 +918,19 @@ fn handle_enum_derive(
         }
     }
 
-    let repr_ty = extract_repr_type(&attrs)
-        .expect("Enum must have a #[repr(u8)], #[repr(u16)], #[repr(u32)], or similar attribute");
+    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
+        let n = enum_data.variants.len();
+        let ty_str = if n <= 256 {
+            "u8"
+        } else if n <= 65_536 {
+            "u16"
+        } else if n as u64 <= u32::MAX as u64 + 1 {
+            "u32"
+        } else {
+            "u64"
+        };
+        Ident::new(ty_str, enum_name.span())
+    });
 
     let endianness = parse_byteable_attr(&attrs);
     if matches!(
@@ -929,16 +940,11 @@ fn handle_enum_derive(
         panic!("transparent and try_transparent attributes are not supported for enums");
     }
 
-    let from_discriminant_arms = enum_data.variants.iter().map(|variant| {
+    let discriminants = compute_discriminants(&enum_data.variants);
+
+    let from_discriminant_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc)| {
         let variant_name = &variant.ident;
-        let (_, expr) = variant.discriminant.as_ref().unwrap_or_else(|| {
-            panic!(
-                "All enum variants must have explicit discriminant values for Byteable. \
-                 Variant '{}' is missing a discriminant.",
-                variant_name
-            )
-        });
-        quote! { #expr => Ok(#enum_name::#variant_name), }
+        quote! { #disc => Ok(#enum_name::#variant_name), }
     });
 
     let (raw_type_wrapper, raw_type_get) = match endianness {
