@@ -105,7 +105,7 @@ These traits replaced the previous monolithic `Byteable` trait to provide more f
 The derive macro generates a hidden "raw" struct (e.g., `__byteable_raw_Foo` for `struct Foo`) with:
 
 - `#[repr(C, packed)]` for predictable layout
-- Endianness wrappers around fields based on `#[byteable(big_endian)]` or `#[byteable(little_endian)]` attributes
+- Endianness wrappers around fields: explicit `#[byteable(big_endian)]`/`#[byteable(little_endian)]` attributes, or auto-`LittleEndian<T>` for unannotated multi-byte primitives
 - Direct `transmute`-based `IntoByteArray`/`FromByteArray` implementations
 
 The original struct gets `From` conversions to/from the raw struct, creating a safe API layer.
@@ -114,7 +114,7 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 - **`TransmuteSafe` trait** - Marks types safe for `transmute`-based conversions
 - Automatically implemented for `u8`, `i8`, endian wrappers, and arrays thereof
-- Multi-byte primitives (`u16`, `u32`, etc.) are **not** implemented — must use `BigEndian<T>`/`LittleEndian<T>` wrappers
+- Multi-byte primitives (`u16`, `u32`, etc.) are **not** directly `TransmuteSafe` — the derive macro auto-wraps unannotated multi-byte fields in `LittleEndian<T>`, which is `TransmuteSafe`
 - Raw structs require all fields to implement `TransmuteSafe`
 - This prevents unsafe usage with types like `String`, `Vec`, references, etc.
 
@@ -159,6 +159,8 @@ The `#[derive(Byteable)]` macro handles two code paths:
 - `#[byteable(big_endian)]` - Wrap field in `BigEndian<T>`
 - `#[byteable(transparent)]` - Use field's raw type (via `RawRepr::Raw`)
 - `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (via `TryRawRepr::Raw`)
+
+**Default endianness:** Multi-byte primitive fields (`u16`, `u32`, `u64`, `i16`, `f32`, etc.) with no endianness annotation are automatically treated as `LittleEndian<T>` in both the transmute path and the stream I/O path. Use `#[byteable(big_endian)]` to override.
 
 When `try_transparent` is used, the struct implements `TryFromByteArray` instead of `FromByteArray`.
 

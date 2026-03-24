@@ -117,14 +117,12 @@ fn gen_struct_field_write(
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
-                panic!(
-                    "io_only struct field of type `{}` is a multi-byte primitive and requires \
-                     an endianness annotation: add #[byteable(little_endian)] or \
-                     #[byteable(big_endian)]",
-                    quote!(#field_ty)
-                );
+                quote! {
+                    writer.write_value(&#bc::LittleEndian::new(#field_access))?;
+                }
+            } else {
+                quote! { writer.write_value(&#field_access)?; }
             }
-            quote! { writer.write_value(&#field_access)?; }
         }
         AttributeType::IoOnly => {
             panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
@@ -730,7 +728,17 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 quote! { .into() },
                 quote! { .try_into()? },
             ),
-            AttributeType::None => (quote! { #field_type }, quote! {}, quote! {}),
+            AttributeType::None => {
+                if is_multibyte_primitive(field_type) {
+                    (
+                        quote! { #bc::LittleEndian<#field_type> },
+                        quote! { .into() },
+                        quote! { .get() },
+                    )
+                } else {
+                    (quote! { #field_type }, quote! {}, quote! {})
+                }
+            }
             AttributeType::IoOnly => panic!(
                 "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
             ),
@@ -1060,13 +1068,12 @@ fn gen_field_write(
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
-                panic!(
-                    "field `{}` is a multi-byte type and requires an endianness annotation: \
-                     add #[byteable(little_endian)] or #[byteable(big_endian)]",
-                    field_ident
-                );
+                quote! {
+                    writer.write_value(&#bc::LittleEndian::new(*#field_ident))?;
+                }
+            } else {
+                quote! { writer.write_value(#field_ident)?; }
             }
-            quote! { writer.write_value(#field_ident)?; }
         }
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
@@ -1094,13 +1101,13 @@ fn gen_field_read(
         },
         AttributeType::None => {
             if is_multibyte_primitive(field_ty) {
-                panic!(
-                    "field `{}` is a multi-byte type and requires an endianness annotation: \
-                     add #[byteable(little_endian)] or #[byteable(big_endian)]",
-                    field_ident
-                );
+                quote! {
+                    let #field_ident: #field_ty =
+                        reader.read_value::<#bc::LittleEndian<#field_ty>>()?.get();
+                }
+            } else {
+                quote! { let #field_ident: #field_ty = reader.read_value()?; }
             }
-            quote! { let #field_ident: #field_ty = reader.read_value()?; }
         }
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \

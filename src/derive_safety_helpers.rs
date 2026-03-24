@@ -114,21 +114,17 @@ use crate::{BigEndian, LittleEndian};
 /// # }
 /// ```
 ///
-/// ```compile_fail,cfg(feature="derive")
+/// ```
 /// # #[cfg(feature = "derive")] {
 /// use byteable::Byteable;
 ///
-/// // WRONG: Will not compile - no endianness specified
+/// // OK: multi-byte fields without an annotation default to little-endian
 /// #[derive(Clone, Copy, Byteable)]
-/// struct BadPacket {
+/// struct DefaultEndianPacket {
 ///     id: u8,
-///     length: u16,     // Error: needs endianness wrapper or attribute
-///     checksum: u32,   // Error: needs endianness wrapper or attribute
+///     length: u16,     // Defaults to LittleEndian<u16>
+///     checksum: u32,   // Defaults to LittleEndian<u32>
 /// }
-/// # }
-/// # #[cfg(not(feature = "derive"))] {
-/// # let x = 5;
-/// # x += 2; // shouldn't compile!
 /// # }
 /// ```
 pub unsafe trait TransmuteSafe {}

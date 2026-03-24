@@ -93,6 +93,45 @@ fn option_none_roundtrip() {
     assert_eq!(decoded, original);
 }
 
+// ── Named struct with Option<u64> (default LE) ───────────────────────────────
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct OptionU64Struct {
+    value: Option<u64>,
+}
+
+#[test]
+fn option_u64_some_roundtrip() {
+    let original = OptionU64Struct {
+        value: Some(0x0102030405060708),
+    };
+    let mut buf = Vec::new();
+    buf.write_value(&original).unwrap();
+    let decoded: OptionU64Struct = Cursor::new(&buf).read_value().unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn option_u64_none_roundtrip() {
+    let original = OptionU64Struct { value: None };
+    let mut buf = Vec::new();
+    buf.write_value(&original).unwrap();
+    let decoded: OptionU64Struct = Cursor::new(&buf).read_value().unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn option_u64_some_byte_layout() {
+    // Option<u64>: 1-byte discriminant (1 = Some), then u64 as little-endian
+    let original = OptionU64Struct { value: Some(0xFF) };
+    let mut buf = Vec::new();
+    buf.write_value(&original).unwrap();
+
+    assert_eq!(buf[0], 1); // Some discriminant
+    assert_eq!(&buf[1..9], &255u64.to_le_bytes());
+}
+
 // ── Mixed: endian-annotated numeric + Vec ─────────────────────────────────────
 
 #[derive(Byteable, Debug, PartialEq)]
