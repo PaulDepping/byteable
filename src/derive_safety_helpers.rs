@@ -127,6 +127,13 @@ use crate::{BigEndian, LittleEndian};
 /// }
 /// # }
 /// ```
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be used in a `#[derive(Byteable)]` struct field",
+    label = "this type does not implement `TransmuteSafe`",
+    note = "multi-byte primitives (u16, u32, f32, etc.) must be wrapped in `BigEndian<T>` or `LittleEndian<T>`",
+    note = "types with invalid bit patterns (bool, char, NonZero*) are not allowed in the transmute path",
+    note = "heap-allocated types (Vec, String, Box) require `#[byteable(io_only)]` instead"
+)]
 pub unsafe trait TransmuteSafe {}
 
 unsafe impl TransmuteSafe for u8 {}

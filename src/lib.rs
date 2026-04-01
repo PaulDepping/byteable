@@ -348,6 +348,9 @@ mod derive_safety_helpers;
 mod endian;
 mod std_types;
 
+#[cfg(feature = "ordered-float")]
+mod ordered_float_types;
+
 #[cfg(feature = "std")]
 mod io;
 
