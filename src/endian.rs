@@ -408,6 +408,27 @@ macro_rules! impl_endian_wrapper {
 impl_endian_wrapper!(BigEndian, to_be, from_be);
 impl_endian_wrapper!(LittleEndian, to_le, from_le);
 
+// Concrete From<Endian<T>> for T impls.
+// A blanket `impl<T: EndianConvert> From<BigEndian<T>> for T` would violate the orphan
+// rule (uncovered type param before the first local type), so we generate one impl per
+// concrete primitive type instead.
+macro_rules! impl_from_endian_for_primitive {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl From<BigEndian<$ty>> for $ty {
+                #[inline]
+                fn from(v: BigEndian<$ty>) -> $ty { v.get() }
+            }
+            impl From<LittleEndian<$ty>> for $ty {
+                #[inline]
+                fn from(v: LittleEndian<$ty>) -> $ty { v.get() }
+            }
+        )+
+    };
+}
+
+impl_from_endian_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+
 #[cfg(test)]
 mod tests {
     use crate::IntoByteArray;

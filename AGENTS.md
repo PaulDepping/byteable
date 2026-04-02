@@ -15,8 +15,8 @@ This file provides guidance to AI agents when working with code in this reposito
 cargo test
 
 # Run tests for a specific test file
-cargo test --test enum_test
-cargo test --test primitive_types_test
+cargo test --test derive_enums
+cargo test --test type_impls
 
 # Run tests with tokio feature
 cargo test --features tokio
@@ -59,7 +59,6 @@ cargo run --example simple_usage
 cargo run --example file_io
 cargo run --example enum_endianness
 cargo run --example cursor_usage
-cargo run --example try_io
 ```
 
 ### Publishing
@@ -112,10 +111,10 @@ The original struct gets `From` conversions to/from the raw struct, creating a s
 
 #### Safety Validation ([src/derive_safety_helpers.rs](src/derive_safety_helpers.rs))
 
-- **`TransmuteSafe` trait** - Marks types safe for `transmute`-based conversions
+- **`PlainOldData` trait** - Marks types safe for `transmute`-based conversions
 - Automatically implemented for `u8`, `i8`, endian wrappers, and arrays thereof
-- Multi-byte primitives (`u16`, `u32`, etc.) are **not** directly `TransmuteSafe` — the derive macro auto-wraps unannotated multi-byte fields in `LittleEndian<T>`, which is `TransmuteSafe`
-- Raw structs require all fields to implement `TransmuteSafe`
+- Multi-byte primitives (`u16`, `u32`, etc.) are **not** directly `PlainOldData` — the derive macro auto-wraps unannotated multi-byte fields in `LittleEndian<T>`, which is `PlainOldData`
+- Raw structs require all fields to implement `PlainOldData`
 - This prevents unsafe usage with types like `String`, `Vec`, references, etc.
 
 #### I/O Extension Traits
@@ -157,10 +156,9 @@ The `#[derive(Byteable)]` macro handles two code paths:
 
 - `#[byteable(little_endian)]` - Wrap field in `LittleEndian<T>`
 - `#[byteable(big_endian)]` - Wrap field in `BigEndian<T>`
-- `#[byteable(transparent)]` - Use field's raw type (via `RawRepr::Raw`)
 - `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (via `TryRawRepr::Raw`)
 
-**Default endianness:** Multi-byte primitive fields (`u16`, `u32`, `u64`, `i16`, `f32`, etc.) with no endianness annotation are automatically treated as `LittleEndian<T>` in both the transmute path and the stream I/O path. Use `#[byteable(big_endian)]` to override.
+**Default endianness:** Multi-byte primitive fields (`u16`, `u32`, `u64`, `i16`, `f32`, etc.) with no endianness annotation are automatically treated as `LittleEndian<T>` in both the transmute path and the stream I/O path. Use `#[byteable(big_endian)]` to override. This is now driven by the blanket `RawRepr` impl: unannotated fields use `<FieldType as RawRepr>::Raw` as their raw type.
 
 When `try_transparent` is used, the struct implements `TryFromByteArray` instead of `FromByteArray`.
 
@@ -216,14 +214,14 @@ The safety requirements differ depending on which derive path is used.
 
 Important test files:
 
-- [tests/enum_test.rs](tests/enum_test.rs) - C-like enum derive validation
-- [tests/field_enum_test.rs](tests/field_enum_test.rs) - Field enum derive (variants with data)
-- [tests/io_struct_test.rs](tests/io_struct_test.rs) - `io_only` struct derive
-- [tests/collections_io_test.rs](tests/collections_io_test.rs) - Collection `Readable`/`Writable` impls
-- [tests/std_types_test.rs](tests/std_types_test.rs) - Standard library type support
-- [tests/primitive_types_test.rs](tests/primitive_types_test.rs) - `bool`, `char` validation
-- [tests/try_transparent_test.rs](tests/try_transparent_test.rs) - Nested enum/validated types
-- [tests/safety_validation_test.rs](tests/safety_validation_test.rs) - `TransmuteSafe` tests
+- [tests/derive_structs.rs](tests/derive_structs.rs) - Named/tuple/unit struct derive; `transparent`; visibility; safety (`PlainOldData`)
+- [tests/derive_enums.rs](tests/derive_enums.rs) - C-like enum derive (all repr types, endianness, auto-inference)
+- [tests/derive_field_enums.rs](tests/derive_field_enums.rs) - Field enum derive (variants with data)
+- [tests/try_transparent.rs](tests/try_transparent.rs) - `try_transparent` attribute (fallible nested types)
+- [tests/type_impls.rs](tests/type_impls.rs) - `ByteRepr` impls: primitives, arrays, `NonZero*`, network, time, ranges, `bool`, `char`, `u128`/`i128`
+- [tests/ordered_float.rs](tests/ordered_float.rs) - `ordered-float` crate integration
+- [tests/io_sync.rs](tests/io_sync.rs) - Sync I/O: fixed-size, value/stream, `io_only` derive, collections
+- [tests/io_async.rs](tests/io_async.rs) - Async I/O: fixed-size, value/stream, async collections
 
 ## Common Patterns
 
@@ -232,9 +230,9 @@ Important test files:
 If adding support for a new primitive type that needs validation (like `bool`, `char`):
 
 1. Implement `TryFromByteArray` instead of `FromByteArray`
-2. Add validation logic that returns `InvalidDiscriminantError` for invalid byte patterns
+2. Add validation logic that returns `DecodeError` for invalid byte patterns
 3. Implement `IntoByteArray` for infallible conversion
-4. Add test coverage in [tests/primitive_types_test.rs](tests/primitive_types_test.rs)
+4. Add test coverage in [tests/type_impls.rs](tests/type_impls.rs)
 
 ### Enum Implementation Pattern
 

@@ -1,7 +1,7 @@
 //! Byteable implementations for standard-library types: `bool`, `char`, ranges,
 //! `Duration`, `SystemTime`, and network address types.
 use crate::{
-    ByteRepr, FromByteArray, IntoByteArray, InvalidDiscriminantError, LittleEndian, TransmuteSafe,
+    ByteRepr, DecodeError, FromByteArray, IntoByteArray, LittleEndian, PlainOldData, RawRepr,
     TryFromByteArray, TryRawRepr,
 };
 use crate::{impl_byteable_via, unsafe_byteable_transmute};
@@ -16,7 +16,7 @@ use core::{
     time::Duration,
 };
 
-// PhantomData<T> is a zero-sized type with no bytes.
+// PhantomData<T> is a zero-sized type with no bytes. Raw = [u8; 0] (which is PlainOldData).
 impl<T> ByteRepr for PhantomData<T> {
     type ByteArray = [u8; 0];
 }
@@ -35,62 +35,24 @@ impl<T> FromByteArray for PhantomData<T> {
     }
 }
 
-// NonZero* types serialize identically to their inner type but deserialize fallibly,
-// since the byte pattern 0 is invalid.
-macro_rules! impl_nonzero_byteable {
-    ($($nonzero:ty: $inner:ty),+ $(,)?) => {
-        $(
-            impl ByteRepr for $nonzero {
-                type ByteArray = <$inner as ByteRepr>::ByteArray;
-            }
-
-            impl IntoByteArray for $nonzero {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    self.get().into_byte_array()
-                }
-            }
-
-            impl TryFromByteArray for $nonzero {
-                type Error = InvalidDiscriminantError;
-
-                #[inline]
-                fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                    let val = <$inner>::from_byte_array(byte_array);
-                    Self::new(val).ok_or_else(|| {
-                        InvalidDiscriminantError::new(val, ::core::any::type_name::<Self>())
-                    })
-                }
-            }
-        )+
-    };
-}
-
-impl_nonzero_byteable!(
-    NonZeroU8: u8,
-    NonZeroU16: u16,
-    NonZeroU32: u32,
-    NonZeroU64: u64,
-    NonZeroU128: u128,
-    NonZeroI8: i8,
-    NonZeroI16: i16,
-    NonZeroI32: i32,
-    NonZeroI64: i64,
-    NonZeroI128: i128,
-);
+// PhantomData<T> is a ZST with no state and all-byte-patterns valid: it is its own raw
+// representation. The blanket `impl<T: PlainOldData + From<T>> RawRepr for T` then
+// provides RawRepr<Raw = PhantomData<T>> automatically.
+unsafe impl<T> PlainOldData for PhantomData<T> {}
 
 // Generates ByteRepr, IntoByteArray, TryFromByteArray, and TryRawRepr for a type
-// that delegates to a raw wrapper type via TryRawRepr.
+// that delegates to a raw wrapper type. Uses the concrete $raw type directly to
+// avoid requiring byte-conversion bounds on TryRawRepr::Raw.
 macro_rules! impl_try_raw_byteable {
     ($type:ty, $raw:ty, $error:ty) => {
         impl ByteRepr for $type {
-            type ByteArray = <<$type as TryRawRepr>::Raw as ByteRepr>::ByteArray;
+            type ByteArray = <$raw as ByteRepr>::ByteArray;
         }
 
         impl IntoByteArray for $type {
             #[inline]
             fn into_byte_array(self) -> Self::ByteArray {
-                let raw: <Self as TryRawRepr>::Raw = self.into();
+                let raw: $raw = self.into();
                 raw.into_byte_array()
             }
         }
@@ -100,7 +62,7 @@ macro_rules! impl_try_raw_byteable {
 
             #[inline]
             fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-                let raw = <Self as TryRawRepr>::Raw::from_byte_array(byte_array);
+                let raw = <$raw>::from_byte_array(byte_array);
                 raw.try_into()
             }
         }
@@ -111,12 +73,111 @@ macro_rules! impl_try_raw_byteable {
     };
 }
 
+// NonZero* types serialize identically to their inner type but deserialize fallibly,
+// since the byte pattern 0 is invalid. All types implement TryRawRepr.
+//
+// Single-byte types (NonZeroU8, NonZeroI8): wrap in a newtype raw because std already
+// provides TryFrom<u8> for NonZeroU8 with a different error type (TryFromIntError),
+// which would conflict with the Error = DecodeError required by TryRawRepr.
+//
+// Multi-byte types: use LittleEndian<T> as the raw representation, ensuring a
+// consistent little-endian byte layout on all platforms.
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
+pub struct RawNonZeroU8(u8);
+
+unsafe impl PlainOldData for RawNonZeroU8 {}
+unsafe_byteable_transmute!(RawNonZeroU8);
+
+impl From<NonZeroU8> for RawNonZeroU8 {
+    #[inline]
+    fn from(v: NonZeroU8) -> Self {
+        Self(v.get())
+    }
+}
+
+impl TryFrom<RawNonZeroU8> for NonZeroU8 {
+    type Error = DecodeError;
+    #[inline]
+    fn try_from(raw: RawNonZeroU8) -> Result<Self, Self::Error> {
+        NonZeroU8::new(raw.0)
+            .ok_or_else(|| DecodeError::new(raw.0, ::core::any::type_name::<Self>()))
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
+pub struct RawNonZeroI8(i8);
+
+unsafe impl PlainOldData for RawNonZeroI8 {}
+unsafe_byteable_transmute!(RawNonZeroI8);
+
+impl From<NonZeroI8> for RawNonZeroI8 {
+    #[inline]
+    fn from(v: NonZeroI8) -> Self {
+        Self(v.get())
+    }
+}
+
+impl TryFrom<RawNonZeroI8> for NonZeroI8 {
+    type Error = DecodeError;
+    #[inline]
+    fn try_from(raw: RawNonZeroI8) -> Result<Self, Self::Error> {
+        NonZeroI8::new(raw.0)
+            .ok_or_else(|| DecodeError::new(raw.0, ::core::any::type_name::<Self>()))
+    }
+}
+
+impl_try_raw_byteable!(NonZeroU8, RawNonZeroU8, DecodeError);
+impl_try_raw_byteable!(NonZeroI8, RawNonZeroI8, DecodeError);
+
+// Multi-byte NonZero types use LittleEndian<T> as their raw representation directly,
+// since LittleEndian<T> is PlainOldData and there is no conflicting std TryFrom impl.
+macro_rules! impl_nonzero_multi_byte {
+    ($($nonzero:ty: $inner:ty),+ $(,)?) => {
+        $(
+            impl From<$nonzero> for LittleEndian<$inner> {
+                #[inline]
+                fn from(v: $nonzero) -> Self {
+                    v.get().into()
+                }
+            }
+
+            impl TryFrom<LittleEndian<$inner>> for $nonzero {
+                type Error = DecodeError;
+                #[inline]
+                fn try_from(raw: LittleEndian<$inner>) -> Result<Self, Self::Error> {
+                    let val = raw.get();
+                    Self::new(val)
+                        .ok_or_else(|| DecodeError::new(val, ::core::any::type_name::<Self>()))
+                }
+            }
+
+            impl_try_raw_byteable!($nonzero, LittleEndian<$inner>, DecodeError);
+        )+
+    };
+}
+
+impl_nonzero_multi_byte!(
+    NonZeroU16: u16,
+    NonZeroU32: u32,
+    NonZeroU64: u64,
+    NonZeroU128: u128,
+    NonZeroI16: i16,
+    NonZeroI32: i32,
+    NonZeroI64: i64,
+    NonZeroI128: i128,
+);
+
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct RawBool(u8);
 
-unsafe impl TransmuteSafe for RawBool {}
+unsafe impl PlainOldData for RawBool {}
 
 unsafe_byteable_transmute!(RawBool);
 
@@ -128,14 +189,14 @@ impl From<bool> for RawBool {
 }
 
 impl TryFrom<RawBool> for bool {
-    type Error = InvalidDiscriminantError;
+    type Error = DecodeError;
 
     #[inline]
     fn try_from(value: RawBool) -> Result<Self, Self::Error> {
         match value.0 {
             0 => Ok(false),
             1 => Ok(true),
-            invalid => Err(InvalidDiscriminantError::new(
+            invalid => Err(DecodeError::new(
                 invalid,
                 ::core::any::type_name::<Self>(),
             )),
@@ -148,7 +209,7 @@ impl TryFrom<RawBool> for bool {
 #[doc(hidden)]
 pub struct RawChar(LittleEndian<u32>);
 
-unsafe impl TransmuteSafe for RawChar {}
+unsafe impl PlainOldData for RawChar {}
 
 unsafe_byteable_transmute!(RawChar);
 
@@ -160,14 +221,14 @@ impl From<char> for RawChar {
 }
 
 impl TryFrom<RawChar> for char {
-    type Error = InvalidDiscriminantError;
+    type Error = DecodeError;
 
     #[inline]
     fn try_from(value: RawChar) -> Result<Self, Self::Error> {
         let num = value.0.get();
         match char::from_u32(num) {
             Some(c) => Ok(c),
-            None => Err(InvalidDiscriminantError::new(
+            None => Err(DecodeError::new(
                 num,
                 ::core::any::type_name::<Self>(),
             )),
@@ -175,8 +236,8 @@ impl TryFrom<RawChar> for char {
     }
 }
 
-impl_try_raw_byteable!(bool, RawBool, InvalidDiscriminantError);
-impl_try_raw_byteable!(char, RawChar, InvalidDiscriminantError);
+impl_try_raw_byteable!(bool, RawBool, DecodeError);
+impl_try_raw_byteable!(char, RawChar, DecodeError);
 
 macro_rules! impl_range_byteable {
     // Single-byte index types (u8, i8) — no endianness annotation needed.
@@ -492,6 +553,7 @@ impl_range_single_byteable!(little_endian; RangeToInclusive<f64>, end, f64, Rang
 pub struct RangeFullRaw;
 
 unsafe_byteable_transmute!(RangeFullRaw);
+unsafe impl PlainOldData for RangeFullRaw {}
 
 impl From<RangeFull> for RangeFullRaw {
     fn from(_: RangeFull) -> Self {
@@ -506,6 +568,10 @@ impl From<RangeFullRaw> for RangeFull {
 }
 
 impl_byteable_via!(RangeFull => RangeFullRaw);
+
+impl RawRepr for RangeFull {
+    type Raw = RangeFullRaw;
+}
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]

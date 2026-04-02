@@ -365,7 +365,7 @@ pub use byteable_derive::{Byteable, UnsafeByteableTransmute};
 pub use byte_array::FixedBytes;
 
 pub use byteable_trait::{
-    ByteRepr, DiscriminantValue, FromByteArray, IntoByteArray, InvalidDiscriminantError, RawRepr,
+    ByteRepr, DecodeError, DiscriminantValue, FromByteArray, IntoByteArray, RawRepr,
     TryFromByteArray, TryRawRepr,
 };
 
@@ -382,4 +382,4 @@ pub use async_io::{
 
 pub use endian::{BigEndian, EndianConvert, LittleEndian};
 
-pub use derive_safety_helpers::TransmuteSafe;
+pub use derive_safety_helpers::PlainOldData;

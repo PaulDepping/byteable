@@ -24,8 +24,6 @@ use syn::{Data, DeriveInput, Fields, Ident, Meta, Visibility, parse_macro_input}
 enum AttributeType {
     LittleEndian,
     BigEndian,
-    /// Use field's raw representation via `RawRepr` (infallible conversion)
-    Transparent,
     /// Use field's raw representation via `TryRawRepr` (fallible conversion)
     TryTransparent,
     /// Struct-level: skip transmute path, generate `Readable`/`Writable` via sequential field I/O
@@ -52,12 +50,12 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                 return match meta_list.tokens.to_string().as_str() {
                     "little_endian" => AttributeType::LittleEndian,
                     "big_endian" => AttributeType::BigEndian,
-                    "transparent" => AttributeType::Transparent,
+                    "transparent" => AttributeType::None,
                     "try_transparent" => AttributeType::TryTransparent,
                     "io_only" => AttributeType::IoOnly,
                     other => panic!(
                         "Unknown byteable attribute: {other}. \
-                         Valid attributes are: little_endian, big_endian, transparent, try_transparent, io_only"
+                         Valid attributes are: little_endian, big_endian, try_transparent, io_only"
                     ),
                 };
             }
@@ -66,7 +64,7 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     AttributeType::None
 }
 
-/// Generates `TransmuteSafe`, `ByteRepr`, `IntoByteArray`, and `FromByteArray`
+/// Generates `PlainOldData`, `ByteRepr`, `IntoByteArray`, and `FromByteArray`
 /// impls for a raw struct, using `transmute` for zero-cost conversion.
 fn gen_raw_struct_impls(
     raw_name: &Ident,
@@ -74,8 +72,8 @@ fn gen_raw_struct_impls(
     bc: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     quote! {
-        unsafe impl #bc::TransmuteSafe for #raw_name
-        where #(#raw_field_types: #bc::TransmuteSafe),*
+        unsafe impl #bc::PlainOldData for #raw_name
+        where #(#raw_field_types: #bc::PlainOldData),*
         {}
 
         impl #bc::ByteRepr for #raw_name {
@@ -127,8 +125,8 @@ fn gen_struct_field_write(
         AttributeType::IoOnly => {
             panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
         }
-        AttributeType::Transparent | AttributeType::TryTransparent => panic!(
-            "#[byteable(transparent)] and #[byteable(try_transparent)] are not applicable in \
+        AttributeType::TryTransparent => panic!(
+            "#[byteable(try_transparent)] is not applicable in \
              io_only mode; remove the annotation or use a plain field"
         ),
     }
@@ -428,12 +426,14 @@ pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_m
         for ty in &field_types {
             clauses
                 .predicates
-                .push(syn::parse_quote! { #ty: #bc::TransmuteSafe });
+                .push(syn::parse_quote! { #ty: #bc::PlainOldData });
         }
         Some(clauses)
     };
 
     quote! {
+        unsafe impl #impl_generics #bc::PlainOldData for #ident #type_generics #extended_where {}
+
         impl #impl_generics #bc::ByteRepr for #ident #type_generics #extended_where {
             type ByteArray = [u8; ::core::mem::size_of::<Self>()];
         }
@@ -681,8 +681,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 #[inline]
                 fn from_byte_array(_: Self::ByteArray) -> Self { #original_name }
             }
-            impl #bc::RawRepr for #original_name { type Raw = Self; }
-            unsafe impl #bc::TransmuteSafe for #original_name {}
+            unsafe impl #bc::PlainOldData for #original_name {}
         }
         .into();
     }
@@ -718,27 +717,16 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
                 quote! { .into() },
                 quote! { .get() },
             ),
-            AttributeType::Transparent => (
-                quote! { <#field_type as #bc::RawRepr>::Raw },
-                quote! { .into() },
-                quote! { .into() },
-            ),
             AttributeType::TryTransparent => (
                 quote! { <#field_type as #bc::TryRawRepr>::Raw },
                 quote! { .into() },
                 quote! { .try_into()? },
             ),
-            AttributeType::None => {
-                if is_multibyte_primitive(field_type) {
-                    (
-                        quote! { #bc::LittleEndian<#field_type> },
-                        quote! { .into() },
-                        quote! { .get() },
-                    )
-                } else {
-                    (quote! { #field_type }, quote! {}, quote! {})
-                }
-            }
+            AttributeType::None => (
+                quote! { <#field_type as #bc::RawRepr>::Raw },
+                quote! { .into() },
+                quote! { .into() },
+            ),
             AttributeType::IoOnly => panic!(
                 "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
             ),
@@ -805,7 +793,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
     let original_impls = if has_try {
         quote! {
             impl TryFrom<#raw_name> for #original_name {
-                type Error = #bc::InvalidDiscriminantError;
+                type Error = #bc::DecodeError;
                 #[inline]
                 fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                     Ok(#from_raw_body)
@@ -825,7 +813,7 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             }
 
             impl #impl_generics #bc::TryFromByteArray for #original_name #type_generics #where_clause {
-                type Error = #bc::InvalidDiscriminantError;
+                type Error = #bc::DecodeError;
                 #[inline]
                 fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
                     let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
@@ -941,11 +929,8 @@ fn handle_enum_derive(
     });
 
     let endianness = parse_byteable_attr(&attrs);
-    if matches!(
-        endianness,
-        AttributeType::Transparent | AttributeType::TryTransparent
-    ) {
-        panic!("transparent and try_transparent attributes are not supported for enums");
+    if matches!(endianness, AttributeType::TryTransparent) {
+        panic!("try_transparent attribute is not supported for enums");
     }
 
     let discriminants = compute_discriminants(&enum_data.variants);
@@ -964,7 +949,10 @@ fn handle_enum_derive(
             quote! { #bc::BigEndian<#repr_ty> },
             quote! { value.0.get() },
         ),
-        _ => (quote! { #repr_ty }, quote! { value.0 }),
+        _ => (
+            quote! { <#repr_ty as #bc::RawRepr>::Raw },
+            quote! { <#repr_ty>::from(value.0) },
+        ),
     };
 
     let raw_name = Ident::new(&format!("__byteable_raw_{}", enum_name), enum_name.span());
@@ -988,13 +976,13 @@ fn handle_enum_derive(
         }
 
         impl TryFrom<#raw_name> for #enum_name {
-            type Error = #bc::InvalidDiscriminantError;
+            type Error = #bc::DecodeError;
             #[inline]
             fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
                 let value = #raw_type_get;
                 match value {
                     #(#from_discriminant_arms)*
-                    invalid => Err(#bc::InvalidDiscriminantError::new(invalid, ::core::any::type_name::<Self>())),
+                    invalid => Err(#bc::DecodeError::new(invalid, ::core::any::type_name::<Self>())),
                 }
             }
         }
@@ -1198,8 +1186,7 @@ fn compute_discriminants(
 ///   ≤256 → `u8`, ≤65536 → `u16`, ≤2³² → `u32`, otherwise `u64`.
 /// - Explicit discriminants — if omitted, values are auto-assigned starting at `0` and
 ///   incrementing by one, following Rust's own default discriminant rules.
-/// - Endianness — required for user-supplied multi-byte reprs; auto-selected reprs default
-///   to little-endian.
+/// - Endianness — defaults to little-endian for multi-byte reprs when not explicitly annotated.
 fn handle_field_enum_derive(
     enum_name: Ident,
     generics: syn::Generics,
@@ -1210,17 +1197,12 @@ fn handle_field_enum_derive(
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
     let endianness = parse_byteable_attr(&attrs);
-    if matches!(
-        endianness,
-        AttributeType::Transparent | AttributeType::TryTransparent
-    ) {
-        panic!("transparent and try_transparent attributes are not supported for enums");
+    if matches!(endianness, AttributeType::TryTransparent) {
+        panic!("try_transparent attribute is not supported for enums");
     }
 
     // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
-    let explicit_repr = extract_repr_type(&attrs);
-    let repr_auto_selected = explicit_repr.is_none();
-    let repr_ty = explicit_repr.unwrap_or_else(|| {
+    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
         let n = enum_data.variants.len();
         let ty_str = if n <= 256 {
             "u8"
@@ -1237,20 +1219,13 @@ fn handle_field_enum_derive(
     let repr_ty_str = repr_ty.to_string();
     let is_single_byte = matches!(repr_ty_str.as_str(), "u8" | "i8");
 
-    // For multi-byte repr: auto-selected defaults to little-endian; user-specified requires explicit.
+    // For multi-byte repr with no endianness annotation: default to little-endian.
     let effective_endianness = if !is_single_byte
         && !matches!(
             endianness,
             AttributeType::LittleEndian | AttributeType::BigEndian
         ) {
-        if repr_auto_selected {
-            AttributeType::LittleEndian
-        } else {
-            panic!(
-                "Field enums with an explicit multi-byte repr type require an endianness attribute: \
-                 add #[byteable(little_endian)] or #[byteable(big_endian)]"
-            )
-        }
+        AttributeType::LittleEndian
     } else {
         endianness
     };

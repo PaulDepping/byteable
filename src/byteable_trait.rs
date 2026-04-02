@@ -5,11 +5,13 @@
 //! - [`IntoByteArray`]: Converts a value into a byte array
 //! - [`FromByteArray`]: Constructs a value from a byte array
 //! - [`TryFromByteArray`]: Fallible construction from a byte array
-//! - [`RawRepr`]: For types with a distinct raw representation
+//! - [`RawRepr`]: For types with a distinct raw representation (infallible conversion)
+//! - [`TryRawRepr`]: For types with a distinct raw representation (fallible conversion)
 //!
 //! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
 //! the crate, along with helper macros for implementing them.
 use crate::byte_array::FixedBytes;
+use crate::derive_safety_helpers::PlainOldData;
 
 /// Associates a type with its byte array representation.
 ///
@@ -217,16 +219,13 @@ impl<T: FromByteArray> TryFromByteArray for T {
     }
 }
 
-/// A trait for types that have a corresponding raw representation type.
+/// A trait for types that have a corresponding raw representation type (infallible conversion).
 ///
-/// This trait is automatically implemented by the `#[derive(Byteable)]` macro to expose
-/// the generated raw struct type. The raw type is typically a `#[repr(C, packed)]` struct
-/// with endianness wrappers and is used internally for byte conversion.
+/// This trait associates a type with its raw (transmutable) `PlainOldData` representation.
+/// The conversion from `Self` to `Raw` is always infallible, and `Raw` to `Self` is also
+/// infallible (use [`TryRawRepr`] for fallible cases like enums and validated types).
 ///
-/// This trait enables better type safety when using nested `Byteable` structs with the
-/// `#[byteable(transparent)]` attribute. Instead of storing nested structs as raw byte arrays
-/// (`[u8; N]`), the parent struct's raw type can directly reference the child struct's raw type,
-/// maintaining type information throughout the conversion process.
+/// Implemented by primitive types and structs derived with `#[derive(Byteable)]`.
 ///
 /// # Examples
 ///
@@ -241,30 +240,25 @@ impl<T: FromByteArray> TryFromByteArray for T {
 ///
 /// #[derive(Clone, Copy, Byteable)]
 /// struct Outer {
-///     #[byteable(transparent)]
-///     inner: Inner,  // Uses Inner::Raw instead of [u8; 1]
+///     inner: Inner,  // Uses <Inner as RawRepr>::Raw
+///     count: u16,    // Uses <u16 as RawRepr>::Raw = LittleEndian<u16>
 /// }
-///
-/// // Both Inner and Outer automatically implement RawRepr via derive(Byteable)
-/// // The generated raw types are properly nested and type-safe
 /// # }
 /// ```
-pub trait RawRepr: ByteRepr + From<Self::Raw> + IntoByteArray + FromByteArray {
-    /// The raw type used for byte conversion.
-    ///
-    /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
-    /// that handles the actual memory layout and byte-level operations.
-    type Raw: ByteRepr + From<Self> + IntoByteArray + FromByteArray;
+pub trait RawRepr: From<Self::Raw>
+where
+    Self::Raw: From<Self>,
+{
+    /// The raw `PlainOldData` type used for byte conversion.
+    type Raw: PlainOldData;
 }
 
 /// A trait for types that have a corresponding raw representation type with fallible conversion.
 ///
-/// This trait is similar to [`RawRepr`], but is designed for types where conversion from
-/// the raw representation might fail. This is particularly useful for enums, where not all
-/// byte patterns represent valid discriminants.
+/// Like [`RawRepr`], but the conversion from `Raw` to `Self` may fail (e.g., for enums with
+/// a finite set of valid discriminants, or validated wrapper types).
 ///
-/// This trait is automatically implemented by the `#[derive(Byteable)]` macro for enums.
-/// The raw type can be converted to the original type using `TryFrom`.
+/// The error type is fixed to [`DecodeError`] to keep generic bounds simple.
 ///
 /// # Examples
 ///
@@ -281,7 +275,6 @@ pub trait RawRepr: ByteRepr + From<Self::Raw> + IntoByteArray + FromByteArray {
 /// }
 ///
 /// // Enums automatically implement TryRawRepr
-/// // Converting enum to raw (always succeeds)
 /// let status = Status::Running;
 /// let raw: <Status as TryRawRepr>::Raw = status.into();
 ///
@@ -295,25 +288,16 @@ pub trait RawRepr: ByteRepr + From<Self::Raw> + IntoByteArray + FromByteArray {
 /// assert_eq!(from_bytes, Status::Running);
 /// # }
 /// ```
-pub trait TryRawRepr: ByteRepr + TryFrom<Self::Raw> + IntoByteArray + TryFromByteArray {
-    /// The raw type used for byte conversion.
-    ///
-    /// This is typically a `#[repr(C, packed)]` struct with endianness wrappers
-    /// that handles the actual memory layout and byte-level operations.
-    type Raw: ByteRepr + From<Self> + IntoByteArray + FromByteArray;
-}
-
-/// Blanket implementation of `TryRawRepr` for types that implement `RawRepr`.
-///
-/// Types with infallible raw conversion automatically get fallible conversion
-/// with `Infallible` as the error type (via the blanket `TryFrom` impl for types implementing `From`).
-impl<T: RawRepr> TryRawRepr for T {
-    type Raw = <T as RawRepr>::Raw;
+pub trait TryRawRepr: TryFrom<Self::Raw, Error = DecodeError>
+where
+    Self::Raw: From<Self>,
+{
+    /// The raw `PlainOldData` type used for byte conversion.
+    type Raw: PlainOldData;
 }
 
 // Implementation of Byteable for fixed-size arrays of Byteable types
 // This allows [T; N] to be Byteable if T is Byteable
-
 impl<T: ByteRepr, const SIZE: usize> ByteRepr for [T; SIZE] {
     type ByteArray = [T::ByteArray; SIZE];
 }
@@ -508,6 +492,31 @@ macro_rules! impl_byteable_primitive {
 
 impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
+// Blanket RawRepr for all PlainOldData types: Raw = Self.
+// This covers u8, i8, LittleEndian<T>, BigEndian<T>, and arrays thereof — any type
+// that is already in its "raw" transmutable form maps to itself.
+impl<T: PlainOldData + From<T>> RawRepr for T {
+    type Raw = T;
+}
+
+// RawRepr for multi-byte primitives: Raw = LittleEndian<T>
+// This auto-selects little-endian for unannotated fields in the derive macro.
+// Note: these types are NOT PlainOldData (they lack explicit endianness), so no conflict
+// with the blanket impl above.
+use crate::LittleEndian;
+
+macro_rules! impl_raw_repr_for_multibyte {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl RawRepr for $ty {
+                type Raw = LittleEndian<$ty>;
+            }
+        )+
+    };
+}
+
+impl_raw_repr_for_multibyte!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+
 /// Represents a discriminant value that can be of various integer types.
 ///
 /// This enum stores the invalid discriminant value with its original type information,
@@ -564,13 +573,15 @@ impl_discriminant_from!(
     u128 => U128, i128 => I128,
 );
 
-/// Error type for converting bytes to an enum with an invalid discriminant.
+/// Error type for converting bytes into a type with an invalid or out-of-range value.
 ///
-/// This error is returned when attempting to convert a byte array to an enum
-/// value, but the discriminant value doesn't match any valid enum variant.
+/// This error is returned when attempting to convert a byte array to a type whose
+/// value is not representable — for example, an invalid enum discriminant, a `bool`
+/// value outside `{0, 1}`, an invalid Unicode scalar for `char`, or a zero value
+/// for a `NonZero*` type.
 ///
-/// The error includes both the invalid discriminant value (with its original type)
-/// and the enum type name for better diagnostics.
+/// The error includes both the offending value (with its integer type) and the
+/// target type name for diagnostics.
 ///
 /// # Examples
 ///
@@ -597,38 +608,35 @@ impl_discriminant_from!(
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidDiscriminantError {
-    /// The invalid discriminant value that was encountered
-    pub invalid_discriminant: DiscriminantValue,
-    /// The name of the enum type that failed to match
-    pub enum_type_name: &'static str,
+pub struct DecodeError {
+    /// The invalid value that was encountered
+    pub invalid_value: DiscriminantValue,
+    /// The name of the type that failed to decode
+    pub type_name: &'static str,
 }
 
-impl InvalidDiscriminantError {
-    /// Creates a new `InvalidDiscriminantError` with the given invalid discriminant and type name.
+impl DecodeError {
+    /// Creates a new `DecodeError` with the given invalid value and type name.
     #[inline]
-    pub fn new<T: Into<DiscriminantValue>>(
-        invalid_discriminant: T,
-        enum_type_name: &'static str,
-    ) -> Self {
+    pub fn new<T: Into<DiscriminantValue>>(invalid_value: T, type_name: &'static str) -> Self {
         Self {
-            invalid_discriminant: invalid_discriminant.into(),
-            enum_type_name,
+            invalid_value: invalid_value.into(),
+            type_name,
         }
     }
 }
 
-impl core::fmt::Display for InvalidDiscriminantError {
+impl core::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "Invalid discriminant value {} for enum '{}'",
-            self.invalid_discriminant, self.enum_type_name
+            "Invalid value {} for type '{}'",
+            self.invalid_value, self.type_name
         )
     }
 }
 
-impl core::error::Error for InvalidDiscriminantError {}
+impl core::error::Error for DecodeError {}
 
 #[cfg(all(test, feature = "derive"))]
 mod tests {

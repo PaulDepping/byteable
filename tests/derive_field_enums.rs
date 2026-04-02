@@ -119,7 +119,6 @@ fn mixed_variants_roundtrip() {
 
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u16)]
-#[byteable(little_endian)]
 enum Request {
     Ping = 0x0001,
     GetValue { key: u8 } = 0x0002,

@@ -64,7 +64,7 @@ fn test_enum_invalid_discriminant_via_raw() {
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert_eq!(e.invalid_discriminant, byteable::DiscriminantValue::U8(255));
+        assert_eq!(e.invalid_value, byteable::DiscriminantValue::U8(255));
     }
 }
 
@@ -143,7 +143,7 @@ fn test_message_with_invalid_status_discriminant() {
 
     // Verify the error contains the invalid discriminant value
     if let Err(e) = result {
-        assert_eq!(e.invalid_discriminant, byteable::DiscriminantValue::U8(255));
+        assert_eq!(e.invalid_value, byteable::DiscriminantValue::U8(255));
     }
 }
 
@@ -218,7 +218,7 @@ fn test_message_invalid_discriminants() {
 
         if let Err(e) = result {
             assert_eq!(
-                e.invalid_discriminant,
+                e.invalid_value,
                 byteable::DiscriminantValue::U8(invalid)
             );
         }
@@ -302,7 +302,7 @@ mod two_try_transparent_tests {
         let result = Dual::try_from_byte_array(bytes);
         assert!(result.is_err());
         if let Err(e) = result {
-            assert_eq!(e.invalid_discriminant, DiscriminantValue::U8(255));
+            assert_eq!(e.invalid_value, DiscriminantValue::U8(255));
         }
     }
 
@@ -313,7 +313,7 @@ mod two_try_transparent_tests {
         let result = Dual::try_from_byte_array(bytes);
         assert!(result.is_err());
         if let Err(e) = result {
-            assert_eq!(e.invalid_discriminant, DiscriminantValue::U16(0xFFFF));
+            assert_eq!(e.invalid_value, DiscriminantValue::U16(0xFFFF));
         }
     }
 
@@ -386,7 +386,7 @@ mod command_packet_tests {
 
         if let Err(e) = result {
             assert_eq!(
-                e.invalid_discriminant,
+                e.invalid_value,
                 byteable::DiscriminantValue::U16(0xFFFF)
             );
         }

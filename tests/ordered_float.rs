@@ -1,7 +1,7 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{EndianConvert, FromByteArray, IntoByteArray, LittleEndian, TransmuteSafe, TryFromByteArray};
+use byteable::{EndianConvert, FromByteArray, IntoByteArray, LittleEndian, PlainOldData, TryFromByteArray};
 use ordered_float::{NotNan, OrderedFloat};
 
 // --- OrderedFloat<f32> ---
@@ -117,12 +117,12 @@ fn not_nan_f64_byte_size() {
     assert_eq!(NotNan::<f64>::BYTE_SIZE, 8);
 }
 
-// --- TransmuteSafe ---
+// --- PlainOldData ---
 
 #[test]
 fn ordered_float_transmute_safe() {
-    // Compile-time check: these types implement TransmuteSafe
-    fn assert_transmute_safe<T: TransmuteSafe>() {}
+    // Compile-time check: these types implement PlainOldData
+    fn assert_transmute_safe<T: PlainOldData>() {}
     assert_transmute_safe::<LittleEndian<OrderedFloat<f32>>>();
     assert_transmute_safe::<LittleEndian<OrderedFloat<f64>>>();
     assert_transmute_safe::<byteable::BigEndian<OrderedFloat<f32>>>();

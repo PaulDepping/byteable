@@ -39,14 +39,14 @@ Add `byteable` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-byteable = "0.25"  # Or latest version
+byteable = "0.30"  # Or latest version
 ```
 
 ### Optional Features
 
 ```toml
 [dependencies]
-byteable = { version = "0.25", features = ["derive", "tokio"] }
+byteable = { version = "0.30", features = ["derive", "tokio"] }
 ```
 
 - **`derive`** (default): Enables the `#[derive(Byteable)]` procedural macro
@@ -54,70 +54,81 @@ byteable = { version = "0.25", features = ["derive", "tokio"] }
 
 ## Quick Start
 
-### Basic File I/O Example
+### Getting Started
+
+Two serialization paths, one API. Fixed-size types use zero-copy transmute and expose `BYTE_SIZE`; dynamic types (`io_only`) serialize fields sequentially and support `Vec`, `String`, and other collections.
 
 ```rust
-use byteable::{Byteable, LittleEndian, ReadValue, WriteValue};
-use std::fs::File;
+use byteable::{Byteable, ByteRepr, FromByteArray, IntoByteArray, ReadValue, WriteValue};
+use std::io::Cursor;
 
-#[derive(Byteable, Debug, PartialEq)]
-struct Packet {
-    id: u8,
-    #[byteable(little_endian)]
-    length: u16,
-    data: [u8; 4],
+/// Fixed-size struct — zero-copy transmute, `BYTE_SIZE` known at compile time.
+#[derive(Clone, Copy, Debug, PartialEq, Byteable)]
+struct Point3D { x: f32, y: f32, z: f32 }
+
+/// Dynamic struct — contains `String`, so `io_only` generates `Readable`/`Writable`.
+#[derive(Debug, PartialEq, Byteable)]
+#[byteable(io_only)]
+struct Waypoint {
+    label: String,
+    position: Point3D,
 }
 
 fn main() -> std::io::Result<()> {
-    // Create a packet
-    let packet = Packet {
-        id: 42,
-        length: 1024.into(),
-        data: [0xDE, 0xAD, 0xBE, 0xEF],
-    };
+    // Fixed-size: direct byte array conversion — no I/O needed.
+    let p = Point3D { x: 1.0, y: 2.5, z: -0.5 };
+    let bytes: [u8; Point3D::BYTE_SIZE] = p.into_byte_array();
+    assert_eq!(p, Point3D::from_byte_array(bytes));
 
-    // Write packet to a file
-    let mut file = File::create("packet.bin")?;
-    file.write_value(&packet)?;
-    println!("Packet written to file");
+    // Both types use the same write_value / read_value API on any reader/writer.
+    let waypoints = vec![
+        Waypoint { label: "start".into(), position: Point3D { x: 0.0, y: 0.0, z: 0.0 } },
+        Waypoint { label: "end".into(),   position: Point3D { x: 5.0, y: 5.0, z: 0.0 } },
+    ];
 
-    // Read packet back from file
-    let mut file = File::open("packet.bin")?;
-    let restored: Packet = file.read_value()?;
+    let mut buf = Cursor::new(Vec::new());
+    buf.write_value(&waypoints)?;  // Vec<Waypoint> — u64 length prefix + elements
 
-    assert_eq!(packet, restored);
-    println!("Packet successfully read back: {:?}", restored);
-
+    buf.set_position(0);
+    let decoded: Vec<Waypoint> = buf.read_value()?;
+    assert_eq!(waypoints, decoded);
     Ok(())
 }
 ```
 
-### Network Protocol Example
+### Network Protocol
+
+Field enums let each message variant carry different data. The discriminant is written first, followed by the variant's fields — `Vec<u8>` and `String` are fully supported:
 
 ```rust
-use byteable::Byteable;
+use byteable::{Byteable, ReadValue, WriteValue};
+use std::io::Cursor;
 
-#[derive(Byteable, Debug, Clone, Copy)]
-struct TcpHeader {
-    #[byteable(big_endian)]
-    source_port: u16,      // Network byte order (big-endian)
-    #[byteable(big_endian)]
-    dest_port: u16,
-    #[byteable(big_endian)]
-    sequence_num: u32,
-    #[byteable(big_endian)]
-    ack_num: u32,
+#[derive(Debug, PartialEq, Byteable)]
+#[repr(u8)]
+enum Message {
+    Ping                                                                   = 0x01,
+    Subscribe   { topic: String }                                          = 0x10,
+    Publish     { topic: String, payload: Vec<u8> }                        = 0x11,
+    Error       { #[byteable(big_endian)] code: u16, description: String } = 0xFF,
 }
 
-let header = TcpHeader {
-    source_port: 80,
-    dest_port: 8080,
-    sequence_num: 12345,
-    ack_num: 67890,
-};
+fn main() -> std::io::Result<()> {
+    let messages = vec![
+        Message::Ping,
+        Message::Subscribe { topic: "sensors/temp".into() },
+        Message::Publish { topic: "sensors/temp".into(), payload: vec![0x41, 0x20, 0x00, 0x00] },
+        Message::Error { code: 403, description: "not authorized".into() },
+    ];
 
-// Convert to bytes for transmission
-let bytes = header.into_byte_array();
+    let mut buf = Cursor::new(Vec::new());
+    buf.write_value(&messages)?;
+
+    buf.set_position(0);
+    let received: Vec<Message> = buf.read_value()?;
+    assert_eq!(messages, received);
+    Ok(())
+}
 ```
 
 ### Async I/O with Tokio
@@ -213,13 +224,15 @@ use byteable::{Byteable, TryFromByteArray};
 
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
 struct Config {
+    #[byteable(try_transparent)]
     enabled: bool,
+    #[byteable(try_transparent)]
     mode: char,
     #[byteable(little_endian)]
     port: u16,
 }
 
-fn main() -> Result<(), byteable::InvalidDiscriminantError> {
+fn main() -> Result<(), byteable::DecodeError> {
     let config = Config {
         enabled: true,
         mode: 'A',
@@ -263,7 +276,7 @@ enum Status {
     Failed = 3,
 }
 
-fn main() -> Result<(), byteable::InvalidDiscriminantError> {
+fn main() -> Result<(), byteable::DecodeError> {
     let status = Status::Running;
     let bytes = status.into_byte_array();
     assert_eq!(bytes, [1]);
@@ -310,19 +323,22 @@ use std::io::Cursor;
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum Message {
-    Ping = 0,
-    Pong { id: u8 } = 1,
-    Data { length: u8, value: [u8; 4] } = 2,
+    Ping                                                                   = 0x01,
+    Subscribe   { topic: String }                                          = 0x10,
+    Publish     { topic: String, payload: Vec<u8> }                        = 0x11,
+    Error       { #[byteable(big_endian)] code: u16, description: String } = 0xFF,
 }
 
-let original = Message::Data { length: 4, value: [0xDE, 0xAD, 0xBE, 0xEF] };
+let messages = vec![
+    Message::Ping,
+    Message::Publish { topic: "sensors/temp".into(), payload: vec![0x41, 0x20, 0x00, 0x00] },
+];
 
-let mut buf = Vec::new();
-buf.write_value(&original).unwrap();
-assert_eq!(buf, [2, 4, 0xDE, 0xAD, 0xBE, 0xEF]); // discriminant + fields
+let mut buf = Cursor::new(Vec::new());
+buf.write_value(&messages).unwrap();  // Vec<Message> — length prefix + each message
 
-let decoded: Message = Cursor::new(&buf).read_value().unwrap();
-assert_eq!(decoded, original);
+let decoded: Vec<Message> = Cursor::new(buf.into_inner()).read_value().unwrap();
+assert_eq!(messages, decoded);
 ```
 
 Discriminants and fields both support endianness annotations:
@@ -384,24 +400,25 @@ use std::io::Cursor;
 
 #[derive(Byteable, Debug, PartialEq)]
 #[byteable(io_only)]
-struct Packet {
-    tag: u8,
-    payload: Vec<u8>,
-    label: String,
-    optional: Option<u8>,
+struct Record {
+    timestamp: u64,
+    level: u8,
+    message: String,
+    tags: Vec<String>,
 }
 
-let original = Packet {
-    tag: 1,
-    payload: vec![0xDE, 0xAD, 0xBE, 0xEF],
-    label: "hello".to_string(),
-    optional: Some(42),
+let original = Record {
+    timestamp: 1_700_000_000,
+    level: 1,
+    message: "disk usage above 90%".into(),
+    tags: vec!["disk".into(), "warning".into()],
 };
 
-let mut buf = Vec::new();
+let mut buf = Cursor::new(Vec::new());
 buf.write_value(&original).unwrap();
 
-let decoded: Packet = Cursor::new(&buf).read_value().unwrap();
+buf.set_position(0);
+let decoded: Record = buf.read_value().unwrap();
 assert_eq!(decoded, original);
 ```
 

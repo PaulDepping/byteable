@@ -1,6 +1,6 @@
 //! Safety helpers for validating types suitable for byte casting.
 //!
-//! This module provides the `TransmuteSafe` trait, which marks types that are safe
+//! This module provides the `PlainOldData` trait, which marks types that are safe
 //! to transmute to/from byte arrays. This trait acts as a compile-time safety mechanism
 //! to prevent UB when using the `Byteable` derive macros.
 
@@ -37,8 +37,8 @@ use crate::{BigEndian, LittleEndian};
 ///
 /// - **Single-byte primitives**: `u8`, `i8` (no endianness needed)
 /// - **Endianness wrappers**: `BigEndian<T>` and `LittleEndian<T>` for multi-byte types
-/// - **Arrays**: `[T; N]` where `T: TransmuteSafe`
-/// - **Custom structs**: Explicitly marked with `unsafe impl TransmuteSafe` (use with caution!)
+/// - **Arrays**: `[T; N]` where `T: PlainOldData`
+/// - **Custom structs**: Explicitly marked with `unsafe impl PlainOldData` (use with caution!)
 ///
 /// # Types that should NOT implement this trait
 ///
@@ -57,9 +57,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Safe types (compile successfully):
 ///
 /// ```
-/// use byteable::{TransmuteSafe, LittleEndian, BigEndian};
+/// use byteable::{PlainOldData, LittleEndian, BigEndian};
 ///
-/// fn ensure_valid<T: TransmuteSafe>() {}
+/// fn ensure_valid<T: PlainOldData>() {}
 ///
 /// // Single-byte types - no endianness needed
 /// ensure_valid::<u8>();
@@ -79,9 +79,9 @@ use crate::{BigEndian, LittleEndian};
 /// ## Unsafe types (won't compile):
 ///
 /// ```compile_fail
-/// use byteable::TransmuteSafe;
+/// use byteable::PlainOldData;
 ///
-/// fn ensure_valid<T: TransmuteSafe>() {}
+/// fn ensure_valid<T: PlainOldData>() {}
 ///
 /// // Multi-byte primitives without endianness wrapper - REJECTED
 /// ensure_valid::<u16>();      // Error: no explicit endianness
@@ -129,25 +129,25 @@ use crate::{BigEndian, LittleEndian};
 /// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be used in a `#[derive(Byteable)]` struct field",
-    label = "this type does not implement `TransmuteSafe`",
+    label = "this type does not implement `PlainOldData`",
     note = "multi-byte primitives (u16, u32, f32, etc.) must be wrapped in `BigEndian<T>` or `LittleEndian<T>`",
     note = "types with invalid bit patterns (bool, char, NonZero*) are not allowed in the transmute path",
     note = "heap-allocated types (Vec, String, Box) require `#[byteable(io_only)]` instead"
 )]
-pub unsafe trait TransmuteSafe {}
+pub unsafe trait PlainOldData: Copy {}
 
-unsafe impl TransmuteSafe for u8 {}
-unsafe impl TransmuteSafe for i8 {}
+unsafe impl PlainOldData for u8 {}
+unsafe impl PlainOldData for i8 {}
 
-macro_rules! impl_transmute_safe_for_endian {
+macro_rules! impl_pod_for_endian {
     ($($ty:ty),+ $(,)?) => {
         $(
-            unsafe impl TransmuteSafe for BigEndian<$ty> {}
-            unsafe impl TransmuteSafe for LittleEndian<$ty> {}
+            unsafe impl PlainOldData for BigEndian<$ty> {}
+            unsafe impl PlainOldData for LittleEndian<$ty> {}
         )+
     };
 }
 
-impl_transmute_safe_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+impl_pod_for_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 
-unsafe impl<T: TransmuteSafe, const SIZE: usize> TransmuteSafe for [T; SIZE] {}
+unsafe impl<T: PlainOldData, const SIZE: usize> PlainOldData for [T; SIZE] {}
