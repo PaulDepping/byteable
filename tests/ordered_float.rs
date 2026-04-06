@@ -1,8 +1,27 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{FromByteArray, IntoByteArray, PlainOldData, TryFromByteArray};
+use byteable::{Byteable, FromByteArray, IntoByteArray, PlainOldData, TryFromByteArray};
 use ordered_float::{NotNan, OrderedFloat};
+
+#[derive(Debug, Clone, Byteable, PartialEq, PartialOrd)]
+pub enum Content {
+    Null,
+    Bool(bool),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(ordered_float::OrderedFloat<f32>),
+    F64(ordered_float::OrderedFloat<f64>),
+    String(String),
+}
 
 // --- OrderedFloat<f32> ---
 

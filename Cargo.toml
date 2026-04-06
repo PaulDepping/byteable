@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.31.0"
+version = "0.31.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -18,7 +18,7 @@ ordered-float = ["dep:ordered-float"]
 [dependencies]
 byteable_derive = { version = "0.19.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
-ordered-float = { version = "4", optional = true }
+ordered-float = { version = "5", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
