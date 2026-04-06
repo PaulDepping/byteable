@@ -9,8 +9,8 @@
 //! - **Dynamic types** (`#[byteable(io_only)]`) write fields sequentially and
 //!   support `Vec<T>`, `String`, and other variable-length collections.
 
-use byteable::{ByteRepr, Byteable, FromByteArray, IntoByteArray, ReadValue, WriteValue};
-use std::io::{self, Cursor};
+use byteable::{Byteable, FromByteArray, IntoByteArray, ReadValue, ReadableError, WriteValue};
+use std::io::Cursor;
 
 // ── Fixed-size struct ─────────────────────────────────────────────────────────
 //
@@ -40,7 +40,7 @@ struct Waypoint {
     altitude_m: f32,
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), ReadableError> {
     // ── Part 1: fixed-size struct ─────────────────────────────────────────────
 
     let origin = Point3D {

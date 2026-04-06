@@ -1,191 +1,126 @@
-# `byteable_derive`
+# byteable_derive
 
-This crate provides custom `derive` macros for the [`byteable`](https://crates.io/crates/byteable) crate.
+[![Crates.io](https://img.shields.io/crates/v/byteable_derive)](https://crates.io/crates/byteable_derive)
+[![docs.rs](https://img.shields.io/docsrs/byteable_derive)](https://docs.rs/byteable_derive)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](../LICENSE)
 
-## Available Derives
+Procedural derive macro for the [`byteable`](https://crates.io/crates/byteable) crate.
 
-### `#[derive(Byteable)]`
+This crate provides the `#[derive(Byteable)]` macro. You almost certainly want to depend on
+`byteable` directly (which re-exports this macro via the `derive` feature) rather than adding
+`byteable_derive` as a direct dependency.
 
-The main derive macro that automatically implements byte conversion traits for your types. Supports:
+```toml
+[dependencies]
+byteable = "0.31"          # includes #[derive(Byteable)] by default
+```
 
-- **Structs** (named, tuple, and unit structs)
-- **Enums** (C-like enums with explicit discriminants)
-- **Endianness control** via field and type-level attributes
-- **Nested byteable types** via `transparent` and `try_transparent` attributes
+## What `#[derive(Byteable)]` generates
 
-## Struct Support
+Applying the macro to a type generates byte-serialization trait impls automatically.
+The exact traits depend on the type and attributes used:
 
-### Basic Struct
+| Type / attribute | Generated traits |
+|-----------------|-----------------|
+| Struct (default) | `RawRepr`, `FromRawRepr`/`TryFromRawRepr`, `IntoByteArray`, `FromByteArray`/`TryFromByteArray` |
+| Struct `#[byteable(io_only)]` | `Readable`, `Writable` |
+| Unit enum | `TryFromRawRepr`, `IntoByteArray`, `TryFromByteArray` |
+| Field enum | `Readable`, `Writable` |
+
+## Attributes
+
+### Struct / enum level
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
+| `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
+| `#[byteable(io_only)]` | Generate `Readable`/`Writable` instead of fixed-size traits |
+
+### Field level
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[byteable(little_endian)]` | This field uses little-endian (overrides struct-level) |
+| `#[byteable(big_endian)]` | This field uses big-endian (overrides struct-level) |
+| `#[byteable(try_transparent)]` | Field decode may fail; struct impl becomes `TryFromRawRepr` |
+
+## Examples
+
+### Fixed-size struct
 
 ```rust
-use byteable::Byteable;
+use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 
-#[derive(Byteable, Clone, Copy)]
+#[derive(Byteable)]
 struct Point {
-    x: i32,
-    y: i32,
+    x: f32,
+    y: f32,
 }
+
+let p = Point { x: 1.0, y: 2.0 };
+let bytes: [u8; 8] = p.into_byte_array();
+let p2 = Point::try_from_byte_array(bytes).unwrap();
+assert_eq!(p.x, p2.x);
 ```
 
-### Struct with Endianness
+### Endianness control
 
 ```rust
 use byteable::Byteable;
 
-#[derive(Byteable, Clone, Copy)]
-struct NetworkPacket {
-    version: u8,
-    #[byteable(big_endian)]
-    length: u16,
-    #[byteable(little_endian)]
-    checksum: u32,
-}
-```
-
-### Field Attributes
-
-- `#[byteable(big_endian)]` - Store field in big-endian byte order
-- `#[byteable(little_endian)]` - Store field in little-endian byte order
-- `#[byteable(transparent)]` - Use field's raw representation (for nested `Byteable` types)
-- `#[byteable(try_transparent)]` - Use field's raw representation with fallible conversion
-
-## Enum Support
-
-The `#[derive(Byteable)]` macro supports C-like enums with explicit discriminants.
-
-### Basic Enum
-
-```rust
-use byteable::Byteable;
-
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum Status {
-    Idle = 0,
-    Running = 1,
-    Completed = 2,
-    Failed = 3,
-}
-```
-
-### Enum with Endianness
-
-Enums support type-level endianness attributes:
-
-```rust
-use byteable::Byteable;
-
-// Little-endian (for file formats)
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u16)]
-#[byteable(little_endian)]
-enum FileType {
-    Text = 0x1000,
-    Binary = 0x2000,
-    Archive = 0x3000,
-}
-
-// Big-endian (for network protocols)
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u32)]
+#[derive(Byteable)]
 #[byteable(big_endian)]
-enum HttpStatus {
-    Ok = 200,
-    NotFound = 404,
-    InternalError = 500,
+struct NetworkHeader {
+    magic: u32,
+    #[byteable(little_endian)]  // field-level override
+    payload_len: u16,
+    version: u8,
 }
 ```
 
-### Enum Requirements
-
-When deriving `Byteable` for enums, you **must**:
-
-1. Use an explicit repr type: `#[repr(u8)]`, `#[repr(u16)]`, `#[repr(u32)]`, `#[repr(u64)]`,
-   `#[repr(i8)]`, `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`
-2. Have only unit variants (no fields)
-3. Provide explicit discriminant values for all variants
-4. Use `TryFromByteArray` for deserialization (returns `InvalidDiscriminantError` for invalid discriminants)
-
-### Type-Level Attributes for Enums
-
-- `#[byteable(big_endian)]` - Store enum discriminant in big-endian byte order
-- `#[byteable(little_endian)]` - Store enum discriminant in little-endian byte order
-- No attribute - Use native endianness
-
-### Error Handling
-
-Enums use fallible conversion because not all byte patterns represent valid enum variants:
+### Dynamic struct (`io_only`)
 
 ```rust
-use byteable::{Byteable, TryFromByteArray};
+use byteable::{Byteable, Writable, Readable};
+use byteable::io::{WriteValue, ReadValue};
 
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum Command {
-    Start = 1,
-    Stop = 2,
-}
-
-fn example() -> Result<(), byteable::InvalidDiscriminantError> {
-    // Valid conversion
-    let bytes = [1];
-    let cmd = Command::try_from_byte_array(bytes)?;
-    assert_eq!(cmd, Command::Start);
-
-    // Invalid discriminant returns error
-    let invalid = [255];
-    let result = Command::try_from_byte_array(invalid);
-    assert!(result.is_err());
-
-    Ok(())
-}
-```
-
-## Advanced Usage
-
-### Nested Structs with Enums
-
-```rust
-use byteable::Byteable;
-
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum MessageType {
-    Data = 1,
-    Control = 2,
-    Error = 3,
-}
-
-#[derive(Byteable, Clone, Copy)]
+#[derive(Byteable)]
+#[byteable(io_only)]
 struct Message {
-    #[byteable(try_transparent)]
-    msg_type: MessageType,
-    #[byteable(big_endian)]
-    sequence: u32,
-    payload: [u8; 16],
+    id: u32,
+    body: String,
+    tags: Vec<String>,
 }
 ```
 
-### Sparse Discriminants
-
-Enums with non-sequential discriminants work perfectly:
+### Unit enum
 
 ```rust
-use byteable::Byteable;
+use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 
-#[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum Priority {
-    Low = 1,
-    Medium = 5,
-    High = 10,
-    Critical = 100,
-}
+#[derive(Byteable, Debug, PartialEq)]
+enum Color { Red, Green, Blue }
 
-// Only defined discriminants (1, 5, 10, 100) are valid
-// All other values return errors during conversion
+// Auto-selected repr: u8 (3 variants fits in 1 byte)
+assert_eq!(Color::BYTE_SIZE, 1);
+let bytes = Color::Green.into_byte_array();
+assert_eq!(Color::try_from_byte_array(bytes).unwrap(), Color::Green);
 ```
 
-## See Also
+### Field enum
 
-For comprehensive documentation and examples, see the main [`byteable` crate documentation](https://docs.rs/byteable).
+```rust
+use byteable::{Byteable, Readable, Writable};
+use byteable::io::{WriteValue, ReadValue};
+
+#[derive(Byteable, Debug, PartialEq)]
+enum Shape {
+    Circle { radius: f32 },
+    Rect   { width: f32, height: f32 },
+}
+```
+
+## License
+
+MIT — see [LICENSE](../LICENSE).

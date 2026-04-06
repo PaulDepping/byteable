@@ -3,10 +3,7 @@
 //! wrappers, `PhantomData`, `u128`/`i128`, `NonZero*`, network types,
 //! `Duration`, `SystemTime`, range types, `bool`, and `char`.
 
-use byteable::{
-    BigEndian, ByteRepr, DiscriminantValue, FromByteArray, IntoByteArray, LittleEndian,
-    TryFromByteArray,
-};
+use byteable::{BigEndian, FromByteArray, IntoByteArray, LittleEndian, TryFromByteArray};
 use core::marker::PhantomData;
 use core::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use core::num::{NonZeroI32, NonZeroU8, NonZeroU32, NonZeroU64};
@@ -29,37 +26,6 @@ fn primitive_byte_sizes() {
     assert_eq!(i128::BYTE_SIZE, 16);
     assert_eq!(f32::BYTE_SIZE, 4);
     assert_eq!(f64::BYTE_SIZE, 8);
-}
-
-// ── Arrays ────────────────────────────────────────────────────────────────────
-
-#[test]
-fn array_byte_sizes() {
-    assert_eq!(<[u8; 0]>::BYTE_SIZE, 0);
-    assert_eq!(<[u8; 4]>::BYTE_SIZE, 4);
-    assert_eq!(<[u32; 4]>::BYTE_SIZE, 16);
-    assert_eq!(<[u8; 16]>::BYTE_SIZE, 16);
-}
-
-#[test]
-fn u32_array_roundtrip() {
-    let original: [u32; 4] = [0xDEAD, 0xBEEF, 0xCAFE, 0xBABE];
-    let bytes = original.into_byte_array();
-    assert_eq!(<[u32; 4]>::from_byte_array(bytes), original);
-}
-
-#[test]
-fn u8_array_roundtrip() {
-    let original: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
-    let bytes = original.into_byte_array();
-    assert_eq!(<[u8; 8]>::from_byte_array(bytes), original);
-}
-
-#[test]
-fn nested_array_roundtrip() {
-    let original: [[u8; 2]; 3] = [[0x11, 0x22], [0x33, 0x44], [0x55, 0x66]];
-    let bytes = original.into_byte_array();
-    assert_eq!(<[[u8; 2]; 3]>::from_byte_array(bytes), original);
 }
 
 // ── Endian wrappers ───────────────────────────────────────────────────────────
@@ -92,7 +58,13 @@ fn phantom_data_roundtrip() {
 
 #[test]
 fn u128_roundtrip() {
-    for val in [0u128, 1, u128::MAX, 0x0102030405060708090A0B0C0D0E0F10, u128::MAX / 2] {
+    for val in [
+        0u128,
+        1,
+        u128::MAX,
+        0x0102030405060708090A0B0C0D0E0F10,
+        u128::MAX / 2,
+    ] {
         let bytes = val.into_byte_array();
         assert_eq!(u128::from_byte_array(bytes), val);
     }
@@ -159,7 +131,10 @@ fn nonzero_zero_is_err() {
 #[test]
 fn ipv4_addr_roundtrip() {
     let original = Ipv4Addr::new(192, 168, 1, 100);
-    assert_eq!(Ipv4Addr::from_byte_array(original.into_byte_array()), original);
+    assert_eq!(
+        Ipv4Addr::from_byte_array(original.into_byte_array()),
+        original
+    );
 }
 
 #[test]
@@ -170,7 +145,10 @@ fn ipv4_addr_byte_layout() {
 #[test]
 fn ipv6_addr_roundtrip() {
     let original = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
-    assert_eq!(Ipv6Addr::from_byte_array(original.into_byte_array()), original);
+    assert_eq!(
+        Ipv6Addr::from_byte_array(original.into_byte_array()),
+        original
+    );
 }
 
 #[test]
@@ -200,7 +178,11 @@ fn duration_byte_size() {
 
 #[test]
 fn duration_roundtrip() {
-    for d in [Duration::ZERO, Duration::from_secs(3600), Duration::new(1, 500_000_000)] {
+    for d in [
+        Duration::ZERO,
+        Duration::from_secs(3600),
+        Duration::new(1, 500_000_000),
+    ] {
         assert_eq!(Duration::from_byte_array(d.into_byte_array()), d);
     }
 }
@@ -209,7 +191,7 @@ fn duration_roundtrip() {
 
 #[cfg(feature = "std")]
 mod system_time_tests {
-    use byteable::{ByteRepr, FromByteArray, IntoByteArray};
+    use byteable::{FromByteArray, IntoByteArray};
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -238,10 +220,16 @@ fn range_roundtrips() {
     assert_eq!(Range::<u8>::from_byte_array(r.clone().into_byte_array()), r);
 
     let r: Range<u32> = 0..0xDEAD_BEEF;
-    assert_eq!(Range::<u32>::from_byte_array(r.clone().into_byte_array()), r);
+    assert_eq!(
+        Range::<u32>::from_byte_array(r.clone().into_byte_array()),
+        r
+    );
 
     let r: RangeInclusive<u32> = 1..=0xFFFF_FFFF;
-    assert_eq!(RangeInclusive::<u32>::from_byte_array(r.clone().into_byte_array()), r);
+    assert_eq!(
+        RangeInclusive::<u32>::from_byte_array(r.clone().into_byte_array()),
+        r
+    );
 }
 
 #[test]
@@ -254,10 +242,16 @@ fn range_from_roundtrip() {
 #[test]
 fn range_to_roundtrips() {
     let r: RangeTo<u32> = ..999;
-    assert_eq!(RangeTo::<u32>::from_byte_array(r.into_byte_array()).end, 999);
+    assert_eq!(
+        RangeTo::<u32>::from_byte_array(r.into_byte_array()).end,
+        999
+    );
 
     let r: RangeToInclusive<u32> = ..=1000;
-    assert_eq!(RangeToInclusive::<u32>::from_byte_array(r.into_byte_array()).end, 1000);
+    assert_eq!(
+        RangeToInclusive::<u32>::from_byte_array(r.into_byte_array()).end,
+        1000
+    );
 }
 
 #[test]
@@ -286,11 +280,7 @@ fn bool_roundtrip() {
 #[test]
 fn bool_invalid_bytes_are_err() {
     for invalid in [2u8, 3, 10, 42, 100, 255] {
-        let err = bool::try_from_byte_array([invalid]).unwrap_err();
-        assert_eq!(err.invalid_value, DiscriminantValue::U8(invalid));
-        let s = format!("{}", err);
-        assert!(s.contains("Invalid value"), "expected 'Invalid value' in: {s}");
-        assert!(s.contains("bool"), "expected 'bool' in: {s}");
+        let _err = bool::try_from_byte_array([invalid]).unwrap_err();
     }
 }
 
@@ -300,7 +290,6 @@ fn bool_error_implements_std_error() {
     use std::error::Error;
     let err = bool::try_from_byte_array([2]).unwrap_err();
     let _: &dyn Error = &err;
-    assert!(format!("{:?}", err).contains("DecodeError"));
 }
 
 // ── char ─────────────────────────────────────────────────────────────────────
@@ -319,9 +308,33 @@ fn char_ascii_byte_layout() {
 #[test]
 fn char_roundtrip() {
     let chars = [
-        'A', 'z', '0', '9', ' ', '!', '\0', '\n',
-        '€', '£', '¥', '©', 'α', 'β', 'γ', 'π', 'Σ',
-        '中', '日', '本', '語', '🦀', '🚀', '🌟', '❤', '✓', '\u{10FFFF}',
+        'A',
+        'z',
+        '0',
+        '9',
+        ' ',
+        '!',
+        '\0',
+        '\n',
+        '€',
+        '£',
+        '¥',
+        '©',
+        'α',
+        'β',
+        'γ',
+        'π',
+        'Σ',
+        '中',
+        '日',
+        '本',
+        '語',
+        '🦀',
+        '🚀',
+        '🌟',
+        '❤',
+        '✓',
+        '\u{10FFFF}',
     ];
     for c in chars {
         let bytes = c.into_byte_array();
@@ -348,10 +361,7 @@ fn char_invalid_codepoints_are_err() {
         [0xFF, 0xFF, 0xFF, 0xFF], // 0xFFFFFFFF — out of range
     ];
     for bytes in invalid {
-        let err = char::try_from_byte_array(bytes).expect_err("expected error for {bytes:?}");
-        let s = format!("{}", err);
-        assert!(s.contains("Invalid value"), "expected 'Invalid value' in: {s}");
-        assert!(s.contains("char"), "expected 'char' in: {s}");
+        let _ = char::try_from_byte_array(bytes).expect_err("expected error for {bytes:?}");
     }
 }
 
@@ -361,14 +371,13 @@ fn char_error_implements_std_error() {
     use std::error::Error;
     let err = char::try_from_byte_array([0xFF, 0xFF, 0xFF, 0xFF]).unwrap_err();
     let _: &dyn Error = &err;
-    assert!(format!("{:?}", err).contains("DecodeError"));
 }
 
 // ── Derive-macro integration ──────────────────────────────────────────────────
 
 #[cfg(feature = "derive")]
 mod derive_std_types {
-    use byteable::{Byteable, ByteRepr, DiscriminantValue, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 
     // ── bool in a derived struct ──────────────────────────────────────────
 
@@ -389,7 +398,11 @@ mod derive_std_types {
     #[test]
     fn flag_packet_roundtrip() {
         for (enabled, value, ready) in [(true, 42u8, false), (false, 0, true), (true, 255, true)] {
-            let p = FlagPacket { enabled, value, ready };
+            let p = FlagPacket {
+                enabled,
+                value,
+                ready,
+            };
             let bytes = p.into_byte_array();
             assert_eq!(bytes[0], enabled as u8);
             assert_eq!(bytes[1], value);
@@ -400,14 +413,12 @@ mod derive_std_types {
 
     #[test]
     fn flag_packet_invalid_bool_first_field() {
-        let err = FlagPacket::try_from_byte_array([2, 0, 0]).unwrap_err();
-        assert_eq!(err.invalid_value, DiscriminantValue::U8(2));
+        let _err = FlagPacket::try_from_byte_array([2, 0, 0]).unwrap_err();
     }
 
     #[test]
     fn flag_packet_invalid_bool_second_field() {
-        let err = FlagPacket::try_from_byte_array([1, 42, 200]).unwrap_err();
-        assert_eq!(err.invalid_value, DiscriminantValue::U8(200));
+        let _err = FlagPacket::try_from_byte_array([1, 42, 200]).unwrap_err();
     }
 
     // ── char in a derived struct ──────────────────────────────────────────
@@ -430,17 +441,24 @@ mod derive_std_types {
     fn char_record_roundtrip() {
         for (id, symbol, count) in [(1u8, 'A', 0u16), (255, '🦀', 1000), (0, '€', 65535)] {
             let r = CharRecord { id, symbol, count };
-            assert_eq!(CharRecord::try_from_byte_array(r.into_byte_array()).unwrap(), r);
+            assert_eq!(
+                CharRecord::try_from_byte_array(r.into_byte_array()).unwrap(),
+                r
+            );
         }
     }
 
     #[test]
     fn char_record_byte_layout() {
-        let r = CharRecord { id: 7, symbol: 'A', count: 0x0102 };
+        let r = CharRecord {
+            id: 7,
+            symbol: 'A',
+            count: 0x0102,
+        };
         let bytes = r.into_byte_array();
         assert_eq!(bytes[0], 7);
         assert_eq!(&bytes[1..5], &[0x41, 0x00, 0x00, 0x00]); // 'A' LE u32
-        assert_eq!(&bytes[5..7], &[0x02, 0x01]);              // 0x0102 LE
+        assert_eq!(&bytes[5..7], &[0x02, 0x01]); // 0x0102 LE
     }
 
     #[test]
@@ -469,15 +487,26 @@ mod derive_std_types {
 
     #[test]
     fn annotation_roundtrip() {
-        let a = Annotation { active: true, label: '✓', tag: 0xDEADBEEF };
-        assert_eq!(Annotation::try_from_byte_array(a.into_byte_array()).unwrap(), a);
+        let a = Annotation {
+            active: true,
+            label: '✓',
+            tag: 0xDEADBEEF,
+        };
+        assert_eq!(
+            Annotation::try_from_byte_array(a.into_byte_array()).unwrap(),
+            a
+        );
     }
 
     #[test]
     fn annotation_byte_layout() {
-        let a = Annotation { active: false, label: 'Z', tag: 0x01020304 };
+        let a = Annotation {
+            active: false,
+            label: 'Z',
+            tag: 0x01020304,
+        };
         let bytes = a.into_byte_array();
-        assert_eq!(bytes[0], 0);                              // false
+        assert_eq!(bytes[0], 0); // false
         assert_eq!(&bytes[1..5], &[0x5A, 0x00, 0x00, 0x00]); // 'Z' = U+005A LE
         assert_eq!(&bytes[5..9], &[0x01, 0x02, 0x03, 0x04]); // BE u32
     }

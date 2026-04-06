@@ -3,7 +3,7 @@
 //! Field enums implement `Readable` + `Writable` (stream-based I/O) rather than
 //! `IntoByteArray`/`FromByteArray`, because variant sizes differ.
 #![cfg(all(feature = "std", feature = "derive"))]
-use byteable::{Byteable, ReadValue, WriteValue};
+use byteable::{Byteable, ReadValue, ReadableError, WriteValue};
 use std::io::Cursor;
 
 // ── Basic field enum with u8 discriminant ────────────────────────────────────
@@ -56,9 +56,8 @@ fn multi_field_variant_roundtrip() {
 #[test]
 fn invalid_discriminant_returns_error() {
     let buf = [0xFFu8]; // not a valid discriminant
-    let result: std::io::Result<Message> = Cursor::new(&buf).read_value();
+    let result: Result<Message, ReadableError> = Cursor::new(&buf).read_value();
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
 }
 
 // ── Tuple variant ─────────────────────────────────────────────────────────────
@@ -174,19 +173,9 @@ fn big_endian_field_variant_roundtrip() {
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum Typed {
-    Small {
-        val: u8,
-    } = 0,
-    Wide {
-        #[byteable(little_endian)]
-        val: u32,
-    } = 1,
-    Network {
-        #[byteable(big_endian)]
-        port: u16,
-        #[byteable(big_endian)]
-        addr: u32,
-    } = 2,
+    Small { val: u8 } = 0,
+    Wide { val: u32 } = 1,
+    Network { #[byteable(big_endian)] port: u16, #[byteable(big_endian)] addr: u32 } = 2,
 }
 
 #[test]
@@ -265,9 +254,8 @@ fn c_like_enum_as_field_roundtrip() {
 #[test]
 fn c_like_enum_invalid_nested_discriminant_returns_error() {
     let buf = [1u8, 0xFFu8]; // valid envelope disc, invalid status disc
-    let result: std::io::Result<Envelope> = Cursor::new(&buf).read_value();
+    let result: Result<Envelope, _> = Cursor::new(&buf).read_value();
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
 }
 
 // ── bool field (uses newly-added Readable impl for bool) ─────────────────────

@@ -16,7 +16,7 @@
 //!   ...
 //! ```
 
-use byteable::{ByteRepr, Byteable, ReadValue, WriteValue};
+use byteable::{Byteable, IntoByteArray, ReadValue, ReadableError, WriteValue};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
@@ -68,7 +68,7 @@ fn write_records(path: &Path, records: &[Record]) -> io::Result<()> {
     Ok(())
 }
 
-fn read_records(path: &Path) -> io::Result<(FileHeader, Vec<Record>)> {
+fn read_records(path: &Path) -> Result<(FileHeader, Vec<Record>), ReadableError> {
     let mut file = BufReader::new(File::open(path)?);
 
     let header: FileHeader = file.read_value()?;
@@ -86,7 +86,7 @@ fn read_records(path: &Path) -> io::Result<(FileHeader, Vec<Record>)> {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), ReadableError> {
     let records = vec![
         Record {
             timestamp: 1_700_000_000,

@@ -15,8 +15,8 @@
 //!   Error        →  [0xFF] [u16 BE code] [u64 desc_len] [desc bytes]
 //! ```
 
-use byteable::{Byteable, ReadValue, WriteValue};
-use std::io::{self, Cursor};
+use byteable::{Byteable, ReadValue, ReadableError, WriteValue};
+use std::io::Cursor;
 
 /// Messages exchanged between client and broker.
 #[derive(Debug, PartialEq, Byteable)]
@@ -38,7 +38,7 @@ enum Message {
     } = 0xFF,
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), ReadableError> {
     let outgoing = vec![
         Message::Ping,
         Message::Subscribe {

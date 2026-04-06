@@ -1,753 +1,679 @@
-//! Core traits for byte-oriented serialization and deserialization.
-//!
-//! This module contains the fundamental traits for converting types to and from byte arrays:
-//! - [`ByteRepr`]: Associates a type with its byte array representation
-//! - [`IntoByteArray`]: Converts a value into a byte array
-//! - [`FromByteArray`]: Constructs a value from a byte array
-//! - [`TryFromByteArray`]: Fallible construction from a byte array
-//! - [`RawRepr`]: For types with a distinct raw representation (infallible conversion)
-//! - [`TryRawRepr`]: For types with a distinct raw representation (fallible conversion)
-//!
-//! These traits provide the foundation for zero-overhead, zero-copy serialization throughout
-//! the crate, along with helper macros for implementing them.
-use crate::byte_array::FixedBytes;
-use crate::derive_safety_helpers::PlainOldData;
+/// Marker trait for types that can be safely transmuted to and from raw bytes.
+///
+/// A type may implement `PlainOldData` only when **all** of the following hold:
+///
+/// - It has no padding bytes (i.e. every byte in `size_of::<Self>()` is part of a field).
+/// - Every possible bit pattern is a valid value (no invalid states, no pointer indirection).
+/// - It is `Copy` and `Sized`.
+///
+/// These invariants are the precondition for the safe use of `transmute` in
+/// [`IntoByteArray`] and [`FromByteArray`], and for reinterpreting the type as a
+/// `&[u8]` slice via [`as_bytes`](PlainOldData::as_bytes).
+///
+/// Implemented for: `u8`, `i8`, `u16`, `u32`, `u64`, `u128`, `i16`, `i32`, `i64`, `i128`,
+/// `f32`, `f64`, [`BigEndian<T>`], [`LittleEndian<T>`], and fixed-size arrays `[T; N]` where
+/// `T: PlainOldData`.
+///
+/// # Safety
+///
+/// The implementor must guarantee the invariants above. Violating them causes
+/// undefined behaviour in the `transmute`-based paths.
+pub unsafe trait PlainOldData: Copy + Sized {
+    /// The number of bytes this type occupies in memory, equal to `size_of::<Self>()`.
+    const BYTE_SIZE: usize = core::mem::size_of::<Self>();
 
-/// Associates a type with its byte array representation.
-///
-/// This trait defines the relationship between a Rust type and its corresponding byte array type.
-/// It serves as the foundation for byte-oriented serialization, providing the necessary type
-/// information for conversions.
-///
-/// # Associated Types
-///
-/// - `ByteArray`: The type of the byte array representation. Usually `[u8; N]` where `N`
-///   is the size of the type in bytes. This must implement the [`FixedBytes`] trait.
-///
-/// # Associated Constants
-///
-/// - `BYTE_SIZE`: The size of the type in bytes. This is automatically derived from
-///   `ByteArray::BYTE_SIZE`.
-///
-/// # Usage
-///
-/// This trait is typically not implemented directly. Instead, implement the higher-level traits
-/// [`IntoByteArray`] and [`FromByteArray`], which require `ByteRepr` as a supertrait,
-/// or use the `#[derive(Byteable)]` macro which implements all necessary traits automatically.
-///
-/// # Examples
-///
-/// ```
-/// use byteable::{ByteRepr, IntoByteArray, FromByteArray};
-///
-/// // Primitive types implement ByteRepr
-/// assert_eq!(u32::BYTE_SIZE, 4);
-/// assert_eq!(u64::BYTE_SIZE, 8);
-///
-/// // Arrays also implement it
-/// assert_eq!(<[u16; 3]>::BYTE_SIZE, 6);
-/// ```
-///
-/// ## With custom types using derive
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, ByteRepr};
-///
-/// #[derive(Byteable, Clone, Copy)]
-/// struct Point {
-///     x: u8,
-///     y: u8,
-/// }
-///
-/// // ByteRepr is automatically implemented
-/// assert_eq!(Point::BYTE_SIZE, 2);
-/// # }
-/// ```
-pub trait ByteRepr {
-    type ByteArray: FixedBytes;
-    const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
+    /// Returns a zero-initialized value of this type.
+    ///
+    /// Because every bit pattern is valid (by the `PlainOldData` contract), all-zeros is
+    /// guaranteed to be a safe value.
+    #[inline]
+    fn zeroed() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+
+    /// Returns a mutable view of this value as a byte slice.
+    ///
+    /// The returned slice has length [`BYTE_SIZE`](PlainOldData::BYTE_SIZE).
+    ///
+    /// # Safety
+    ///
+    /// Safe to call because `PlainOldData` guarantees no padding and all bit patterns valid,
+    /// so writing arbitrary bytes through the returned slice cannot produce an invalid value.
+    #[inline]
+    fn as_bytes_mut(&mut self) -> &mut [u8] {
+        // SAFETY: PlainOldData guarantees T has no padding and all bit patterns are valid.
+        // The slice length equals the total byte size of the array.
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                core::ptr::from_mut(self) as *mut u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
+
+    /// Returns a read-only view of this value as a byte slice.
+    ///
+    /// The returned slice has length [`BYTE_SIZE`](PlainOldData::BYTE_SIZE).
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        // SAFETY: Same reasoning as as_bytes_mut, but for shared reference.
+        unsafe {
+            core::slice::from_raw_parts(
+                core::ptr::from_ref(self) as *const u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
 }
 
-/// Converts a value into its byte array representation.
+unsafe impl<T: PlainOldData, const N: usize> PlainOldData for [T; N] {}
+
+/// Marker trait for types that are fixed-size byte arrays.
 ///
-/// This trait provides the ability to transform a Rust value into a fixed-size byte array,
-/// enabling zero-overhead serialization. This is particularly useful for:
-/// - Binary file I/O
-/// - Network protocols
-/// - Low-level system programming
-/// - Memory-mapped files
-/// - Interfacing with C libraries
+/// Currently only implemented for `[u8; N]`. It is used as the associated `ByteArray` type
+/// in [`IntoByteArray`] to represent the serialized form of a value.
 ///
-/// # Implementations
+/// # Safety
 ///
-/// This trait is implemented for:
-/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
-/// - `bool` and `char` (with validation on deserialization)
-/// - Fixed-size arrays of types implementing `IntoByteArray`
-/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
-/// - Custom types via `#[derive(Byteable)]`
+/// The implementor must be a plain byte array with `BYTE_SIZE` equal to its actual size.
+pub unsafe trait ByteArray: Copy {
+    /// The number of bytes in this array.
+    const BYTE_SIZE: usize;
+}
+unsafe impl<const N: usize> ByteArray for [u8; N] {
+    const BYTE_SIZE: usize = N;
+}
+
+/// Conversion from a value into its fixed-size byte representation.
+///
+/// Implementing this trait (together with [`TryFromByteArray`] or [`FromByteArray`]) enables
+/// zero-copy, allocation-free serialization for types whose wire size is known at compile time.
+///
+/// [`BYTE_SIZE`](IntoByteArray::BYTE_SIZE) is a compile-time constant equal to the number of
+/// bytes produced by [`into_byte_array`](IntoByteArray::into_byte_array).
 ///
 /// # Examples
 ///
-/// ## With primitive types
-///
-/// ```
-/// use byteable::IntoByteArray;
-///
-/// let value: u32 = 0x12345678;
-/// let bytes = value.into_byte_array();
-///
-/// // On little-endian systems
-/// #[cfg(target_endian = "little")]
-/// assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
-/// ```
-///
-/// ## With custom types
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
+/// ```rust
 /// use byteable::{Byteable, IntoByteArray};
 ///
-/// #[derive(Byteable, Clone, Copy)]
-/// struct Color {
-///     r: u8,
-///     g: u8,
-///     b: u8,
-///     a: u8,
+/// #[derive(Byteable)]
+/// struct Pair {
+///     a: u16,
+///     b: u16,
 /// }
 ///
-/// let color = Color { r: 255, g: 128, b: 64, a: 255 };
-/// let bytes = color.into_byte_array();
-/// assert_eq!(bytes, [255, 128, 64, 255]);
-/// # }
+/// let p = Pair { a: 1, b: 2 };
+/// assert_eq!(Pair::BYTE_SIZE, 4);
+/// let bytes: [u8; 4] = p.into_byte_array();
 /// ```
-pub trait IntoByteArray: ByteRepr {
-    /// Converts `self` into its byte array representation.
-    ///
-    /// This method consumes the value and returns its byte representation.
-    fn into_byte_array(self) -> Self::ByteArray;
+pub trait IntoByteArray: Sized {
+    /// The fixed-size byte array type that this value serializes to (always `[u8; N]`).
+    type ByteArray: ByteArray;
+
+    /// Compile-time byte size of the serialized form.
+    const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
+
+    /// Serialize this value into a fixed-size byte array.
+    fn into_byte_array(&self) -> Self::ByteArray;
 }
 
-/// Constructs a value from its byte array representation.
+/// Infallible conversion from a fixed-size byte array back into a value.
 ///
-/// This trait provides the ability to reconstruct a Rust value from a fixed-size byte array,
-/// enabling zero-overhead deserialization. This is the inverse operation of [`IntoByteArray`].
+/// This is the infallible counterpart to [`TryFromByteArray`]. Implement this when
+/// decoding cannot fail (i.e. every possible byte array is a valid value).
 ///
-/// # Implementations
-///
-/// This trait is implemented for:
-/// - All primitive numeric types (`u8`, `i32`, `f64`, etc.)
-/// - `bool` and `char` (via `TryFromByteArray` with validation)
-/// - Fixed-size arrays of types implementing `FromByteArray`
-/// - `BigEndian<T>` and `LittleEndian<T>` wrappers
-/// - Custom types via `#[derive(Byteable)]`
-///
-/// # Examples
-///
-/// ## With primitive types
-///
-/// ```
-/// use byteable::FromByteArray;
-///
-/// let bytes = [0x78, 0x56, 0x34, 0x12];
-///
-/// // On little-endian systems
-/// #[cfg(target_endian = "little")]
-/// {
-///     let value = u32::from_byte_array(bytes);
-///     assert_eq!(value, 0x12345678);
-/// }
-/// ```
-///
-/// ## With custom types
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, FromByteArray};
-///
-/// #[derive(Byteable, Debug, PartialEq, Clone, Copy)]
-/// struct Color {
-///     r: u8,
-///     g: u8,
-///     b: u8,
-///     a: u8,
-/// }
-///
-/// let bytes = [255_u8, 128, 64, 255];
-/// let color = Color::from_byte_array(bytes);
-/// assert_eq!(color, Color { r: 255, g: 128, b: 64, a: 255 });
-/// # }
-/// ```
-pub trait FromByteArray: ByteRepr {
-    /// Constructs a value from its byte array representation.
-    ///
-    /// This method consumes the byte array and returns the reconstructed value.
+/// A blanket impl automatically provides [`TryFromByteArray`] for every type that
+/// implements `FromByteArray`.
+pub trait FromByteArray: IntoByteArray {
+    /// Deserialize a value from a fixed-size byte array. Infallible.
     fn from_byte_array(byte_array: Self::ByteArray) -> Self;
 }
 
-/// Attempts to construct a value from its byte array representation, potentially failing.
+/// Fallible conversion from a fixed-size byte array back into a value.
 ///
-/// This trait provides fallible construction from byte arrays, useful for types that may need
-/// validation or have constraints on valid byte patterns. Types that implement [`FromByteArray`]
-/// automatically implement this trait with `Error = Infallible`.
+/// Use this when decoding can fail (e.g. `bool`, `char`, `NonZero<T>`). Returns
+/// [`DecodeError`] on failure.
 ///
-/// # Examples
+/// For types that implement [`FromByteArray`], a blanket impl provides `TryFromByteArray`
+/// automatically by wrapping the infallible conversion in `Ok(...)`.
 ///
-/// ```
-/// use byteable::{FromByteArray, TryFromByteArray};
+/// # Errors
 ///
-/// // Types that implement FromByteArray automatically get TryFromByteArray
-/// let bytes = [42, 0, 0, 0];
-/// let value = u32::try_from_byte_array(bytes).unwrap();
-/// assert_eq!(value, u32::from_byte_array(bytes));
-/// ```
-pub trait TryFromByteArray: ByteRepr + Sized {
-    /// The type returned in the event of a conversion error.
-    type Error;
-
-    /// Attempts to construct a value from its byte array representation.
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error>;
+/// Returns [`DecodeError`] if the byte array does not represent a valid value of `Self`.
+pub trait TryFromByteArray: IntoByteArray {
+    /// Attempt to deserialize a value from a fixed-size byte array.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError`] if the bytes are not a valid encoding of `Self`.
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, DecodeError>;
 }
 
 impl<T: FromByteArray> TryFromByteArray for T {
-    type Error = core::convert::Infallible;
-
-    #[inline]
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
+    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, DecodeError> {
         Ok(Self::from_byte_array(byte_array))
     }
 }
 
-/// A trait for types that have a corresponding raw representation type (infallible conversion).
-///
-/// This trait associates a type with its raw (transmutable) `PlainOldData` representation.
-/// The conversion from `Self` to `Raw` is always infallible, and `Raw` to `Self` is also
-/// infallible (use [`TryRawRepr`] for fallible cases like enums and validated types).
-///
-/// Implemented by primitive types and structs derived with `#[derive(Byteable)]`.
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, RawRepr};
-///
-/// #[derive(Clone, Copy, Byteable)]
-/// struct Inner {
-///     value: u8,
-/// }
-///
-/// #[derive(Clone, Copy, Byteable)]
-/// struct Outer {
-///     inner: Inner,  // Uses <Inner as RawRepr>::Raw
-///     count: u16,    // Uses <u16 as RawRepr>::Raw = LittleEndian<u16>
-/// }
-/// # }
-/// ```
-pub trait RawRepr: From<Self::Raw>
-where
-    Self::Raw: From<Self>,
-{
-    /// The raw `PlainOldData` type used for byte conversion.
-    type Raw: PlainOldData;
-}
-
-/// A trait for types that have a corresponding raw representation type with fallible conversion.
-///
-/// Like [`RawRepr`], but the conversion from `Raw` to `Self` may fail (e.g., for enums with
-/// a finite set of valid discriminants, or validated wrapper types).
-///
-/// The error type is fixed to [`DecodeError`] to keep generic bounds simple.
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, TryRawRepr, TryFromByteArray, IntoByteArray};
-///
-/// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-/// #[repr(u8)]
-/// enum Status {
-///     Idle = 0,
-///     Running = 1,
-///     Completed = 2,
-/// }
-///
-/// // Enums automatically implement TryRawRepr
-/// let status = Status::Running;
-/// let raw: <Status as TryRawRepr>::Raw = status.into();
-///
-/// // Converting raw back to enum (might fail for invalid discriminants)
-/// let restored: Status = Status::try_from(raw).unwrap();
-/// assert_eq!(restored, Status::Running);
-///
-/// // TryFromByteArray is also implemented for enums
-/// let bytes = status.into_byte_array();
-/// let from_bytes = Status::try_from_byte_array(bytes).unwrap();
-/// assert_eq!(from_bytes, Status::Running);
-/// # }
-/// ```
-pub trait TryRawRepr: TryFrom<Self::Raw, Error = DecodeError>
-where
-    Self::Raw: From<Self>,
-{
-    /// The raw `PlainOldData` type used for byte conversion.
-    type Raw: PlainOldData;
-}
-
-// Implementation of Byteable for fixed-size arrays of Byteable types
-// This allows [T; N] to be Byteable if T is Byteable
-impl<T: ByteRepr, const SIZE: usize> ByteRepr for [T; SIZE] {
-    type ByteArray = [T::ByteArray; SIZE];
-}
-
-impl<T: IntoByteArray, const SIZE: usize> IntoByteArray for [T; SIZE] {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        self.map(T::into_byte_array)
-    }
-}
-
-impl<T: FromByteArray, const SIZE: usize> FromByteArray for [T; SIZE] {
-    #[inline]
-    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        byte_array.map(T::from_byte_array)
-    }
-}
-
-/// Implements `Byteable` for one or more types using `transmute`.
-///
-/// This macro provides a quick way to implement `Byteable` for types that can be
-/// safely transmuted to/from byte arrays. This is useful for `#[repr(C)]` or
-/// `#[repr(transparent)]` types.
-///
-/// # Safety
-///
-/// This macro uses `unsafe` code (`core::mem::transmute`). You must ensure:
-/// - The type has a well-defined memory layout
-/// - All byte patterns are valid for the type
-/// - The type has no padding bytes with uninitialized memory
-///
-/// # Examples
-///
-/// ```
-/// use byteable::{unsafe_byteable_transmute, IntoByteArray};
-///
-/// #[derive(Clone, Copy)]
-/// #[repr(transparent)]
-/// struct MyU32(u32);
-///
-/// unsafe_byteable_transmute!(MyU32);
-///
-/// let value = MyU32(0x12345678);
-/// let bytes = value.into_byte_array();
-/// ```
-///
-/// Multiple types can be implemented at once:
-///
-/// ```
-/// use byteable::unsafe_byteable_transmute;
-///
-/// #[derive(Clone, Copy)]
-/// #[repr(transparent)]
-/// struct TypeA(u16);
-///
-/// #[derive(Clone, Copy)]
-/// #[repr(transparent)]
-/// struct TypeB(u32);
-///
-/// unsafe_byteable_transmute!(TypeA, TypeB);
-/// ```
-#[macro_export]
-macro_rules! unsafe_byteable_transmute {
-    ($($type:ty),+) => {
+macro_rules! unsafe_impl_plain_old_data {
+    ($($ty:ty),+) => {
         $(
-            impl $crate::ByteRepr for $type {
-                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-            }
+            unsafe impl PlainOldData for $ty {}
+        )+
+    };
+}
 
-            impl $crate::IntoByteArray for $type {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    unsafe { ::core::mem::transmute(self) }
+macro_rules! impl_byte_array {
+    ($($ty:ty),+) => {
+        $(
+            impl IntoByteArray for $ty
+                where $ty : PlainOldData
+            {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(*self) }
                 }
             }
-            impl $crate::FromByteArray for $type {
-                #[inline]
+
+            impl FromByteArray for $ty
+                where $ty : PlainOldData
+            {
                 fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(byte_array) }
                 }
             }
         )+
     };
 }
+pub(crate) use impl_byte_array;
 
-/// Implements `Byteable` for a type by delegating to another type.
-///
-/// This macro is useful when you have a "user-friendly" type and a "raw" type that
-/// can be converted between each other. The raw type must already implement `Byteable`,
-/// and both types must implement `From` for converting between them.
-///
-/// This pattern is common when you want to separate concerns:
-/// - The raw type handles byte layout (with endianness markers, packed representation)
-/// - The user-facing type provides a convenient API (with native types, methods)
-///
-/// # Requirements
-///
-/// - `$raw_type` must implement `Byteable`
-/// - `$regular_type` must implement `From<$raw_type>`
-/// - `$raw_type` must implement `From<$regular_type>`
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{LittleEndian, impl_byteable_via, IntoByteArray, FromByteArray};
-/// use byteable::UnsafeByteableTransmute;
-///
-/// // Raw type with explicit byte layout
-/// #[derive(byteable::UnsafeByteableTransmute, Clone, Copy)]
-/// #[repr(C, packed)]
-/// struct PointRaw {
-///     x: LittleEndian<i32>,
-///     y: LittleEndian<i32>,
-/// }
-///
-/// // User-friendly type
-/// #[derive(Debug, PartialEq, Clone, Copy)]
-/// struct Point {
-///     x: i32,
-///     y: i32,
-/// }
-///
-/// impl From<Point> for PointRaw {
-///     fn from(p: Point) -> Self {
-///         Self { x: p.x.into(), y: p.y.into() }
-///     }
-/// }
-///
-/// impl From<PointRaw> for Point {
-///     fn from(raw: PointRaw) -> Self {
-///         Self { x: raw.x.get(), y: raw.y.get() }
-///     }
-/// }
-///
-/// impl_byteable_via!(Point => PointRaw);
-///
-/// let point = Point { x: 100, y: 200 };
-/// let bytes = point.into_byte_array();
-/// let restored = Point::from_byte_array(bytes);
-/// assert_eq!(restored, point);
-/// # }
-/// ```
-#[macro_export]
-macro_rules! impl_byteable_via {
-    ($regular_type:ty => $raw_type:ty) => {
-        impl $crate::ByteRepr for $regular_type {
-            type ByteArray = <$raw_type as $crate::ByteRepr>::ByteArray;
-        }
+unsafe_impl_plain_old_data!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+// impl_byte_array!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-        impl $crate::IntoByteArray for $regular_type {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                let raw: $raw_type = self.into();
-                raw.into_byte_array()
-            }
-        }
-
-        impl $crate::FromByteArray for $regular_type {
-            #[inline]
-            fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                let raw = <$raw_type>::from_byte_array(byte_array);
-                raw.into()
-            }
-        }
-    };
-}
-
-macro_rules! impl_byteable_primitive {
-    ($($type:ty),+) => {
-        $(
-            impl $crate::ByteRepr for $type {
-                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-            }
-
-            impl $crate::IntoByteArray for $type {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    <$type>::to_ne_bytes(self)
-                }
-            }
-
-            impl $crate::FromByteArray for $type {
-                #[inline]
-                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-                    <$type>::from_ne_bytes(byte_array)
-                }
-            }
-        )+
-    };
-}
-
-impl_byteable_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
-
-// Blanket RawRepr for all PlainOldData types: Raw = Self.
-// This covers u8, i8, LittleEndian<T>, BigEndian<T>, and arrays thereof — any type
-// that is already in its "raw" transmutable form maps to itself.
-impl<T: PlainOldData + From<T>> RawRepr for T {
-    type Raw = T;
-}
-
-// RawRepr for multi-byte primitives: Raw = LittleEndian<T>
-// This auto-selects little-endian for unannotated fields in the derive macro.
-// Note: these types are NOT PlainOldData (they lack explicit endianness), so no conflict
-// with the blanket impl above.
-use crate::LittleEndian;
-
-macro_rules! impl_raw_repr_for_multibyte {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl RawRepr for $ty {
-                type Raw = LittleEndian<$ty>;
-            }
-        )+
-    };
-}
-
-impl_raw_repr_for_multibyte!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
-
-/// Represents a discriminant value that can be of various integer types.
+/// Error returned when decoding bytes into a typed value fails.
 ///
-/// This enum stores the invalid discriminant value with its original type information,
-/// allowing for proper formatting and type-safe error handling.
+/// This error is produced by [`TryFromByteArray::try_from_byte_array`],
+/// [`TryFromRawRepr::try_from_raw`], and the I/O read traits when the raw bytes do not
+/// represent a valid value of the target type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiscriminantValue {
-    U8(u8),
-    I8(i8),
-    U16(u16),
-    I16(i16),
-    U32(u32),
-    I32(i32),
-    U64(u64),
-    I64(i64),
-    U128(u128),
-    I128(i128),
-}
-
-impl core::fmt::Display for DiscriminantValue {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            DiscriminantValue::U8(v) => write!(f, "{} (u8)", v),
-            DiscriminantValue::I8(v) => write!(f, "{} (i8)", v),
-            DiscriminantValue::U16(v) => write!(f, "{} (u16)", v),
-            DiscriminantValue::I16(v) => write!(f, "{} (i16)", v),
-            DiscriminantValue::U32(v) => write!(f, "{} (u32)", v),
-            DiscriminantValue::I32(v) => write!(f, "{} (i32)", v),
-            DiscriminantValue::U64(v) => write!(f, "{} (u64)", v),
-            DiscriminantValue::I64(v) => write!(f, "{} (i64)", v),
-            DiscriminantValue::U128(v) => write!(f, "{} (u128)", v),
-            DiscriminantValue::I128(v) => write!(f, "{} (i128)", v),
-        }
-    }
-}
-
-macro_rules! impl_discriminant_from {
-    ($($int:ty => $variant:ident),+ $(,)?) => {
-        $(
-            impl From<$int> for DiscriminantValue {
-                #[inline]
-                fn from(v: $int) -> Self {
-                    DiscriminantValue::$variant(v)
-                }
-            }
-        )+
-    };
-}
-
-impl_discriminant_from!(
-    u8 => U8, i8 => I8,
-    u16 => U16, i16 => I16,
-    u32 => U32, i32 => I32,
-    u64 => U64, i64 => I64,
-    u128 => U128, i128 => I128,
-);
-
-/// Error type for converting bytes into a type with an invalid or out-of-range value.
-///
-/// This error is returned when attempting to convert a byte array to a type whose
-/// value is not representable — for example, an invalid enum discriminant, a `bool`
-/// value outside `{0, 1}`, an invalid Unicode scalar for `char`, or a zero value
-/// for a `NonZero*` type.
-///
-/// The error includes both the offending value (with its integer type) and the
-/// target type name for diagnostics.
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(feature = "derive")] {
-/// use byteable::{Byteable, TryFromByteArray, IntoByteArray};
-///
-/// #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-/// #[repr(u8)]
-/// enum Status {
-///     Idle = 0,
-///     Running = 1,
-/// }
-///
-/// // Valid discriminant
-/// let bytes = [1];
-/// let status = Status::try_from_byte_array(bytes).unwrap();
-/// assert_eq!(status, Status::Running);
-///
-/// // Invalid discriminant
-/// let bytes = [255];
-/// let result = Status::try_from_byte_array(bytes);
-/// assert!(result.is_err());
-/// # }
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DecodeError {
-    /// The invalid value that was encountered
-    pub invalid_value: DiscriminantValue,
-    /// The name of the type that failed to decode
-    pub type_name: &'static str,
-}
-
-impl DecodeError {
-    /// Creates a new `DecodeError` with the given invalid value and type name.
-    #[inline]
-    pub fn new<T: Into<DiscriminantValue>>(invalid_value: T, type_name: &'static str) -> Self {
-        Self {
-            invalid_value: invalid_value.into(),
-            type_name,
-        }
-    }
+pub enum DecodeError {
+    /// The raw discriminant value does not correspond to any variant of the enum.
+    InvalidDiscriminant { raw: u64, type_name: &'static str },
+    /// A `bool` field contained a byte other than `0` (false) or `1` (true).
+    InvalidBool(u8),
+    /// A `char` field contained a `u32` value that is not a valid Unicode scalar.
+    InvalidChar(u32),
+    /// A tag byte for a dynamically-tagged type (e.g. `Option`, `Result`, field enum)
+    /// was not one of the expected values.
+    InvalidTag { raw: u8, type_name: &'static str },
+    /// A `String` field contained bytes that are not valid UTF-8.
+    InvalidUtf8,
+    /// A `CString` field contained an interior null byte.
+    InvalidCString,
+    /// A `NonZero<T>` field decoded to zero, which is not allowed.
+    InvalidZero,
+    /// A `NotNan<T>` field decoded to NaN, which is not allowed.
+    InvalidNaN,
 }
 
 impl core::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "Invalid value {} for type '{}'",
-            self.invalid_value, self.type_name
-        )
+        match self {
+            DecodeError::InvalidDiscriminant { raw, type_name } => {
+                write!(f, "invalid discriminant {raw} for type {type_name}")
+            }
+            DecodeError::InvalidBool(v) => write!(f, "invalid value {v} for bool"),
+            DecodeError::InvalidChar(v) => write!(f, "invalid value {v} for char"),
+            DecodeError::InvalidTag { raw, type_name } => {
+                write!(f, "invalid tag {raw} for {type_name}")
+            }
+            DecodeError::InvalidUtf8 => write!(f, "invalid UTF-8"),
+            DecodeError::InvalidCString => write!(f, "invalid CString: interior null byte"),
+            DecodeError::InvalidZero => write!(f, "invalid value: zero not allowed"),
+            DecodeError::InvalidNaN => write!(f, "invalid value: NaN not allowed"),
+        }
     }
 }
 
 impl core::error::Error for DecodeError {}
 
-#[cfg(all(test, feature = "derive"))]
-mod tests {
-    use crate::{BigEndian, ByteRepr, FromByteArray, IntoByteArray, LittleEndian};
-    use byteable_derive::UnsafeByteableTransmute;
+/// Conversion of a value to its raw, [`PlainOldData`] representation.
+///
+/// The "raw representation" is an intermediate type that:
+/// 1. Is [`PlainOldData`] (no padding, all bit patterns valid), so it can be safely transmuted.
+/// 2. Encodes any necessary byte-order or layout transformations (e.g. wrapping multi-byte
+///    integers in [`LittleEndian<T>`] or [`BigEndian<T>`]).
+///
+/// For example, `u32` has `Raw = LittleEndian<u32>`, so serializing a `u32` always produces
+/// little-endian bytes regardless of the host byte order.
+///
+/// This is the write half of the fixed-size serialization pipeline. The read half is
+/// [`TryFromRawRepr`] (fallible) or [`FromRawRepr`] (infallible).
+///
+/// A blanket impl provides `RawRepr` for `[T; N]` when `T: RawRepr`.
+pub trait RawRepr: Sized {
+    /// The [`PlainOldData`] type that `Self` serializes to.
+    type Raw: PlainOldData;
 
-    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]
-    #[repr(C, packed)]
-    struct ABC {
-        a: LittleEndian<u16>,
-        b: LittleEndian<u16>,
-        c: BigEndian<u16>,
+    /// Convert this value to its raw representation for serialization.
+    fn to_raw(&self) -> Self::Raw;
+}
+
+impl<T: RawRepr, const N: usize> RawRepr for [T; N] {
+    type Raw = [T::Raw; N];
+
+    fn to_raw(&self) -> Self::Raw {
+        self.each_ref().map(|e| e.to_raw())
     }
+}
 
-    #[test]
-    fn test_impl() {
-        let a = ABC {
-            a: LittleEndian::new(1),
-            b: LittleEndian::new(2),
-            c: BigEndian::new(3),
-        };
+/// Infallible conversion from a raw [`PlainOldData`] representation back into a value.
+///
+/// Implement this when every possible raw bit pattern is a valid `Self`. When decoding can
+/// fail (e.g. `bool`, `char`, `NonZero<T>`), implement [`TryFromRawRepr`] instead.
+///
+/// A blanket impl provides `FromRawRepr` for `[T; N]` when `T: FromRawRepr`.
+pub trait FromRawRepr: RawRepr {
+    /// Convert a raw representation into `Self`. Infallible.
+    fn from_raw(raw: Self::Raw) -> Self;
+}
 
-        let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.into_byte_array(), expected_bytes);
-
-        let read_a = ABC::from_byte_array(expected_bytes);
-        assert_eq!(read_a.a.get(), 1);
-        assert_eq!(read_a.b.get(), 2);
-        assert_eq!(read_a.c.get(), 3);
-        assert_eq!(read_a, a);
+impl<T: FromRawRepr, const N: usize> FromRawRepr for [T; N] {
+    fn from_raw(raw: Self::Raw) -> Self {
+        raw.map(|el| T::from_raw(el))
     }
+}
 
-    #[test]
-    fn test_cursor() {
-        let a = ABC {
-            a: LittleEndian::new(1),
-            b: LittleEndian::new(2),
-            c: BigEndian::new(3),
-        };
+/// Fallible conversion from a raw [`PlainOldData`] representation back into a value.
+///
+/// Use this when decoding can produce an invalid value (e.g. `bool` must be 0 or 1,
+/// `char` must be a valid Unicode scalar). Returns [`DecodeError`] on failure.
+///
+/// A blanket impl provides `TryFromRawRepr` for `[T; N]` when `T: TryFromRawRepr`,
+/// properly dropping already-initialized elements on failure.
+///
+/// # Errors
+///
+/// Returns [`DecodeError`] if the raw bytes do not encode a valid `Self`.
+pub trait TryFromRawRepr: RawRepr {
+    /// Attempt to convert a raw representation into `Self`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError`] if the raw bytes do not encode a valid `Self`.
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError>;
+}
 
-        let expected_bytes = [1, 0, 2, 0, 0, 3];
-        assert_eq!(a.into_byte_array(), expected_bytes);
-
-        let read = ABC::from_byte_array(expected_bytes);
-        assert_eq!(read.a.get(), 1);
-        assert_eq!(read.b.get(), 2);
-        assert_eq!(read.c.get(), 3);
-        assert_eq!(read, a);
-    }
-
-    #[derive(Clone, Copy, PartialEq, Debug, UnsafeByteableTransmute)]
-    #[repr(C, packed)]
-    struct MyRawStruct {
-        a: u8,
-        b: LittleEndian<u32>,
-        c: LittleEndian<u16>,
-        d: u8,
-        e: u8,
-    }
-
-    #[derive(Clone, Copy, PartialEq, Debug)]
-    struct MyRegularStruct {
-        a: u8,
-        b: u32,
-        c: u16,
-        d: u8,
-        e: u8,
-    }
-
-    impl From<MyRawStruct> for MyRegularStruct {
-        fn from(value: MyRawStruct) -> Self {
-            Self {
-                a: value.a,
-                b: value.b.get(),
-                c: value.c.get(),
-                d: value.d,
-                e: value.e,
+impl<T: TryFromRawRepr, const N: usize> TryFromRawRepr for [T; N] {
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+        use core::mem::MaybeUninit;
+        let mut out: [MaybeUninit<T>; N] = [const { MaybeUninit::uninit() }; N];
+        let mut initialized = 0usize;
+        for (slot, el) in out.iter_mut().zip(raw) {
+            match T::try_from_raw(el) {
+                Ok(v) => {
+                    slot.write(v);
+                    initialized += 1;
+                }
+                Err(e) => {
+                    for s in &mut out[..initialized] {
+                        unsafe { s.assume_init_drop() };
+                    }
+                    return Err(e);
+                }
             }
         }
+        Ok(out.map(|e| unsafe { e.assume_init() }))
     }
+}
 
-    impl From<MyRegularStruct> for MyRawStruct {
-        fn from(value: MyRegularStruct) -> Self {
-            Self {
-                a: value.a,
-                b: value.b.into(),
-                c: value.c.into(),
-                d: value.d,
-                e: value.e,
+/// Marker trait for multi-byte primitive types that support byte-order conversion.
+///
+/// Implemented for `u16`, `u32`, `u64`, `u128`, `i16`, `i32`, `i64`, `i128`, `f32`, `f64`.
+///
+/// This trait is used by [`BigEndian<T>`] and [`LittleEndian<T>`] to perform byte-swapping,
+/// and is also required for field-level endian control in the derive macro via
+/// [`HasEndianRepr`].
+///
+/// # Safety
+///
+/// The implementor must be [`PlainOldData`] and the byte-swap operations must be correct
+/// (i.e. `from_le(to_le(x)) == x` and similarly for big-endian).
+pub unsafe trait EndianConvert: PlainOldData {
+    /// Converts a value from little-endian byte order to native byte order.
+    fn from_le(value: Self) -> Self;
+
+    /// Converts a value from big-endian byte order to native byte order.
+    fn from_be(value: Self) -> Self;
+
+    /// Converts `self` from native byte order to little-endian byte order.
+    fn to_le(self) -> Self;
+
+    /// Converts `self` from native byte order to big-endian byte order.
+    fn to_be(self) -> Self;
+}
+
+macro_rules! impl_endian_convert {
+    ($($type:ty),+) => {
+        $(
+            unsafe impl EndianConvert for $type {
+                #[inline]
+                fn from_le(value: Self) -> Self {
+                    <$type>::from_le(value)
+                }
+
+                #[inline]
+                fn from_be(value: Self) -> Self {
+                    <$type>::from_be(value)
+                }
+
+                #[inline]
+                fn to_le(self) -> Self {
+                    <$type>::to_le(self)
+                }
+
+                #[inline]
+                fn to_be(self) -> Self {
+                    <$type>::to_be(self)
+                }
+            }
+        )+
+    };
+}
+
+impl_endian_convert!(u16, u32, u64, u128, i16, i32, i64, i128);
+
+macro_rules! impl_endian_convert_float {
+    ($($type:ty => $base:ty),+) => {
+        $(
+            unsafe impl EndianConvert for $type {
+                #[inline]
+                fn from_le(value: Self) -> Self {
+                    Self::from_bits(<$base>::from_le(value.to_bits()))
+                }
+
+                #[inline]
+                fn from_be(value: Self) -> Self {
+                    Self::from_bits(<$base>::from_be(value.to_bits()))
+                }
+
+                #[inline]
+                fn to_le(self) -> Self {
+                    Self::from_bits(self.to_bits().to_le())
+                }
+
+                #[inline]
+                fn to_be(self) -> Self {
+                    Self::from_bits(self.to_bits().to_be())
+                }
+            }
+        )+
+    };
+}
+
+impl_endian_convert_float!(f32 => u32, f64 => u64);
+
+/// A transparent wrapper that stores an [`EndianConvert`] value in **big-endian** byte order.
+///
+/// `BigEndian<T>` is `#[repr(transparent)]` and implements [`PlainOldData`], so it can be
+/// embedded directly in `#[repr(C, packed)]` raw structs used for zero-copy serialization.
+///
+/// Use [`new`](BigEndian::new) to construct from a native-endian value, and
+/// [`get`](BigEndian::get) to retrieve the native-endian value.
+///
+/// # Examples
+///
+/// ```rust
+/// use byteable::{BigEndian, IntoByteArray};
+///
+/// let be = BigEndian::new(0x1234u16);
+/// assert_eq!(be.get(), 0x1234u16);
+/// // The internal bytes are stored in big-endian order:
+/// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
+/// ```
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct BigEndian<T: EndianConvert>(T);
+
+/// A transparent wrapper that stores an [`EndianConvert`] value in **little-endian** byte order.
+///
+/// `LittleEndian<T>` is `#[repr(transparent)]` and implements [`PlainOldData`], so it can be
+/// embedded directly in `#[repr(C, packed)]` raw structs used for zero-copy serialization.
+///
+/// Use [`new`](LittleEndian::new) to construct from a native-endian value, and
+/// [`get`](LittleEndian::get) to retrieve the native-endian value.
+///
+/// # Examples
+///
+/// ```rust
+/// use byteable::{LittleEndian, IntoByteArray};
+///
+/// let le = LittleEndian::new(0x1234u16);
+/// assert_eq!(le.get(), 0x1234u16);
+/// // The internal bytes are stored in little-endian order:
+/// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
+/// ```
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct LittleEndian<T: EndianConvert>(T);
+
+macro_rules! impl_endian_wrapper {
+    ($name:ident, $to_fn:ident, $from_fn:ident) => {
+        impl<T: EndianConvert> $name<T> {
+            /// Wraps `value` by converting it from native byte order to the target byte order.
+            #[inline]
+            pub fn new(value: T) -> Self {
+                Self(value.$to_fn())
+            }
+
+            /// Retrieves the wrapped value, converting it from the stored byte order to native.
+            #[inline]
+            pub fn get(self) -> T {
+                T::$from_fn(self.0)
             }
         }
+
+        impl<T: core::fmt::Debug + EndianConvert> core::fmt::Debug for $name<T> {
+            #[inline]
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.get()).finish()
+            }
+        }
+
+        impl<T: PartialEq + EndianConvert> PartialEq for $name<T> {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.get() == other.get()
+            }
+        }
+
+        impl<T: Eq + EndianConvert> Eq for $name<T> {}
+
+        impl<T: PartialOrd + EndianConvert> PartialOrd for $name<T> {
+            #[inline]
+            fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+                self.get().partial_cmp(&other.get())
+            }
+        }
+
+        impl<T: Ord + EndianConvert> Ord for $name<T> {
+            #[inline]
+            fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+                self.get().cmp(&other.get())
+            }
+        }
+
+        impl<T: core::hash::Hash + EndianConvert> core::hash::Hash for $name<T> {
+            #[inline]
+            fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+                self.get().hash(state);
+            }
+        }
+
+        impl<T: EndianConvert + Default> Default for $name<T> {
+            #[inline]
+            fn default() -> Self {
+                Self::new(T::default())
+            }
+        }
+
+        impl<T: EndianConvert> From<T> for $name<T> {
+            fn from(value: T) -> Self {
+                Self::new(value)
+            }
+        }
+
+        impl<T: EndianConvert> RawRepr for $name<T> {
+            type Raw = Self;
+
+            fn to_raw(&self) -> Self::Raw {
+                *self
+            }
+        }
+
+        impl<T: EndianConvert> FromRawRepr for $name<T> {
+            fn from_raw(raw: Self::Raw) -> Self {
+                raw
+            }
+        }
+
+        impl<T: EndianConvert> TryFromRawRepr for $name<T> {
+            fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+                Ok(Self::from_raw(raw))
+            }
+        }
+    };
+}
+
+impl_endian_wrapper!(BigEndian, to_be, from_be);
+impl_endian_wrapper!(LittleEndian, to_le, from_le);
+
+macro_rules! impl_from_endian_for_primitive {
+    ($($ty:ty),+) => {
+        $(
+            impl From<BigEndian<$ty>> for $ty {
+                #[inline]
+                fn from(v: BigEndian<$ty>) -> $ty { v.get() }
+            }
+            impl From<LittleEndian<$ty>> for $ty {
+                #[inline]
+                fn from(v: LittleEndian<$ty>) -> $ty { v.get() }
+            }
+        )+
+    };
+}
+
+unsafe impl<T: EndianConvert + PlainOldData> PlainOldData for BigEndian<T> {}
+unsafe impl<T: EndianConvert + PlainOldData> PlainOldData for LittleEndian<T> {}
+
+macro_rules! impl_byte_array_endian {
+    ($($type:ty),+) => {
+        $(
+            impl_byte_array!(LittleEndian<$type>, BigEndian<$type>);
+        )+
+    };
+}
+
+impl_byte_array_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+impl_from_endian_for_primitive!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+
+/// Provides typed little-endian and big-endian representations for a type.
+///
+/// This trait allows the derive macro to express per-field endian constraints at the type
+/// level. For example, marking a `u32` field as `#[byteable(little_endian)]` causes the
+/// generated code to call `u32::to_little_endian()` and store a `<u32 as HasEndianRepr>::LE`
+/// (i.e. `LittleEndian<u32>`) in the raw struct.
+///
+/// Implemented for all [`EndianConvert`] types (primitives and floats), and by the
+/// `ordered-float` feature for `OrderedFloat<T>` and `NotNan<T>`.
+pub trait HasEndianRepr: Sized {
+    /// The little-endian representation type (e.g. `LittleEndian<u32>` for `u32`).
+    type LE: PlainOldData;
+    /// The big-endian representation type (e.g. `BigEndian<u32>` for `u32`).
+    type BE: PlainOldData;
+
+    /// Convert `self` to its little-endian representation.
+    fn to_little_endian(self) -> Self::LE;
+
+    /// Convert `self` to its big-endian representation.
+    fn to_big_endian(self) -> Self::BE;
+}
+
+/// Infallible conversion from a typed endian representation back to the native value.
+///
+/// Implemented automatically for all [`EndianConvert`] types via a blanket impl.
+/// For types where decoding can fail (e.g. `NotNan<T>`), implement [`TryFromEndianRepr`]
+/// directly instead.
+///
+/// A blanket impl provides [`TryFromEndianRepr`] for every type that implements
+/// `FromEndianRepr`.
+pub trait FromEndianRepr: HasEndianRepr {
+    /// Convert from a little-endian representation to the native value. Infallible.
+    fn from_little_endian(le: Self::LE) -> Self;
+
+    /// Convert from a big-endian representation to the native value. Infallible.
+    fn from_big_endian(be: Self::BE) -> Self;
+}
+
+/// Fallible conversion from a typed endian representation back to the native value.
+///
+/// Use this when the conversion can fail (e.g. `NotNan<T>` must reject NaN). Returns
+/// [`DecodeError`] on failure.
+///
+/// For infallible types, implement [`FromEndianRepr`] instead; a blanket impl then provides
+/// `TryFromEndianRepr` automatically.
+///
+/// # Errors
+///
+/// Returns [`DecodeError`] if the endian representation does not encode a valid `Self`.
+pub trait TryFromEndianRepr: HasEndianRepr {
+    /// Attempt to convert from a little-endian representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError`] if the value is invalid for `Self`.
+    fn try_from_little_endian(le: Self::LE) -> Result<Self, DecodeError>;
+
+    /// Attempt to convert from a big-endian representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError`] if the value is invalid for `Self`.
+    fn try_from_big_endian(be: Self::BE) -> Result<Self, DecodeError>;
+}
+
+impl<T: FromEndianRepr> TryFromEndianRepr for T {
+    fn try_from_little_endian(le: Self::LE) -> Result<Self, DecodeError> {
+        Ok(Self::from_little_endian(le))
     }
 
-    impl_byteable_via!(MyRegularStruct => MyRawStruct);
+    fn try_from_big_endian(be: Self::BE) -> Result<Self, DecodeError> {
+        Ok(Self::from_big_endian(be))
+    }
+}
 
-    #[test]
-    fn test_byteable_regular() {
-        let my_struct = MyRegularStruct {
-            a: 192,
-            b: 168,
-            c: 1,
-            d: 1,
-            e: 2,
-        };
+impl<T: EndianConvert> HasEndianRepr for T {
+    type LE = LittleEndian<T>;
+    type BE = BigEndian<T>;
 
-        let bytes = my_struct.into_byte_array();
-        assert_eq!(bytes, [192, 168, 0, 0, 0, 1, 0, 1, 2]);
+    fn to_little_endian(self) -> Self::LE {
+        LittleEndian::new(self)
+    }
 
-        let struct_from_bytes = MyRegularStruct::from_byte_array([192, 168, 0, 0, 0, 1, 0, 1, 2]);
-        assert_eq!(struct_from_bytes, my_struct);
+    fn to_big_endian(self) -> Self::BE {
+        BigEndian::new(self)
+    }
+}
 
-        assert_eq!(MyRegularStruct::BYTE_SIZE, 9);
+impl<T: EndianConvert> FromEndianRepr for T {
+    fn from_little_endian(le: Self::LE) -> Self {
+        le.get()
+    }
+
+    fn from_big_endian(be: Self::BE) -> Self {
+        be.get()
     }
 }

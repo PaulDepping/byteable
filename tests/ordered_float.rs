@@ -1,7 +1,7 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{EndianConvert, FromByteArray, IntoByteArray, LittleEndian, PlainOldData, TryFromByteArray};
+use byteable::{FromByteArray, IntoByteArray, PlainOldData, TryFromByteArray};
 use ordered_float::{NotNan, OrderedFloat};
 
 // --- OrderedFloat<f32> ---
@@ -25,26 +25,7 @@ fn ordered_float_f32_nan_roundtrip() {
 
 #[test]
 fn ordered_float_f32_byte_size() {
-    use byteable::ByteRepr;
-    assert_eq!(OrderedFloat::<f32>::BYTE_SIZE, 4);
-}
-
-#[test]
-fn ordered_float_f32_endian_convert() {
-    let val = OrderedFloat(1.0f32);
-    let le = val.to_le();
-    let be = val.to_be();
-    assert_eq!(OrderedFloat::<f32>::from_le(le), val);
-    assert_eq!(OrderedFloat::<f32>::from_be(be), val);
-}
-
-#[test]
-fn ordered_float_f32_in_little_endian_wrapper() {
-    let val: LittleEndian<OrderedFloat<f32>> = OrderedFloat(42.5f32).into();
-    assert_eq!(val.get(), OrderedFloat(42.5f32));
-    let bytes = val.into_byte_array();
-    let restored = LittleEndian::<OrderedFloat<f32>>::from_byte_array(bytes);
-    assert_eq!(restored.get(), OrderedFloat(42.5f32));
+    assert_eq!(<OrderedFloat::<f32> as IntoByteArray>::BYTE_SIZE, 4);
 }
 
 // --- OrderedFloat<f64> ---
@@ -67,8 +48,7 @@ fn ordered_float_f64_nan_roundtrip() {
 
 #[test]
 fn ordered_float_f64_byte_size() {
-    use byteable::ByteRepr;
-    assert_eq!(OrderedFloat::<f64>::BYTE_SIZE, 8);
+    assert_eq!(<OrderedFloat::<f64> as IntoByteArray>::BYTE_SIZE, 8);
 }
 
 // --- NotNan<f32> ---
@@ -90,7 +70,6 @@ fn not_nan_f32_nan_rejected() {
 
 #[test]
 fn not_nan_f32_byte_size() {
-    use byteable::ByteRepr;
     assert_eq!(NotNan::<f32>::BYTE_SIZE, 4);
 }
 
@@ -113,7 +92,6 @@ fn not_nan_f64_nan_rejected() {
 
 #[test]
 fn not_nan_f64_byte_size() {
-    use byteable::ByteRepr;
     assert_eq!(NotNan::<f64>::BYTE_SIZE, 8);
 }
 
@@ -123,18 +101,16 @@ fn not_nan_f64_byte_size() {
 fn ordered_float_transmute_safe() {
     // Compile-time check: these types implement PlainOldData
     fn assert_transmute_safe<T: PlainOldData>() {}
-    assert_transmute_safe::<LittleEndian<OrderedFloat<f32>>>();
-    assert_transmute_safe::<LittleEndian<OrderedFloat<f64>>>();
-    assert_transmute_safe::<byteable::BigEndian<OrderedFloat<f32>>>();
-    assert_transmute_safe::<byteable::BigEndian<OrderedFloat<f64>>>();
+    assert_transmute_safe::<OrderedFloat<f32>>();
+    assert_transmute_safe::<OrderedFloat<f64>>();
 }
 
 // --- #[derive(Byteable)] integration ---
 
 #[cfg(feature = "derive")]
 mod derive_tests {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
-    use ordered_float::OrderedFloat;
+    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+    use ordered_float::{NotNan, OrderedFloat};
 
     // OrderedFloat fields require explicit endianness annotation (the derive macro's
     // auto-wrap only recognises bare primitive idents like `f32`, not `OrderedFloat<f32>`).
@@ -145,6 +121,8 @@ mod derive_tests {
         temperature: OrderedFloat<f32>,
         #[byteable(big_endian)]
         pressure: OrderedFloat<f64>,
+        #[byteable(try_transparent)]
+        help_me: NotNan<f64>,
     }
 
     #[test]
@@ -153,9 +131,10 @@ mod derive_tests {
             id: 7,
             temperature: OrderedFloat(36.6),
             pressure: OrderedFloat(101325.0),
+            help_me: NotNan::new(2.9).unwrap(),
         };
         let bytes = reading.into_byte_array();
-        let restored = SensorReading::from_byte_array(bytes);
+        let restored = SensorReading::try_from_byte_array(bytes).unwrap();
         assert_eq!(reading, restored);
     }
 
@@ -165,10 +144,12 @@ mod derive_tests {
             id: 0,
             temperature: OrderedFloat(f32::NAN),
             pressure: OrderedFloat(f64::NAN),
+            help_me: NotNan::new(2.9).unwrap(),
         };
         let bytes = reading.into_byte_array();
-        let restored = SensorReading::from_byte_array(bytes);
+        let restored = SensorReading::try_from_byte_array(bytes).unwrap();
         assert!(restored.temperature.is_nan());
         assert!(restored.pressure.is_nan());
+        assert!(!restored.help_me.is_nan());
     }
 }

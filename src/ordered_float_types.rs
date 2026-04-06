@@ -1,166 +1,115 @@
-//! Byteable implementations for [`ordered_float`] types: [`OrderedFloat`] and [`NotNan`].
+//! [`RawRepr`], [`IntoByteArray`], and endian-conversion impls for
+//! [`ordered_float::OrderedFloat<T>`] and [`ordered_float::NotNan<T>`]
+//! (requires the `ordered-float` feature).
 //!
-//! [`OrderedFloat<T>`] implements [`FromByteArray`] infallibly — any bit pattern is valid,
-//! because `OrderedFloat` deliberately supports NaN values (treating them as equal to each other).
+//! ## `OrderedFloat<T>`
 //!
-//! [`NotNan<T>`] implements [`TryFromByteArray`] fallibly — NaN bit patterns are rejected.
+//! `OrderedFloat<T>` is a transparent wrapper around `f32` or `f64` that provides a total
+//! ordering. Its serialization delegates entirely to the inner float, so the wire format is
+//! identical to the unwrapped primitive. Decoding is infallible (NaN is a valid
+//! `OrderedFloat` value).
 //!
-//! Both types also implement [`EndianConvert`] by delegating to the inner float type.
+//! ## `NotNan<T>`
 //!
-//! [`OrderedFloat`]: ordered_float::OrderedFloat
-//! [`NotNan`]: ordered_float::NotNan
+//! `NotNan<T>` is a wrapper around `f32` or `f64` that guarantees the value is not NaN.
+//! Its wire format is the same as the inner float, but decoding returns
+//! [`DecodeError::InvalidNaN`] if the bytes decode to NaN.
+
 use crate::{
-    BigEndian, ByteRepr, DecodeError, EndianConvert, FromByteArray, IntoByteArray,
-    LittleEndian, PlainOldData, TryFromByteArray,
+    BigEndian, DecodeError, EndianConvert, FromByteArray, FromEndianRepr, FromRawRepr,
+    HasEndianRepr, IntoByteArray, LittleEndian, PlainOldData, RawRepr, TryFromByteArray,
+    TryFromEndianRepr, TryFromRawRepr,
+    core_types::{impl_byte_array_via_raw, impl_try_byte_array_via_raw},
 };
-use ordered_float::{NotNan, OrderedFloat};
+use ordered_float::{FloatCore, NotNan, OrderedFloat};
 
 // --- OrderedFloat<f32> ---
 
-impl ByteRepr for OrderedFloat<f32> {
-    type ByteArray = [u8; 4];
-}
+impl<T: RawRepr> RawRepr for OrderedFloat<T> {
+    type Raw = T::Raw;
 
-impl IntoByteArray for OrderedFloat<f32> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        self.0.into_byte_array()
+    fn to_raw(&self) -> Self::Raw {
+        self.0.to_raw()
     }
 }
 
-impl FromByteArray for OrderedFloat<f32> {
-    #[inline]
-    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        OrderedFloat(f32::from_byte_array(byte_array))
+impl<T: FromRawRepr> FromRawRepr for OrderedFloat<T> {
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self(T::from_raw(raw))
     }
 }
 
-impl EndianConvert for OrderedFloat<f32> {
-    #[inline]
-    fn from_le(value: Self) -> Self {
-        OrderedFloat(f32::from_le(value.0))
-    }
-
-    #[inline]
-    fn from_be(value: Self) -> Self {
-        OrderedFloat(f32::from_be(value.0))
-    }
-
-    #[inline]
-    fn to_le(self) -> Self {
-        OrderedFloat(self.0.to_le())
-    }
-
-    #[inline]
-    fn to_be(self) -> Self {
-        OrderedFloat(self.0.to_be())
+impl<T: TryFromRawRepr> TryFromRawRepr for OrderedFloat<T> {
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+        Ok(Self(T::try_from_raw(raw)?))
     }
 }
 
-// --- OrderedFloat<f64> ---
+unsafe impl<T: PlainOldData> PlainOldData for OrderedFloat<T> {}
 
-impl ByteRepr for OrderedFloat<f64> {
-    type ByteArray = [u8; 8];
-}
+impl_byte_array_via_raw!(OrderedFloat<f32>, OrderedFloat<f64>);
 
-impl IntoByteArray for OrderedFloat<f64> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        self.0.into_byte_array()
+impl<T: RawRepr + FloatCore> RawRepr for NotNan<T> {
+    type Raw = T::Raw;
+
+    fn to_raw(&self) -> Self::Raw {
+        self.into_inner().to_raw()
     }
 }
 
-impl FromByteArray for OrderedFloat<f64> {
-    #[inline]
-    fn from_byte_array(byte_array: Self::ByteArray) -> Self {
-        OrderedFloat(f64::from_byte_array(byte_array))
+impl<T: TryFromRawRepr + FloatCore> TryFromRawRepr for NotNan<T> {
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+        let inner = T::try_from_raw(raw)?;
+        Self::new(inner).map_err(|_| DecodeError::InvalidNaN)
     }
 }
 
-impl EndianConvert for OrderedFloat<f64> {
-    #[inline]
-    fn from_le(value: Self) -> Self {
-        OrderedFloat(f64::from_le(value.0))
+impl<T: EndianConvert> HasEndianRepr for OrderedFloat<T> {
+    type LE = LittleEndian<T>;
+
+    type BE = BigEndian<T>;
+
+    fn to_little_endian(self) -> Self::LE {
+        LittleEndian::new(self.0)
     }
 
-    #[inline]
-    fn from_be(value: Self) -> Self {
-        OrderedFloat(f64::from_be(value.0))
-    }
-
-    #[inline]
-    fn to_le(self) -> Self {
-        OrderedFloat(self.0.to_le())
-    }
-
-    #[inline]
-    fn to_be(self) -> Self {
-        OrderedFloat(self.0.to_be())
+    fn to_big_endian(self) -> Self::BE {
+        BigEndian::new(self.0)
     }
 }
 
-// --- NotNan<f32> ---
+impl<T: EndianConvert> FromEndianRepr for OrderedFloat<T> {
+    fn from_little_endian(le: Self::LE) -> Self {
+        Self(le.get())
+    }
 
-impl ByteRepr for NotNan<f32> {
-    type ByteArray = [u8; 4];
-}
-
-impl IntoByteArray for NotNan<f32> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        self.into_inner().into_byte_array()
+    fn from_big_endian(be: Self::BE) -> Self {
+        Self(be.get())
     }
 }
 
-impl TryFromByteArray for NotNan<f32> {
-    type Error = DecodeError;
+impl<T: EndianConvert + FloatCore> HasEndianRepr for NotNan<T> {
+    type LE = LittleEndian<T>;
 
-    #[inline]
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let val = f32::from_byte_array(byte_array);
-        NotNan::new(val).map_err(|_| {
-            DecodeError::new(val.to_bits(), ::core::any::type_name::<Self>())
-        })
+    type BE = BigEndian<T>;
+
+    fn to_little_endian(self) -> Self::LE {
+        LittleEndian::new(self.into_inner())
+    }
+
+    fn to_big_endian(self) -> Self::BE {
+        BigEndian::new(self.into_inner())
     }
 }
 
-// --- NotNan<f64> ---
+impl<T: EndianConvert + FloatCore> TryFromEndianRepr for NotNan<T> {
+    fn try_from_little_endian(le: Self::LE) -> Result<Self, DecodeError> {
+        Self::new(le.get()).map_err(|_| DecodeError::InvalidNaN)
+    }
 
-impl ByteRepr for NotNan<f64> {
-    type ByteArray = [u8; 8];
-}
-
-impl IntoByteArray for NotNan<f64> {
-    #[inline]
-    fn into_byte_array(self) -> Self::ByteArray {
-        self.into_inner().into_byte_array()
+    fn try_from_big_endian(be: Self::BE) -> Result<Self, DecodeError> {
+        Self::new(be.get()).map_err(|_| DecodeError::InvalidNaN)
     }
 }
 
-impl TryFromByteArray for NotNan<f64> {
-    type Error = DecodeError;
-
-    #[inline]
-    fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, Self::Error> {
-        let val = f64::from_byte_array(byte_array);
-        NotNan::new(val).map_err(|_| {
-            DecodeError::new(val.to_bits(), ::core::any::type_name::<Self>())
-        })
-    }
-}
-
-// --- PlainOldData ---
-//
-// `BigEndian<OrderedFloat<T>>` and `LittleEndian<OrderedFloat<T>>` are safe to transmute:
-// - `OrderedFloat<T>` is `#[repr(transparent)]` over `T`, so the memory layout is identical
-// - Every possible bit pattern is a valid `OrderedFloat` (NaN is explicitly allowed)
-// - The endian wrappers enforce explicit byte-order choice, matching the crate's portability policy
-//
-// `NotNan<T>` does NOT get `PlainOldData` (nor its endian-wrapped forms, which don't exist
-// because `NotNan` intentionally doesn't implement `EndianConvert`):
-// - NaN bit patterns are invalid for `NotNan`, so transmuting arbitrary bytes would be unsound
-
-unsafe impl PlainOldData for BigEndian<OrderedFloat<f32>> {}
-unsafe impl PlainOldData for LittleEndian<OrderedFloat<f32>> {}
-unsafe impl PlainOldData for BigEndian<OrderedFloat<f64>> {}
-unsafe impl PlainOldData for LittleEndian<OrderedFloat<f64>> {}
+impl_try_byte_array_via_raw!(NotNan<f32>, NotNan<f64>);

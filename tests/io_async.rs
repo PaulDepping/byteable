@@ -33,7 +33,10 @@ mod fixed_io {
 
     #[tokio::test]
     async fn derived_struct_roundtrip() {
-        let header = Header { magic: 0x12345678, version: 42 };
+        let header = Header {
+            magic: 0x12345678,
+            version: 42,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&header).await.unwrap();
         let restored: Header = Cursor::new(buf.into_inner()).read_fixed().await.unwrap();
@@ -42,7 +45,10 @@ mod fixed_io {
 
     #[tokio::test]
     async fn write_fixed_and_read_value_produce_same_bytes() {
-        let header = Header { magic: 0xCAFEBABE, version: 7 };
+        let header = Header {
+            magic: 0xCAFEBABE,
+            version: 7,
+        };
         let mut buf1 = Cursor::new(Vec::new());
         buf1.write_fixed(&header).await.unwrap();
         let mut buf2 = Cursor::new(Vec::new());
@@ -106,7 +112,10 @@ mod fixed_io {
 // ── Async value / stream I/O ──────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue, Byteable, LittleEndian};
+    use byteable::{
+        AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue, Byteable, LittleEndian,
+        ReadableError,
+    };
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -136,7 +145,11 @@ mod value_io {
 
     #[tokio::test]
     async fn derived_struct_write_then_read() {
-        let original = Header { version: 2, length: 0x1234, magic: 0xDEAD_BEEF };
+        let original = Header {
+            version: 2,
+            length: 0x1234,
+            magic: 0xDEAD_BEEF,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&original).await.unwrap();
         buf.set_position(0);
@@ -146,9 +159,21 @@ mod value_io {
     #[tokio::test]
     async fn multiple_sequential_structs() {
         let headers = [
-            Header { version: 1, length: 10, magic: 0x0000_0001 },
-            Header { version: 2, length: 20, magic: 0x0000_0002 },
-            Header { version: 3, length: 30, magic: 0x0000_0003 },
+            Header {
+                version: 1,
+                length: 10,
+                magic: 0x0000_0001,
+            },
+            Header {
+                version: 2,
+                length: 20,
+                magic: 0x0000_0002,
+            },
+            Header {
+                version: 3,
+                length: 30,
+                magic: 0x0000_0003,
+            },
         ];
         let mut buf = Cursor::new(Vec::new());
         for h in &headers {
@@ -162,7 +187,10 @@ mod value_io {
 
     #[tokio::test]
     async fn try_struct_roundtrip() {
-        let original = Frame { status: Status::Running, payload: 0xCAFE_BABE };
+        let original = Frame {
+            status: Status::Running,
+            payload: 0xCAFE_BABE,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&original).await.unwrap();
         buf.set_position(0);
@@ -174,17 +202,22 @@ mod value_io {
         let mut bytes = [0u8; 5];
         bytes[0] = 99; // invalid Status
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
-        let result: std::io::Result<Frame> = Cursor::new(bytes.to_vec()).read_fixed().await;
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        let result: Result<Frame, _> = Cursor::new(bytes.to_vec()).read_fixed().await;
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
     }
 
     #[tokio::test]
     async fn primitives_write_read() {
         let mut buf = Cursor::new(Vec::new());
-        buf.write_fixed(&LittleEndian::new(0x1234u16)).await.unwrap();
+        buf.write_fixed(&LittleEndian::new(0x1234u16))
+            .await
+            .unwrap();
         buf.write_fixed(&100u8).await.unwrap();
         buf.set_position(0);
-        assert_eq!(buf.read_fixed::<LittleEndian<u16>>().await.unwrap().get(), 0x1234);
+        assert_eq!(
+            buf.read_fixed::<LittleEndian<u16>>().await.unwrap().get(),
+            0x1234
+        );
         assert_eq!(buf.read_fixed::<u8>().await.unwrap(), 100);
     }
 
@@ -219,7 +252,11 @@ mod value_io {
     #[tokio::test]
     async fn duplex_channel_roundtrip() {
         let (mut writer, mut reader) = tokio::io::duplex(256);
-        let original = Header { version: 5, length: 0xABCD, magic: 0x1234_5678 };
+        let original = Header {
+            version: 5,
+            length: 0xABCD,
+            magic: 0x1234_5678,
+        };
         writer.write_fixed(&original).await.unwrap();
         drop(writer);
         assert_eq!(reader.read_fixed::<Header>().await.unwrap(), original);

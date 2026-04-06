@@ -40,7 +40,10 @@ mod fixed_io {
 
     #[test]
     fn derived_struct_roundtrip() {
-        let header = Header { magic: 0x12345678, version: 42 };
+        let header = Header {
+            magic: 0x12345678,
+            version: 42,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&header).unwrap();
         let restored: Header = Cursor::new(buf.into_inner()).read_fixed().unwrap();
@@ -49,7 +52,10 @@ mod fixed_io {
 
     #[test]
     fn write_fixed_and_read_value_produce_same_bytes() {
-        let header = Header { magic: 0xCAFEBABE, version: 7 };
+        let header = Header {
+            magic: 0xCAFEBABE,
+            version: 7,
+        };
         let mut buf1 = Cursor::new(Vec::new());
         buf1.write_fixed(&header).unwrap();
         let mut buf2 = Cursor::new(Vec::new());
@@ -59,7 +65,10 @@ mod fixed_io {
 
     #[test]
     fn write_fixed_readable_by_read_value() {
-        let header = Header { magic: 0xCAFEBABE, version: 7 };
+        let header = Header {
+            magic: 0xCAFEBABE,
+            version: 7,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&header).unwrap();
         let restored: Header = Cursor::new(buf.into_inner()).read_value().unwrap();
@@ -115,7 +124,9 @@ mod fixed_io {
 // ── Value / stream I/O ────────────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{Byteable, LittleEndian, ReadFixed, ReadValue, WriteFixed, WriteValue};
+    use byteable::{
+        Byteable, LittleEndian, ReadFixed, ReadValue, ReadableError, WriteFixed, WriteValue,
+    };
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -145,7 +156,11 @@ mod value_io {
 
     #[test]
     fn derived_struct_write_then_read() {
-        let original = Packet { id: 7, length: 0x1234, checksum: 0xDEADBEEF };
+        let original = Packet {
+            id: 7,
+            length: 0x1234,
+            checksum: 0xDEADBEEF,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&original).unwrap();
         buf.set_position(0);
@@ -155,9 +170,21 @@ mod value_io {
     #[test]
     fn multiple_sequential_structs() {
         let packets = [
-            Packet { id: 1, length: 10, checksum: 0xAAAA_AAAA },
-            Packet { id: 2, length: 20, checksum: 0xBBBB_BBBB },
-            Packet { id: 3, length: 30, checksum: 0xCCCC_CCCC },
+            Packet {
+                id: 1,
+                length: 10,
+                checksum: 0xAAAA_AAAA,
+            },
+            Packet {
+                id: 2,
+                length: 20,
+                checksum: 0xBBBB_BBBB,
+            },
+            Packet {
+                id: 3,
+                length: 30,
+                checksum: 0xCCCC_CCCC,
+            },
         ];
         let mut buf = Cursor::new(Vec::new());
         for p in &packets {
@@ -171,7 +198,10 @@ mod value_io {
 
     #[test]
     fn try_struct_roundtrip() {
-        let original = Frame { status: Status::Running, payload: 0xCAFE_BABE };
+        let original = Frame {
+            status: Status::Running,
+            payload: 0xCAFE_BABE,
+        };
         let mut buf = Cursor::new(Vec::new());
         buf.write_fixed(&original).unwrap();
         buf.set_position(0);
@@ -183,9 +213,9 @@ mod value_io {
         let mut bytes = [0u8; 5];
         bytes[0] = 99; // invalid Status
         bytes[1..5].copy_from_slice(&0xCAFE_BABEu32.to_le_bytes());
-        let result: std::io::Result<Frame> = Cursor::new(bytes.to_vec()).read_fixed();
+        let result: Result<Frame, _> = Cursor::new(bytes.to_vec()).read_fixed();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
     }
 
     #[test]
@@ -239,8 +269,8 @@ mod value_io {
 
     #[test]
     fn eof_returns_unexpected_eof_error() {
-        let result: std::io::Result<u32> = Cursor::new(vec![]).read_value();
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+        let result: Result<u32, _> = Cursor::new(vec![]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::Io(_)));
     }
 }
 
@@ -272,7 +302,10 @@ mod io_only_derive {
     #[test]
     fn vec_u8_byte_layout() {
         // tag: 1 byte; data: 8-byte LE u64 length prefix + payload
-        let v = VecStruct { tag: 42, data: vec![0xAA, 0xBB] };
+        let v = VecStruct {
+            tag: 42,
+            data: vec![0xAA, 0xBB],
+        };
         let mut buf = Vec::new();
         buf.write_value(&v).unwrap();
         assert_eq!(buf[0], 42);
@@ -306,7 +339,10 @@ mod io_only_derive {
 
     #[test]
     fn big_endian_field_with_vec() {
-        let v = MixedStruct { port: 8080, payload: vec![0xDE, 0xAD] };
+        let v = MixedStruct {
+            port: 8080,
+            payload: vec![0xDE, 0xAD],
+        };
         let mut buf = Vec::new();
         buf.write_value(&v).unwrap();
         // 8080 = 0x1F90, big-endian
@@ -327,12 +363,24 @@ mod io_only_derive {
     #[test]
     fn vec_u8_field_roundtrip() {
         assert_eq!(
-            roundtrip(&ByteVecPacket { tag: 7, data: vec![1, 2, 3, 4, 5] }),
-            ByteVecPacket { tag: 7, data: vec![1, 2, 3, 4, 5] }
+            roundtrip(&ByteVecPacket {
+                tag: 7,
+                data: vec![1, 2, 3, 4, 5]
+            }),
+            ByteVecPacket {
+                tag: 7,
+                data: vec![1, 2, 3, 4, 5]
+            }
         );
         assert_eq!(
-            roundtrip(&ByteVecPacket { tag: 0, data: vec![] }),
-            ByteVecPacket { tag: 0, data: vec![] }
+            roundtrip(&ByteVecPacket {
+                tag: 0,
+                data: vec![]
+            }),
+            ByteVecPacket {
+                tag: 0,
+                data: vec![]
+            }
         );
     }
 
@@ -345,7 +393,10 @@ mod io_only_derive {
 
     #[test]
     fn vec_u32_field_roundtrip() {
-        let original = U32VecPacket { tag: 5, values: vec![0xDEAD, 0xBEEF, 0xCAFE, 0xBABE] };
+        let original = U32VecPacket {
+            tag: 5,
+            values: vec![0xDEAD, 0xBEEF, 0xCAFE, 0xBABE],
+        };
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -358,9 +409,21 @@ mod io_only_derive {
 
     #[test]
     fn vecdeque_field_roundtrip() {
-        let original = DequePacket { tag: 1, queue: VecDeque::from([0xDEAD, 0xBEEF, 0xCAFE]) };
+        let original = DequePacket {
+            tag: 1,
+            queue: VecDeque::from([0xDEAD, 0xBEEF, 0xCAFE]),
+        };
         assert_eq!(roundtrip(&original), original);
-        assert_eq!(roundtrip(&DequePacket { tag: 0, queue: VecDeque::new() }), DequePacket { tag: 0, queue: VecDeque::new() });
+        assert_eq!(
+            roundtrip(&DequePacket {
+                tag: 0,
+                queue: VecDeque::new()
+            }),
+            DequePacket {
+                tag: 0,
+                queue: VecDeque::new()
+            }
+        );
     }
 
     #[derive(Byteable, Debug, PartialEq)]
@@ -388,7 +451,10 @@ mod io_only_derive {
 
     #[test]
     fn hashset_field_roundtrip() {
-        let original = HashSetPacket { version: 1, members: HashSet::from([10u32, 20, 30, 40]) };
+        let original = HashSetPacket {
+            version: 1,
+            members: HashSet::from([10u32, 20, 30, 40]),
+        };
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -417,7 +483,10 @@ mod io_only_derive {
 
     #[test]
     fn btreeset_field_roundtrip() {
-        let original = BTreeSetPacket { version: 2, ids: BTreeSet::from([5u32, 10, 15, 20]) };
+        let original = BTreeSetPacket {
+            version: 2,
+            ids: BTreeSet::from([5u32, 10, 15, 20]),
+        };
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -451,12 +520,16 @@ mod io_only_derive {
 
     #[test]
     fn frame_packet_byte_layout() {
-        let frame = FramePacket { sequence: 1, checksum: 0x0102, payload: vec![0xFF] };
+        let frame = FramePacket {
+            sequence: 1,
+            checksum: 0x0102,
+            payload: vec![0xFF],
+        };
         let mut buf = Vec::new();
         buf.write_value(&frame).unwrap();
-        assert_eq!(&buf[0..4], &1u32.to_le_bytes());      // sequence LE
+        assert_eq!(&buf[0..4], &1u32.to_le_bytes()); // sequence LE
         assert_eq!(&buf[4..6], &0x0102u16.to_be_bytes()); // checksum BE
-        assert_eq!(&buf[6..14], &1u64.to_le_bytes());     // Vec length prefix
+        assert_eq!(&buf[6..14], &1u64.to_le_bytes()); // Vec length prefix
         assert_eq!(buf[14], 0xFF);
     }
 
@@ -492,7 +565,10 @@ mod io_only_derive {
     fn nested_io_only_roundtrip() {
         let original = OuterRecord {
             id: 0xCAFE,
-            inner: InnerRecord { kind: 3, items: vec![10, 20, 30] },
+            inner: InnerRecord {
+                kind: 3,
+                items: vec![10, 20, 30],
+            },
             tags: BTreeSet::from([1u8, 2, 3]),
         };
         assert_eq!(roundtrip(&original), original);
@@ -524,7 +600,7 @@ mod io_only_derive {
 // ── Collection types ──────────────────────────────────────────────────────────
 
 mod collections {
-    use byteable::{ReadValue, WriteValue};
+    use byteable::{ReadValue, ReadableError, WriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
 
@@ -587,13 +663,14 @@ mod collections {
 
     #[test]
     fn option_invalid_tag_is_err() {
-        let result: std::io::Result<Option<u32>> = Cursor::new(vec![2u8]).read_value();
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        let result: Result<Option<u32>, _> = Cursor::new(vec![2u8]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
+        // assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
     fn result_invalid_tag_is_err() {
-        let result: std::io::Result<Result<u32, u8>> = Cursor::new(vec![2u8]).read_value();
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        let result: Result<Result<u32, u8>, _> = Cursor::new(vec![2u8]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
     }
 }

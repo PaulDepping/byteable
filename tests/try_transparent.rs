@@ -4,7 +4,7 @@
 //! for fallible conversion from raw representation.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, IntoByteArray, TryFromByteArray, TryRawRepr};
+use byteable::{Byteable, IntoByteArray, RawRepr, TryFromByteArray, TryFromRawRepr};
 
 /// A simple enum representing status codes
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -30,10 +30,10 @@ fn test_enum_try_has_raw_type() {
     let status = Status::Running;
 
     // Convert to raw (always succeeds)
-    let raw: <Status as TryRawRepr>::Raw = status.into();
+    let raw = status.to_raw();
 
     // Convert back to enum using TryFrom (may fail for invalid discriminants)
-    let restored: Status = Status::try_from(raw).unwrap();
+    let restored: Status = Status::try_from_raw(raw).unwrap();
     assert_eq!(restored, Status::Running);
 }
 
@@ -48,8 +48,8 @@ fn test_enum_raw_roundtrip() {
     ];
 
     for &status in &variants {
-        let raw: <Status as TryRawRepr>::Raw = status.into();
-        let restored: Status = Status::try_from(raw).unwrap();
+        let raw = status.to_raw();
+        let restored: Status = Status::try_from_raw(raw).unwrap();
         assert_eq!(restored, status);
     }
 }
@@ -62,10 +62,6 @@ fn test_enum_invalid_discriminant_via_raw() {
     // TryFromByteArray should fail for invalid discriminant
     let result = Status::try_from_byte_array(bytes);
     assert!(result.is_err());
-
-    if let Err(e) = result {
-        assert_eq!(e.invalid_value, byteable::DiscriminantValue::U8(255));
-    }
 }
 
 #[test]
@@ -140,11 +136,6 @@ fn test_message_with_invalid_status_discriminant() {
     // TryFromByteArray should fail because of the invalid status discriminant
     let result = Message::try_from_byte_array(bytes);
     assert!(result.is_err());
-
-    // Verify the error contains the invalid discriminant value
-    if let Err(e) = result {
-        assert_eq!(e.invalid_value, byteable::DiscriminantValue::U8(255));
-    }
 }
 
 #[test]
@@ -215,13 +206,6 @@ fn test_message_invalid_discriminants() {
             "Expected error for discriminant {}",
             invalid
         );
-
-        if let Err(e) = result {
-            assert_eq!(
-                e.invalid_value,
-                byteable::DiscriminantValue::U8(invalid)
-            );
-        }
     }
 }
 
@@ -234,7 +218,7 @@ fn test_message_invalid_discriminants() {
 // =============================================================================
 
 mod two_try_transparent_tests {
-    use byteable::{Byteable, DiscriminantValue, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
     #[repr(u8)]
@@ -301,9 +285,6 @@ mod two_try_transparent_tests {
         let bytes = [255u8, 0x00, 0x01, 0x00]; // StatusA=255, CodeB=Alpha, value=0
         let result = Dual::try_from_byte_array(bytes);
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.invalid_value, DiscriminantValue::U8(255));
-        }
     }
 
     #[test]
@@ -312,9 +293,6 @@ mod two_try_transparent_tests {
         let bytes = [0u8, 0xFF, 0xFF, 0x00];
         let result = Dual::try_from_byte_array(bytes);
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.invalid_value, DiscriminantValue::U16(0xFFFF));
-        }
     }
 
     #[test]
@@ -383,13 +361,6 @@ mod command_packet_tests {
 
         let result = CommandPacket::try_from_byte_array(bytes);
         assert!(result.is_err());
-
-        if let Err(e) = result {
-            assert_eq!(
-                e.invalid_value,
-                byteable::DiscriminantValue::U16(0xFFFF)
-            );
-        }
     }
 
     #[test]

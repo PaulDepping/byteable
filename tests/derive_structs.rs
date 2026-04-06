@@ -6,16 +6,14 @@
 // ── Named structs with field endianness ───────────────────────────────────────
 
 mod named_structs {
-    use byteable::{ByteRepr, Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, IntoByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     struct TestStruct {
         a: u8,
-        #[byteable(little_endian)]
         b: u16,
         #[byteable(big_endian)]
         c: u64,
-        #[byteable(little_endian)]
         d: f64,
     }
 
@@ -81,28 +79,19 @@ mod tuple_structs {
     use byteable::{Byteable, FromByteArray, IntoByteArray};
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-    struct SimpleTuple(u8, #[byteable(little_endian)] u16, #[byteable(little_endian)] u32);
+    struct SimpleTuple(u8, u16, u32);
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-    struct EndianTuple(
-        u8,
-        #[byteable(little_endian)] u16,
-        #[byteable(big_endian)] u32,
-        #[byteable(little_endian)] u64,
-    );
+    struct EndianTuple(u8, u16, #[byteable(big_endian)] u32, u64);
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-    struct InnerTuple(u8, #[byteable(little_endian)] u16);
+    struct InnerTuple(u8, u16);
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-    struct OuterTuple(
-        #[byteable(transparent)] InnerTuple,
-        u8,
-        #[byteable(big_endian)] u32,
-    );
+    struct OuterTuple(InnerTuple, u8, #[byteable(big_endian)] u32);
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-    struct ArrayTuple(u8, [u8; 4], #[byteable(little_endian)] u16);
+    struct ArrayTuple(u8, [u8; 4], u16);
 
     #[test]
     fn simple_tuple_roundtrip() {
@@ -180,7 +169,7 @@ mod tuple_structs {
 // ── Unit structs ─────────────────────────────────────────────────────────────
 
 mod unit_structs {
-    use byteable::{Byteable, FromByteArray, IntoByteArray, UnsafeByteableTransmute};
+    use byteable::{Byteable, FromByteArray, IntoByteArray};
 
     #[test]
     fn byteable_derive() {
@@ -193,30 +182,16 @@ mod unit_structs {
     }
 
     #[test]
-    fn unsafe_transmute_derive() {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, UnsafeByteableTransmute)]
-        struct Flag;
-
-        let bytes = Flag.into_byte_array();
-        assert_eq!(bytes, [0u8; 0]);
-        assert_eq!(Flag::from_byte_array([]), Flag);
-    }
-
-    #[test]
     fn multiple_unit_structs() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
         struct TypeA;
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
         struct TypeB;
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, UnsafeByteableTransmute)]
-        struct TypeC;
 
         assert!(TypeA.into_byte_array().is_empty());
         assert!(TypeB.into_byte_array().is_empty());
-        assert!(TypeC.into_byte_array().is_empty());
         assert_eq!(TypeA::from_byte_array([]), TypeA);
         assert_eq!(TypeB::from_byte_array([]), TypeB);
-        assert_eq!(TypeC::from_byte_array([]), TypeC);
     }
 
     #[test]
@@ -242,24 +217,12 @@ mod unit_structs {
 
         #[derive(Byteable, Clone, Copy)]
         struct Empty;
-        #[derive(UnsafeByteableTransmute, Clone, Copy)]
-        struct AlsoEmpty;
 
         assert_eq!(size_of::<Empty>(), 0);
-        assert_eq!(size_of::<AlsoEmpty>(), 0);
-        assert_eq!(size_of::<<Empty as byteable::ByteRepr>::ByteArray>(), 0);
-        assert_eq!(size_of::<<AlsoEmpty as byteable::ByteRepr>::ByteArray>(), 0);
-    }
-
-    #[test]
-    fn raw_repr() {
-        use byteable::RawRepr;
-
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
-        struct Sentinel;
-
-        // Unit structs implement RawRepr with Raw = Self
-        let _raw: <Sentinel as RawRepr>::Raw = Sentinel;
+        assert_eq!(
+            size_of::<<Empty as byteable::IntoByteArray>::ByteArray>(),
+            0
+        );
     }
 }
 
@@ -321,7 +284,10 @@ mod visibility {
 
     #[test]
     fn public_struct() {
-        let s = PublicStruct { a: 100, b: 0x12345678 };
+        let s = PublicStruct {
+            a: 100,
+            b: 0x12345678,
+        };
         let bytes = s.into_byte_array();
         let restored = PublicStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
@@ -330,7 +296,10 @@ mod visibility {
 
     #[test]
     fn crate_struct() {
-        let s = CrateStruct { a: 200, b: 0x0102030405060708 };
+        let s = CrateStruct {
+            a: 200,
+            b: 0x0102030405060708,
+        };
         let bytes = s.into_byte_array();
         let restored = CrateStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
@@ -367,7 +336,10 @@ mod visibility {
 
     #[test]
     fn endianness_preserved_across_visibilities() {
-        let s = PublicStruct { a: 42, b: 0x01020304 };
+        let s = PublicStruct {
+            a: 42,
+            b: 0x01020304,
+        };
         let bytes = s.into_byte_array();
         assert_eq!(bytes[0], 42);
         // big-endian u32
@@ -378,7 +350,7 @@ mod visibility {
 // ── Transparent field attribute ───────────────────────────────────────────────
 
 mod transparent {
-    use byteable::{ByteRepr, Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, IntoByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     struct MemberStruct {
@@ -423,7 +395,13 @@ mod transparent {
     #[test]
     fn transparent_field_occupies_start() {
         let member = MemberStruct { a: 10, b: 0x1234 };
-        let outer = TestStruct { member, a: 0, b: 0, c: 0, d: 0.0 };
+        let outer = TestStruct {
+            member,
+            a: 0,
+            b: 0,
+            c: 0,
+            d: 0.0,
+        };
         let bytes = outer.into_byte_array();
         let member_bytes = member.into_byte_array();
         assert_eq!(&bytes[0..3], member_bytes.as_ref());

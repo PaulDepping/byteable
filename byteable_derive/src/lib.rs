@@ -1,48 +1,17 @@
-//! Procedural macros for deriving byte conversion traits.
-//!
-//! This crate provides procedural macros for automatically implementing byte conversion traits
-//! and I/O support on types.
-//!
-//! ## Main Macros
-//!
-//! - **`#[derive(Byteable)]`** - Generates byte conversion traits and I/O support
-//!   - Fixed-size structs → `IntoByteArray`, `FromByteArray` (transmute-based)
-//!   - Dynamic structs with `#[byteable(io_only)]` → `Readable`, `Writable` (field I/O)
-//!   - C-like enums → `IntoByteArray`, `TryFromByteArray` (transmute-based)
-//!   - Enums with variant fields → `Readable`, `Writable` (stream I/O)
-//!
-//! - **`#[derive(UnsafeByteableTransmute)]`** - Lower-level transmute-based implementation
-//!   (rarely needed; normally use `#[derive(Byteable)]` instead)
-
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
-use quote::quote;
-use syn::{Data, DeriveInput, Fields, Ident, Meta, Visibility, parse_macro_input};
+use quote::{format_ident, quote};
+use syn::{Data, DeriveInput, Fields, Ident, Meta, Type, parse_macro_input};
 
-/// Represents the type of byteable attribute applied to a field or type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttributeType {
     LittleEndian,
     BigEndian,
-    /// Use field's raw representation via `TryRawRepr` (fallible conversion)
     TryTransparent,
-    /// Struct-level: skip transmute path, generate `Readable`/`Writable` via sequential field I/O
     IoOnly,
     None,
 }
 
-/// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
-fn byteable_crate_path() -> proc_macro2::TokenStream {
-    match crate_name("byteable").expect("byteable is present in `Cargo.toml`") {
-        FoundCrate::Itself => quote!(::byteable),
-        FoundCrate::Name(name) => {
-            let ident = Ident::new(&name, Span::call_site());
-            quote!(#ident)
-        }
-    }
-}
-
-/// Parses the `#[byteable(...)]` attribute from a list of attributes.
 fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     for attr in attrs {
         if attr.path().is_ident("byteable") {
@@ -59,69 +28,193 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                     ),
                 };
             }
+            panic!(
+                "Unknown byteable attribute. \
+                 Valid attributes are: little_endian, big_endian, try_transparent, io_only"
+            );
         }
     }
     AttributeType::None
 }
 
-/// Generates `PlainOldData`, `ByteRepr`, `IntoByteArray`, and `FromByteArray`
-/// impls for a raw struct, using `transmute` for zero-cost conversion.
-fn gen_raw_struct_impls(
-    raw_name: &Ident,
-    raw_field_types: &[proc_macro2::TokenStream],
-    bc: &proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    quote! {
-        unsafe impl #bc::PlainOldData for #raw_name
-        where #(#raw_field_types: #bc::PlainOldData),*
-        {}
-
-        impl #bc::ByteRepr for #raw_name {
-            type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-        }
-
-        impl #bc::IntoByteArray for #raw_name {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                unsafe { ::core::mem::transmute(self) }
-            }
-        }
-
-        impl #bc::FromByteArray for #raw_name {
-            #[inline]
-            fn from_byte_array(bytes: Self::ByteArray) -> Self {
-                unsafe { ::core::mem::transmute(bytes) }
-            }
+/// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
+fn byteable_crate_path() -> proc_macro2::TokenStream {
+    match crate_name("byteable").expect("byteable is present in `Cargo.toml`") {
+        FoundCrate::Itself => quote!(::byteable),
+        FoundCrate::Name(name) => {
+            let ident = Ident::new(&name, Span::call_site());
+            quote!(#ident)
         }
     }
 }
 
-/// Generates the token stream for writing a single struct field accessed via `self.field` /
-/// `self.0`. Unlike [`gen_field_write`], which dereferences a move-bound variable, this helper
-/// takes a pre-formed access expression (`self.field_name` or `self.0`) suitable for use inside
-/// `&self` methods.
+/// Derive macro that generates byte-serialization impls for structs and enums.
+///
+/// `#[derive(Byteable)]` inspects the annotated type and generates one of two sets of
+/// traits depending on whether `#[byteable(io_only)]` is present:
+///
+/// - **Fixed-size** (default for structs): generates [`RawRepr`], [`FromRawRepr`] or
+///   [`TryFromRawRepr`], [`IntoByteArray`], and [`FromByteArray`] or [`TryFromByteArray`].
+///   A hidden `#[repr(C, packed)]` raw struct is created to hold the on-wire layout.
+///
+/// - **I/O streaming** (`#[byteable(io_only)]` on structs, always for field enums):
+///   generates [`Readable`] and [`Writable`], reading/writing fields sequentially.
+///
+/// - **Unit enums** (all variants are unit): generates [`TryFromRawRepr`],
+///   [`IntoByteArray`], and [`TryFromByteArray`] using an automatically-chosen
+///   discriminant integer type (`u8` → `u16` → `u32` → `u64` based on variant count).
+///
+/// [`RawRepr`]: byteable::RawRepr
+/// [`FromRawRepr`]: byteable::FromRawRepr
+/// [`TryFromRawRepr`]: byteable::TryFromRawRepr
+/// [`IntoByteArray`]: byteable::IntoByteArray
+/// [`FromByteArray`]: byteable::FromByteArray
+/// [`TryFromByteArray`]: byteable::TryFromByteArray
+/// [`Readable`]: byteable::Readable
+/// [`Writable`]: byteable::Writable
+///
+/// # Struct-level attributes
+///
+/// Place these on the struct or enum itself:
+///
+/// | Attribute | Effect |
+/// |-----------|--------|
+/// | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
+/// | `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
+/// | `#[byteable(io_only)]` | Generate `Readable`/`Writable` instead of fixed-size traits |
+///
+/// # Field-level attributes
+///
+/// Place these on individual fields or enum variants:
+///
+/// | Attribute | Effect |
+/// |-----------|--------|
+/// | `#[byteable(little_endian)]` | This field uses little-endian (overrides struct-level) |
+/// | `#[byteable(big_endian)]` | This field uses big-endian (overrides struct-level) |
+/// | `#[byteable(try_transparent)]` | Field decode may fail; the struct impl becomes `TryFromRawRepr` |
+///
+/// # Examples
+///
+/// ## Basic fixed-size struct
+///
+/// ```rust
+/// use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+///
+/// #[derive(Byteable)]
+/// struct Point {
+///     x: f32,
+///     y: f32,
+/// }
+///
+/// let p = Point { x: 1.0, y: 2.0 };
+/// let bytes = p.into_byte_array();
+/// let p2 = Point::try_from_byte_array(bytes).unwrap();
+/// assert_eq!(p.x, p2.x);
+/// ```
+///
+/// ## Mixed-endian struct
+///
+/// ```rust
+/// use byteable::Byteable;
+///
+/// #[derive(Byteable)]
+/// #[byteable(big_endian)]
+/// struct NetworkHeader {
+///     magic: u32,
+///     #[byteable(little_endian)]
+///     flags: u16,   // little-endian despite struct-level big_endian
+///     version: u8,  // single-byte, endian has no effect
+/// }
+/// ```
+///
+/// ## Dynamic struct with `io_only`
+///
+/// ```rust
+/// use byteable::{Byteable, Writable, Readable};
+/// use byteable::io::{WriteValue, ReadValue};
+///
+/// #[derive(Byteable)]
+/// #[byteable(io_only)]
+/// struct Message {
+///     id: u32,
+///     body: String,
+///     tags: Vec<String>,
+/// }
+///
+/// let msg = Message { id: 1, body: "hello".into(), tags: vec![] };
+/// let mut buf = Vec::new();
+/// buf.write_value(&msg).unwrap();
+/// let msg2 = std::io::Cursor::new(&buf).read_value::<Message>().unwrap();
+/// assert_eq!(msg.id, msg2.id);
+/// ```
+///
+/// ## Unit enum (auto-inferred repr)
+///
+/// ```rust
+/// use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+///
+/// #[derive(Byteable, Debug, PartialEq)]
+/// enum Color {
+///     Red,
+///     Green,
+///     Blue,
+/// }
+///
+/// // Fits in u8 (3 variants), so wire size is 1 byte.
+/// assert_eq!(Color::BYTE_SIZE, 1);
+/// let bytes = Color::Green.into_byte_array();
+/// assert_eq!(Color::try_from_byte_array(bytes).unwrap(), Color::Green);
+/// ```
+///
+/// ## Field enum
+///
+/// ```rust
+/// use byteable::{Byteable, Readable, Writable};
+/// use byteable::io::{WriteValue, ReadValue};
+///
+/// #[derive(Byteable, Debug, PartialEq)]
+/// enum Shape {
+///     Circle { radius: f32 },
+///     Rect { width: f32, height: f32 },
+/// }
+///
+/// let s = Shape::Circle { radius: 3.0 };
+/// let mut buf = Vec::new();
+/// buf.write_value(&s).unwrap();
+/// let s2 = std::io::Cursor::new(&buf).read_value::<Shape>().unwrap();
+/// assert_eq!(s, s2);
+/// ```
+#[proc_macro_derive(Byteable, attributes(byteable))]
+pub fn byteable_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input: DeriveInput = parse_macro_input!(input);
+    match input.data {
+        Data::Struct(_) => return struct_derive(input),
+        Data::Enum(_) => return enum_derive(input),
+        Data::Union(_) => panic!("union structs are unsupported"),
+    }
+}
+
+fn struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
+    if parse_byteable_attr(&input.attrs) == AttributeType::IoOnly {
+        return io_struct_derive(input);
+    }
+    fixed_struct_derived(input)
+}
+
 fn gen_struct_field_write(
     field_access: &proc_macro2::TokenStream,
-    field_ty: &syn::Type,
+    field_type: &Type,
     attrs: &[syn::Attribute],
     bc: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
-            writer.write_value(&#bc::LittleEndian::new(#field_access))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(#field_access))?;
         },
         AttributeType::BigEndian => quote! {
-            writer.write_value(&#bc::BigEndian::new(#field_access))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(#field_access))?;
         },
-        AttributeType::None => {
-            if is_multibyte_primitive(field_ty) {
-                quote! {
-                    writer.write_value(&#bc::LittleEndian::new(#field_access))?;
-                }
-            } else {
-                quote! { writer.write_value(&#field_access)?; }
-            }
-        }
+        AttributeType::None => quote! { writer.write_value(&#field_access)?; },
         AttributeType::IoOnly => {
             panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
         }
@@ -132,33 +225,116 @@ fn gen_struct_field_write(
     }
 }
 
-/// Generates `Readable` and `Writable` impls for a struct annotated with `#[byteable(io_only)]`.
-///
-/// Instead of the transmute-based `IntoByteArray`/`FromByteArray` path, this reads and writes
-/// each field in declaration order using their own `Readable`/`Writable` implementations. This
-/// allows structs to contain types like `Vec<T>`, `String`, and `Option<T>` that are not
-/// `TransmuteSafe`.
-fn handle_io_struct_derive(
-    name: &syn::Ident,
-    generics: &syn::Generics,
-    fields_data: &syn::Fields,
+fn gen_field_read(
+    field_ident: &Ident,
+    field_ty: &syn::Type,
+    attrs: &[syn::Attribute],
     bc: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    match parse_byteable_attr(attrs) {
+        AttributeType::LittleEndian => {
+            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::LE>()?.get(); }
+        }
+        AttributeType::BigEndian => {
+            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::BE>()?.get(); }
+        }
+        AttributeType::None => quote! { let #field_ident: #field_ty = reader.read_value()?; },
+        other => panic!(
+            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
+             only little_endian and big_endian are supported here"
+        ),
+    }
+}
 
-    if let syn::Fields::Unit = fields_data {
+fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
+    let bc = byteable_crate_path();
+    let name = &input.ident;
+
+    let fields_data = match &input.data {
+        Data::Struct(data) => &data.fields,
+        _ => unreachable!(),
+    };
+
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+
+    if let Fields::Unit = fields_data {
+        let vis = &input.vis;
+        let raw_name = format_ident!("__byteable_raw_{}", name);
         return quote! {
-            impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
-                fn read_from(_reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
-                    Ok(#name)
+            #[derive(Clone, Copy)]
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            #vis struct #raw_name;
+
+            unsafe impl #bc::PlainOldData for #raw_name {}
+
+            impl #bc::RawRepr for #name {
+                type Raw = #raw_name;
+
+                #[inline]
+                fn to_raw(&self) -> #raw_name {
+                    #raw_name
                 }
             }
-            impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
-                fn write_to(&self, _writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                    Ok(())
+
+            impl #bc::FromRawRepr for #name {
+                #[inline]
+                fn from_raw(value: #raw_name) -> Self {
+                    Self
                 }
             }
-        };
+
+            impl #bc::TryFromRawRepr for #name {
+                #[inline]
+                fn try_from_raw(value: #raw_name) -> Result<Self, #bc::DecodeError> {
+                    Ok(Self)
+                }
+            }
+
+            impl #bc::IntoByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(*self) }
+                }
+            }
+
+            impl #bc::FromByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(byte_array) }
+
+                }
+            }
+
+            impl #bc::IntoByteArray for #name
+            where
+                #name: #bc::RawRepr,
+                <#name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+            {
+                type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
+
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                }
+            }
+
+            impl #bc::FromByteArray for #name
+            where
+                #name: #bc::FromRawRepr,
+                <#name as #bc::RawRepr>::Raw: #bc::FromByteArray,
+            {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    let raw = <<Self as #bc::RawRepr>::Raw as #bc::FromByteArray>::from_byte_array(byte_array);
+                    <Self as #bc::FromRawRepr>::from_raw(raw)
+                }
+            }
+        }
+        .into();
     }
 
     let (fields, is_tuple) = match fields_data {
@@ -178,7 +354,7 @@ fn handle_io_struct_derive(
                 let fname = field.ident.as_ref().unwrap();
                 quote! { self.#fname }
             };
-            gen_struct_field_write(&field_access, &field.ty, &field.attrs, bc)
+            gen_struct_field_write(&field_access, &field.ty, &field.attrs, &bc)
         })
         .collect();
 
@@ -189,21 +365,21 @@ fn handle_io_struct_derive(
         let bindings = fields
             .iter()
             .zip(&idents)
-            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, bc))
+            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc))
             .collect();
         (bindings, quote! { Ok(Self(#(#idents),*)) })
     } else {
         let field_idents: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
         let bindings = fields
             .iter()
-            .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, bc))
+            .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
             .collect();
         (bindings, quote! { Ok(Self { #(#field_idents),* }) })
     };
 
     quote! {
         impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
                 use #bc::ReadValue;
                 #( #read_bindings )*
                 #construct_expr
@@ -216,472 +392,96 @@ fn handle_io_struct_derive(
                 Ok(())
             }
         }
-    }
+    }.into()
 }
 
-/// Derives byte conversion traits for a struct using `transmute`.
-///
-/// This procedural macro automatically implements the byte conversion traits
-/// (`ByteRepr`, `IntoByteArray`, `FromByteArray`) for structs by using
-/// `core::mem::transmute` to convert between the struct and a byte array. This provides
-/// zero-overhead serialization but requires careful attention to memory layout and safety.
-///
-/// # Safety
-///
-/// This macro generates `unsafe` code using `core::mem::transmute`. You **must** ensure:
-///
-/// 1. **The struct has an explicit memory layout**: Use `#[repr(C)]`, `#[repr(C, packed)]`,
-///    or `#[repr(transparent)]` to ensure a well-defined layout.
-///
-/// 2. **All byte patterns are valid**: Every possible combination of bytes must represent
-///    a valid value for your struct. This generally means:
-///    - Primitive numeric types are fine (`u8`, `i32`, `f64`, etc.)
-///    - Endianness wrappers are fine (`BigEndian<T>`, `LittleEndian<T>`)
-///    - Arrays of the above are fine
-///    - Types with invalid bit patterns are **NOT** safe (`bool`, `char`, enums with
-///      discriminants, references, `NonZero*` types, etc.)
-///
-/// 3. **No padding with uninitialized memory**: When using `#[repr(C)]` without `packed`,
-///    padding bytes might contain uninitialized memory. Use `#[repr(C, packed)]` to avoid
-///    padding, or ensure all fields are properly aligned.
-///
-/// 4. **No complex types**: Do **not** use this with:
-///    - Types containing pointers or references (`&T`, `Box<T>`, `Vec<T>`, `String`, etc.)
-///    - Types with invariants (`NonZero*`, `bool`, `char`, enums with fields, etc.)
-///    - Types implementing `Drop`
-///
-/// # Requirements
-///
-/// The struct must:
-/// - Have a known size at compile time (no `dyn` traits or unsized fields)
-/// - Not contain any generic type parameters (or they must implement `Byteable`)
-///
-/// # Examples
-///
-/// ## Basic usage
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, UnsafeByteableTransmute};
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute, Debug, PartialEq)]
-/// #[repr(C, packed)]
-/// struct Color {
-///     r: u8,
-///     g: u8,
-///     b: u8,
-///     a: u8,
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let color = Color { r: 255, g: 128, b: 64, a: 255 };
-/// let bytes = color.into_byte_array();
-/// assert_eq!(bytes, [255, 128, 64, 255]);
-///
-/// let restored = Color::from_byte_array(bytes);
-/// assert_eq!(restored, color);
-/// # }
-/// ```
-///
-/// ## With endianness markers
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, BigEndian, LittleEndian, UnsafeByteableTransmute};
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute, Debug)]
-/// #[repr(C, packed)]
-/// struct NetworkPacket {
-///     magic: BigEndian<u32>,           // Network byte order
-///     version: u8,
-///     flags: u8,
-///     payload_len: LittleEndian<u16>,  // Different endianness for payload
-///     data: [u8; 16],
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let packet = NetworkPacket {
-///     magic: 0x12345678.into(),
-///     version: 1,
-///     flags: 0,
-///     payload_len: 100.into(),
-///     data: [0; 16],
-/// };
-///
-/// let bytes = packet.into_byte_array();
-/// // magic is big-endian: [0x12, 0x34, 0x56, 0x78]
-/// // payload_len is little-endian: [100, 0]
-/// # }
-/// ```
-///
-/// ## With nested structs
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::{Byteable, UnsafeByteableTransmute};
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute, Debug, Clone, Copy)]
-/// #[repr(C, packed)]
-/// struct Point {
-///     x: i32,
-///     y: i32,
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute, Debug)]
-/// #[repr(C, packed)]
-/// struct Line {
-///     start: Point,
-///     end: Point,
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let line = Line {
-///     start: Point { x: 0, y: 0 },
-///     end: Point { x: 10, y: 20 },
-/// };
-///
-/// let bytes = line.into_byte_array();
-/// assert_eq!(bytes.len(), 16); // 4 i32s × 4 bytes each
-/// # }
-/// ```
-///
-/// # Common Mistakes
-///
-/// ## Missing repr attribute
-///
-/// ```compile_fail
-/// # #[cfg(feature = "derive")]
-/// use byteable::UnsafeByteableTransmute;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute)]  // No #[repr(...)] - undefined layout!
-/// struct Bad {
-///     x: u32,
-///     y: u16,
-/// }
-/// ```
-///
-/// ## Using invalid types
-///
-/// ```compile_fail
-/// # #[cfg(feature = "derive")]
-/// use byteable::UnsafeByteableTransmute;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute)]
-/// #[repr(C, packed)]
-/// struct Bad {
-///     valid: bool,  // bool has invalid bit patterns (only 0 and 1 are valid)
-/// }
-/// ```
-///
-/// ## Using types with pointers
-///
-/// ```compile_fail
-/// # #[cfg(feature = "derive")]
-/// use byteable::UnsafeByteableTransmute;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(UnsafeByteableTransmute)]
-/// #[repr(C)]
-/// struct Bad {
-///     data: Vec<u8>,  // Contains a pointer - not safe to transmute!
-/// }
-/// ```
-///
-/// # See Also
-///
-/// - [`Byteable`](../byteable/trait.Byteable.html) - The trait being implemented
-/// - [`impl_byteable_via!`](../byteable/macro.impl_byteable_via.html) - For complex types
-/// - [`unsafe_byteable_transmute!`](../byteable/macro.unsafe_byteable_transmute.html) - Manual implementation macro
-#[proc_macro_derive(UnsafeByteableTransmute)]
-pub fn byteable_transmute_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
     let bc = byteable_crate_path();
-    let input: DeriveInput = parse_macro_input!(input);
-    let ident = &input.ident;
-    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
-
-    let field_types: Vec<_> = match &input.data {
-        Data::Struct(data) => match &data.fields {
-            Fields::Named(fields) => fields.named.iter().map(|f| &f.ty).collect(),
-            Fields::Unnamed(fields) => fields.unnamed.iter().map(|f| &f.ty).collect(),
-            Fields::Unit => Vec::new(),
-        },
-        _ => Vec::new(),
-    };
-
-    let extended_where = if field_types.is_empty() {
-        where_clause.cloned()
-    } else {
-        let mut clauses = where_clause
-            .cloned()
-            .unwrap_or_else(|| syn::parse_quote! { where });
-        for ty in &field_types {
-            clauses
-                .predicates
-                .push(syn::parse_quote! { #ty: #bc::PlainOldData });
-        }
-        Some(clauses)
-    };
-
-    quote! {
-        unsafe impl #impl_generics #bc::PlainOldData for #ident #type_generics #extended_where {}
-
-        impl #impl_generics #bc::ByteRepr for #ident #type_generics #extended_where {
-            type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-        }
-
-        impl #impl_generics #bc::IntoByteArray for #ident #type_generics #extended_where {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                unsafe { ::core::mem::transmute(self) }
-            }
-        }
-
-        impl #impl_generics #bc::FromByteArray for #ident #type_generics #extended_where {
-            #[inline]
-            fn from_byte_array(bytes: Self::ByteArray) -> Self {
-                unsafe { ::core::mem::transmute(bytes) }
-            }
-        }
-    }
-    .into()
-}
-
-/// Derives byte conversion and I/O traits for structs and enums.
-///
-/// This is the main derive macro for the `byteable` crate. It automatically generates appropriate
-/// trait implementations based on the annotated type.
-///
-/// # Struct Modes
-///
-/// ## Fixed-size structs (default)
-///
-/// For ordinary structs without `#[byteable(io_only)]`, this macro generates a `*Raw` helper
-/// struct with `#[repr(C, packed)]` and implements `IntoByteArray` / `FromByteArray` via
-/// `transmute`. This provides zero-copy conversion but requires all fields to be fixed-size.
-///
-/// Fields can be annotated with `#[byteable(little_endian)]` or `#[byteable(big_endian)]`
-/// to control byte order.
-///
-/// Supports:
-/// - Named structs
-/// - Tuple structs
-/// - Unit structs
-///
-/// ## Dynamic-size structs with `#[byteable(io_only)]`
-///
-/// For structs containing `Vec<T>`, `String`, `Option<T>`, or other dynamically-sized types,
-/// annotate with `#[byteable(io_only)]`. This generates `Readable` / `Writable` implementations
-/// that perform sequential field I/O, allowing arbitrary field types.
-///
-/// Supports:
-/// - Named structs
-/// - Tuple structs
-/// - Unit structs
-///
-/// # Enum Modes
-///
-/// ## C-like enums (unit variants only)
-///
-/// Enums with only unit variants and explicit discriminants implement `IntoByteArray` /
-/// `TryFromByteArray` via transmute. Supports:
-/// - Explicit `#[repr(u8)]`, `#[repr(u16)]`, etc.
-/// - Auto-repr inference (when `#[repr]` is omitted)
-/// - Auto-discriminant assignment (when discriminants are omitted)
-/// - Type-level endianness: `#[byteable(big_endian)]` / `#[byteable(little_endian)]`
-///
-/// ## Enums with variant fields
-///
-/// Enums where any variant has fields implement `Readable` / `Writable` via stream-based I/O.
-/// Discriminant is written first (respecting endianness), then the variant's fields in order.
-/// Supports:
-/// - Mix of unit, named-field, and tuple-field variants
-/// - Auto-repr and auto-discriminant assignment
-/// - Per-field endianness annotations
-///
-/// # Attributes
-///
-/// ## Struct/Enum-level
-///
-/// - `#[byteable(io_only)]` - Generate `Readable`/`Writable` via field I/O instead of transmute
-/// - `#[byteable(little_endian)]` - Set type-level endianness (enums only)
-/// - `#[byteable(big_endian)]` - Set type-level endianness (enums only)
-///
-/// ## Field-level
-///
-/// - `#[byteable(little_endian)]` - Wrap field in `LittleEndian<T>`
-/// - `#[byteable(big_endian)]` - Wrap field in `BigEndian<T>`
-/// - `#[byteable(transparent)]` - Use field's raw type (transmute path only)
-/// - `#[byteable(try_transparent)]` - Use field's raw type with fallible conversion (transmute path only)
-///
-/// # Examples
-///
-/// ## Fixed-size struct with endianness
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::Byteable;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
-/// struct Packet {
-///     id: u8,
-///     #[byteable(little_endian)]
-///     length: u16,
-///     #[byteable(big_endian)]
-///     checksum: u32,
-///     data: [u8; 4],
-/// }
-///
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let packet = Packet {
-///     id: 42,
-///     length: 1024,
-///     checksum: 0x12345678,
-///     data: [1, 2, 3, 4],
-/// };
-/// let bytes = packet.into_byte_array();
-/// let restored = Packet::from_byte_array(bytes);
-/// # }
-/// ```
-///
-/// ## Dynamic-size struct with `io_only`
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::Byteable;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(Byteable, Debug, PartialEq)]
-/// #[byteable(io_only)]
-/// struct Message {
-///     tag: u8,
-///     payload: Vec<u8>,
-///     label: String,
-/// }
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// // io_only structs implement Readable/Writable (not IntoByteArray)
-/// # }
-/// ```
-///
-/// ## C-like enum
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::Byteable;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
-/// #[repr(u8)]
-/// enum Status {
-///     Idle = 0,
-///     Running = 1,
-///     Done = 2,
-/// }
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// let status = Status::Running;
-/// let bytes = status.into_byte_array();
-/// # }
-/// ```
-///
-/// ## Enum with variant fields
-///
-/// ```
-/// # #[cfg(feature = "derive")]
-/// use byteable::Byteable;
-///
-/// # #[cfg(feature = "derive")]
-/// #[derive(Byteable, Debug, PartialEq)]
-/// #[repr(u8)]
-/// enum Message {
-///     Ping = 0,
-///     Pong { id: u8 } = 1,
-///     Data { len: u8, value: [u8; 4] } = 2,
-/// }
-/// # #[cfg(feature = "derive")]
-/// # fn example() {
-/// // Enums with fields implement Readable/Writable (not IntoByteArray)
-/// # }
-/// ```
-#[proc_macro_derive(Byteable, attributes(byteable))]
-pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let bc = byteable_crate_path();
-    let input: DeriveInput = parse_macro_input!(input);
-
-    if let Data::Enum(enum_data) = input.data {
-        let has_field_variants = enum_data
-            .variants
-            .iter()
-            .any(|v| !matches!(v.fields, Fields::Unit));
-        if has_field_variants {
-            return handle_field_enum_derive(
-                input.ident,
-                input.generics,
-                input.attrs,
-                &enum_data,
-                bc,
-            )
-            .into();
-        }
-        return handle_enum_derive(
-            input.ident,
-            input.generics,
-            input.vis,
-            input.attrs,
-            &enum_data,
-            bc,
-        )
-        .into();
-    }
-
-    // io_only: generate Readable + Writable by sequential field I/O instead of transmute
-    if parse_byteable_attr(&input.attrs) == AttributeType::IoOnly {
-        let fields_data = match &input.data {
-            Data::Struct(data) => &data.fields,
-            _ => panic!("#[byteable(io_only)] is only supported on structs"),
-        };
-        return handle_io_struct_derive(&input.ident, &input.generics, fields_data, &bc).into();
-    }
-
     let original_name = &input.ident;
-    let vis = &input.vis;
-    let raw_name = Ident::new(
-        &format!("__byteable_raw_{}", original_name),
-        original_name.span(),
-    );
-    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+
+    // let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
     let fields_data = match &input.data {
         Data::Struct(data) => &data.fields,
-        _ => panic!("Byteable only supports structs"),
+        _ => unreachable!(),
     };
 
-    // Unit structs: zero-sized, implement directly without a raw struct
+    let vis = &input.vis;
+    let raw_name = format_ident!("__byteable_raw_{}", original_name);
+
     if let Fields::Unit = fields_data {
         return quote! {
-            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
-                type ByteArray = [u8; 0];
-            }
-            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
+            #[derive(Clone, Copy)]
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            #vis struct #raw_name;
+
+            unsafe impl #bc::PlainOldData for #raw_name {}
+
+            impl #bc::RawRepr for #original_name {
+                type Raw = #raw_name;
+
                 #[inline]
-                fn into_byte_array(self) -> Self::ByteArray { [] }
+                fn to_raw(&self) -> #raw_name {
+                    #raw_name
+                }
             }
-            impl #impl_generics #bc::FromByteArray for #original_name #type_generics #where_clause {
+
+            impl #bc::FromRawRepr for #original_name {
                 #[inline]
-                fn from_byte_array(_: Self::ByteArray) -> Self { #original_name }
+                fn from_raw(value: #raw_name) -> Self {
+                    Self
+                }
             }
-            unsafe impl #bc::PlainOldData for #original_name {}
+
+            impl #bc::TryFromRawRepr for #original_name {
+                #[inline]
+                fn try_from_raw(value: #raw_name) -> Result<Self, #bc::DecodeError> {
+                    Ok(Self)
+                }
+            }
+
+            impl #bc::IntoByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(*self) }
+                }
+            }
+
+            impl #bc::FromByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(byte_array) }
+
+                }
+            }
+
+            impl #bc::IntoByteArray for #original_name
+            where
+                #original_name: #bc::RawRepr,
+                <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+            {
+                type ByteArray = [u8; ::core::mem::size_of::<<Self as #bc::RawRepr>::Raw>()];
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                }
+            }
+
+            impl #bc::FromByteArray for #original_name
+            where
+                #original_name: #bc::FromRawRepr,
+                <#original_name as #bc::RawRepr>::Raw: #bc::FromByteArray,
+            {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    let raw = <<Self as #bc::RawRepr>::Raw as #bc::FromByteArray>::from_byte_array(byte_array);
+                    <Self as #bc::FromRawRepr>::from_raw(raw)
+                }
+            }
         }
         .into();
     }
@@ -692,11 +492,14 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
         Fields::Unit => unreachable!(),
     };
 
+    struct FieldInfo {
+        raw_field_def: proc_macro2::TokenStream,
+        to_raw_expr: proc_macro2::TokenStream,
+        from_raw_expr: proc_macro2::TokenStream,
+    }
+
     // Process each field: determine raw type and to/from conversion expressions
-    let mut raw_field_defs = Vec::new();
-    let mut raw_field_types = Vec::new();
-    let mut to_raw_exprs = Vec::new();
-    let mut from_raw_exprs = Vec::new();
+    let mut field_infos = Vec::new();
     let mut has_try = false;
 
     for (i, field) in fields.iter().enumerate() {
@@ -706,163 +509,224 @@ pub fn byteable_delegate_derive_macro(input: proc_macro::TokenStream) -> proc_ma
             has_try = true;
         }
 
-        let (raw_ty, to_raw_suffix, from_raw_suffix) = match attr {
-            AttributeType::LittleEndian => (
-                quote! { #bc::LittleEndian<#field_type> },
-                quote! { .into() },
-                quote! { .get() },
-            ),
-            AttributeType::BigEndian => (
-                quote! { #bc::BigEndian<#field_type> },
-                quote! { .into() },
-                quote! { .get() },
-            ),
-            AttributeType::TryTransparent => (
-                quote! { <#field_type as #bc::TryRawRepr>::Raw },
-                quote! { .into() },
-                quote! { .try_into()? },
-            ),
-            AttributeType::None => (
-                quote! { <#field_type as #bc::RawRepr>::Raw },
-                quote! { .into() },
-                quote! { .into() },
-            ),
-            AttributeType::IoOnly => panic!(
-                "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
-            ),
-        };
-
-        raw_field_types.push(raw_ty.clone());
-
-        if is_tuple {
+        let field_info = if is_tuple {
             let idx = syn::Index::from(i);
-            raw_field_defs.push(quote! { #raw_ty });
-            to_raw_exprs.push(quote! { value.#idx #to_raw_suffix });
-            from_raw_exprs.push(quote! { value.#idx #from_raw_suffix });
+            match attr {
+                AttributeType::LittleEndian => FieldInfo {
+                    raw_field_def: quote! { #vis <#field_type as #bc::HasEndianRepr>::LE },
+                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_little_endian(self.#idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_little_endian(value.#idx) },
+                },
+                AttributeType::BigEndian => FieldInfo {
+                    raw_field_def: quote! { #vis <#field_type as #bc::HasEndianRepr>::BE },
+                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_big_endian(self.#idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_big_endian(value.#idx) },
+                },
+                AttributeType::TryTransparent => FieldInfo {
+                    raw_field_def: quote! { #vis <#field_type as #bc::RawRepr>::Raw },
+                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#idx)? },
+                },
+                AttributeType::IoOnly => panic!(
+                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
+                ),
+                AttributeType::None => FieldInfo {
+                    raw_field_def: quote! { #vis <#field_type as #bc::RawRepr>::Raw },
+                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromRawRepr>::from_raw(value.#idx) },
+                },
+            }
         } else {
             let name = field.ident.as_ref().unwrap();
-            raw_field_defs.push(quote! { #name: #raw_ty });
-            to_raw_exprs.push(quote! { #name: value.#name #to_raw_suffix });
-            from_raw_exprs.push(quote! { #name: value.#name #from_raw_suffix });
-        }
+            match attr {
+                AttributeType::LittleEndian => FieldInfo {
+                    raw_field_def: quote! { #vis #name: <#field_type as #bc::HasEndianRepr>::LE },
+                    to_raw_expr: quote! { #name: <#field_type as #bc::HasEndianRepr>::to_little_endian(self.#name) },
+                    from_raw_expr: quote! { #name: <#field_type as #bc::FromEndianRepr>::from_little_endian(value.#name) },
+                },
+                AttributeType::BigEndian => FieldInfo {
+                    raw_field_def: quote! { #vis #name: <#field_type as #bc::HasEndianRepr>::BE },
+                    to_raw_expr: quote! { #name: <#field_type as #bc::HasEndianRepr>::to_big_endian(self.#name) },
+                    from_raw_expr: quote! { #name: <#field_type as #bc::FromEndianRepr>::from_big_endian(value.#name) },
+                },
+                AttributeType::TryTransparent => FieldInfo {
+                    raw_field_def: quote! { #vis #name: <#field_type as #bc::RawRepr>::Raw },
+                    to_raw_expr: quote! { #name: <#field_type as #bc::RawRepr>::to_raw(&self.#name) },
+                    from_raw_expr: quote! { #name: <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#name)? },
+                },
+                AttributeType::IoOnly => panic!(
+                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
+                ),
+                AttributeType::None => FieldInfo {
+                    raw_field_def: quote! { #vis #name: <#field_type as #bc::RawRepr>::Raw },
+                    to_raw_expr: quote! { #name: <#field_type as #bc::RawRepr>::to_raw(&self.#name) },
+                    from_raw_expr: quote! { #name: <#field_type as #bc::FromRawRepr>::from_raw(value.#name) },
+                },
+            }
+        };
+        field_infos.push(field_info);
     }
 
-    let raw_struct_def = if is_tuple {
-        quote! {
-            #[derive(Clone, Copy, Debug)]
-            #[repr(C, packed)]
-            #[doc(hidden)]
-            #[allow(non_camel_case_types)]
-            #vis struct #raw_name(#(#raw_field_defs),*);
-        }
-    } else {
-        quote! {
-            #[derive(Clone, Copy, Debug)]
-            #[repr(C, packed)]
-            #[doc(hidden)]
-            #[allow(non_camel_case_types)]
-            #vis struct #raw_name { #(#raw_field_defs),* }
-        }
-    };
-
-    let raw_impls = gen_raw_struct_impls(&raw_name, &raw_field_types, &bc);
-
-    let from_original = if is_tuple {
-        quote! {
-            impl From<#original_name> for #raw_name {
-                #[inline]
-                fn from(value: #original_name) -> Self { Self(#(#to_raw_exprs),*) }
+    let raw_struct_def = {
+        let field_defs = field_infos.iter().map(|v| &v.raw_field_def);
+        if is_tuple {
+            quote! {
+                #[derive(Clone, Copy)]
+                #[repr(C, packed)]
+                #[doc(hidden)]
+                #[allow(non_camel_case_types)]
+                #vis struct #raw_name( #(#field_defs),* );
             }
-        }
-    } else {
-        quote! {
-            impl From<#original_name> for #raw_name {
-                #[inline]
-                fn from(value: #original_name) -> Self { Self { #(#to_raw_exprs),* } }
+        } else {
+            quote! {
+                #[derive(Clone, Copy)]
+                #[repr(C, packed)]
+                #[doc(hidden)]
+                #[allow(non_camel_case_types)]
+                #vis struct #raw_name { #(#field_defs),* }
             }
         }
     };
 
-    let from_raw_body = if is_tuple {
-        quote! { Self(#(#from_raw_exprs),*) }
-    } else {
-        quote! { Self { #(#from_raw_exprs),* } }
+    let raw_impls = {
+        quote! {
+            unsafe impl #bc::PlainOldData for #raw_name {}
+
+            impl #bc::IntoByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                type ByteArray = [u8; ::core::mem::size_of::<Self>()];
+                fn into_byte_array(&self) -> Self::ByteArray {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(*self) }
+                }
+            }
+
+            impl #bc::FromByteArray for #raw_name
+                where #raw_name : #bc::PlainOldData
+            {
+                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                    #[allow(unnecessary_transmutes)]
+                    unsafe { ::core::mem::transmute(byte_array) }
+
+                }
+            }
+        }
     };
 
-    // If any field uses try_transparent, the raw→original conversion is fallible
+    let from_raw_body = {
+        let from_raw_exprs = field_infos.iter().map(|v| &v.from_raw_expr);
+        if is_tuple {
+            quote! { Self(#(#from_raw_exprs),*) }
+        } else {
+            quote! { Self { #(#from_raw_exprs),* } }
+        }
+    };
+
+    let raw_repr = {
+        let to_raw_exprs = field_infos.iter().map(|v| &v.to_raw_expr);
+        if is_tuple {
+            quote! {
+                impl #bc::RawRepr for #original_name {
+                    type Raw = #raw_name;
+
+                    #[inline]
+                    fn to_raw(&self) -> Self::Raw {
+                        #raw_name (#(#to_raw_exprs),*)
+                    }
+                }
+
+                impl #bc::IntoByteArray for #original_name
+                where
+                    #original_name: #bc::RawRepr,
+                    <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                {
+                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
+                    fn into_byte_array(&self) -> Self::ByteArray {
+                        <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                    }
+                }
+
+            }
+        } else {
+            quote! {
+                impl #bc::RawRepr for #original_name {
+                    type Raw = #raw_name;
+
+                    #[inline]
+                    fn to_raw(&self) -> Self::Raw {
+                        #raw_name { #(#to_raw_exprs),* }
+                    }
+                }
+
+                impl #bc::IntoByteArray for #original_name
+                where
+                    #original_name: #bc::RawRepr,
+                    <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                {
+                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
+                    fn into_byte_array(&self) -> Self::ByteArray {
+                        <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                    }
+                }
+            }
+        }
+    };
+
     let original_impls = if has_try {
         quote! {
-            impl TryFrom<#raw_name> for #original_name {
-                type Error = #bc::DecodeError;
+            impl #bc::TryFromRawRepr for #original_name {
                 #[inline]
-                fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
-                    Ok(#from_raw_body)
+                fn try_from_raw(value: #raw_name) -> Result<Self, #bc::DecodeError> { Ok(#from_raw_body) }
+            }
+
+            impl #bc::TryFromByteArray for #original_name
+            where
+                #original_name: #bc::TryFromRawRepr,
+                <#original_name as #bc::RawRepr>::Raw: #bc::FromByteArray,
+            {
+                fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, #bc::DecodeError> {
+                    let raw = <<Self as #bc::RawRepr>::Raw as #bc::FromByteArray>::from_byte_array(byte_array);
+                    <Self as #bc::TryFromRawRepr>::try_from_raw(raw)
                 }
             }
 
-            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
-                type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
-            }
-
-            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    let raw: #raw_name = self.into();
-                    raw.into_byte_array()
-                }
-            }
-
-            impl #impl_generics #bc::TryFromByteArray for #original_name #type_generics #where_clause {
-                type Error = #bc::DecodeError;
-                #[inline]
-                fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
-                    let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
-                    raw.try_into()
-                }
-            }
-
-            impl #bc::TryRawRepr for #original_name { type Raw = #raw_name; }
         }
     } else {
         quote! {
-            impl From<#raw_name> for #original_name {
+            impl #bc::FromRawRepr for #original_name {
                 #[inline]
-                fn from(value: #raw_name) -> Self { #from_raw_body }
+                fn from_raw(value: #raw_name) -> Self { #from_raw_body }
             }
 
-            impl #impl_generics #bc::ByteRepr for #original_name #type_generics #where_clause {
-                type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
+            impl #bc::TryFromRawRepr for #original_name {
+                #[inline]
+                fn try_from_raw(value: #raw_name) -> Result<Self, #bc::DecodeError> { Ok(<Self as #bc::FromRawRepr>::from_raw(value)) }
             }
 
-            impl #impl_generics #bc::IntoByteArray for #original_name #type_generics #where_clause {
-                #[inline]
-                fn into_byte_array(self) -> Self::ByteArray {
-                    let raw: #raw_name = self.into();
-                    raw.into_byte_array()
+
+            impl #bc::FromByteArray for #original_name
+            where
+                #original_name: #bc::FromRawRepr,
+                <#original_name as #bc::RawRepr>::Raw: #bc::FromByteArray,
+            {
+                fn from_byte_array(byte_array: Self::ByteArray) -> Self {
+                    let raw = <<Self as #bc::RawRepr>::Raw as #bc::FromByteArray>::from_byte_array(byte_array);
+                    <Self as #bc::FromRawRepr>::from_raw(raw)
                 }
             }
-
-            impl #impl_generics #bc::FromByteArray for #original_name #type_generics #where_clause {
-                #[inline]
-                fn from_byte_array(bytes: Self::ByteArray) -> Self {
-                    <#raw_name as #bc::FromByteArray>::from_byte_array(bytes).into()
-                }
-            }
-
-            impl #bc::RawRepr for #original_name { type Raw = #raw_name; }
         }
     };
 
     quote! {
         #raw_struct_def
         #raw_impls
-        #from_original
+        #raw_repr
         #original_impls
     }
     .into()
 }
 
-/// Extracts the integer repr type from enum attributes (e.g., `#[repr(u8)]` → `u8`).
 fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
     for attr in attrs {
         if attr.path().is_ident("repr") {
@@ -889,32 +753,49 @@ fn extract_repr_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
     None
 }
 
-/// Handles deriving `Byteable` for C-like enums with explicit discriminants.
-///
-/// Generates `ByteRepr`, `IntoByteArray`, and `TryFromByteArray` impls,
-/// along with a raw wrapper type for the matching endianness.
-fn handle_enum_derive(
-    enum_name: Ident,
-    generics: syn::Generics,
-    vis: Visibility,
-    attrs: Vec<syn::Attribute>,
-    enum_data: &syn::DataEnum,
-    bc: proc_macro2::TokenStream,
+fn gen_enum_field_write(
+    field_ident: &Ident,
+    field_type: &Type,
+    attrs: &[syn::Attribute],
+    bc: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-
-    // Validate: all variants must be unit variants with explicit discriminants
-    for variant in &enum_data.variants {
-        if !matches!(variant.fields, Fields::Unit) {
-            panic!(
-                "Byteable can only be derived for C-like enums (all variants must be unit variants). \
-                 Variant '{}' has fields.",
-                variant.ident
-            );
-        }
+    match parse_byteable_attr(attrs) {
+        AttributeType::LittleEndian => quote! {
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(*#field_ident))?;
+        },
+        AttributeType::BigEndian => quote! {
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(*#field_ident))?;
+        },
+        AttributeType::None => quote! {
+            writer.write_value(#field_ident)?;
+        },
+        other => panic!(
+            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
+             only little_endian and big_endian are supported here"
+        ),
     }
+}
 
-    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
+fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
+    let Data::Enum(enum_data) = &input.data else {
+        unreachable!();
+    };
+    let has_field_variants = enum_data
+        .variants
+        .iter()
+        .any(|v| !matches!(v.fields, Fields::Unit));
+    if !has_field_variants {
+        return unit_enum_derive(input);
+    }
+    let name = input.ident;
+    let bc = byteable_crate_path();
+
+    // generate io_only variant
+
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+
+    // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
+    let repr_ty = extract_repr_type(&input.attrs).unwrap_or_else(|| {
         let n = enum_data.variants.len();
         let ty_str = if n <= 256 {
             "u8"
@@ -925,189 +806,164 @@ fn handle_enum_derive(
         } else {
             "u64"
         };
-        Ident::new(ty_str, enum_name.span())
+        Ident::new(ty_str, name.span())
     });
 
-    let endianness = parse_byteable_attr(&attrs);
-    if matches!(endianness, AttributeType::TryTransparent) {
-        panic!("try_transparent attribute is not supported for enums");
-    }
-
+    let endian_attr = parse_byteable_attr(&input.attrs);
     let discriminants = compute_discriminants(&enum_data.variants);
 
-    let from_discriminant_arms = enum_data.variants.iter().zip(&discriminants).map(|(variant, disc)| {
-        let variant_name = &variant.ident;
-        quote! { #disc => Ok(#enum_name::#variant_name), }
-    });
-
-    let (raw_type_wrapper, raw_type_get) = match endianness {
-        AttributeType::LittleEndian => (
-            quote! { #bc::LittleEndian<#repr_ty> },
-            quote! { value.0.get() },
-        ),
-        AttributeType::BigEndian => (
-            quote! { #bc::BigEndian<#repr_ty> },
-            quote! { value.0.get() },
-        ),
-        _ => (
-            quote! { <#repr_ty as #bc::RawRepr>::Raw },
-            quote! { <#repr_ty>::from(value.0) },
-        ),
+    let read_disc = match endian_attr {
+        AttributeType::LittleEndian => quote! {
+            let disc: #repr_ty = <#repr_ty as #bc::FromEndianRepr>::from_little_endian(
+                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::LE>()?
+            );
+        },
+        AttributeType::BigEndian => quote! {
+            let disc: #repr_ty = <#repr_ty as #bc::FromEndianRepr>::from_big_endian(
+                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::BE>()?
+            );
+        },
+        _ => quote! {
+            let disc: #repr_ty = reader.read_value()?;
+        },
     };
 
-    let raw_name = Ident::new(&format!("__byteable_raw_{}", enum_name), enum_name.span());
-    let raw_impls = gen_raw_struct_impls(&raw_name, &[raw_type_wrapper.clone()], &bc);
+    let write_arms = enum_data
+        .variants
+        .iter()
+        .zip(&discriminants)
+        .map(|(variant, disc_tokens)| {
+            let variant_name = &variant.ident;
+            let write_disc = match endian_attr {
+                AttributeType::LittleEndian => quote! {
+                    let disc_val: #repr_ty = #disc_tokens;
+                    writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_little_endian(disc_val))?;
+                },
+                AttributeType::BigEndian => quote! {
+                    let disc_val: #repr_ty = #disc_tokens;
+                    writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_big_endian(disc_val))?;
+                },
+                _ => quote! {
+                    let disc_val: #repr_ty = #disc_tokens;
+                    writer.write_value(&disc_val)?;
+                },
+            };
+            match &variant.fields {
+                Fields::Unit => quote! {
+                    #name::#variant_name => { #write_disc }
+                },
+                Fields::Named(named) => {
+                    let field_names: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| f.ident.as_ref().unwrap())
+                        .collect();
+                    let field_writes: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| {
+                            gen_enum_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc)
+                        })
+                        .collect();
+                    quote! {
+                        #name::#variant_name { #(#field_names),* } => {
+                            #write_disc
+                            #( #field_writes )*
+                        }
+                    }
+                }
+                Fields::Unnamed(unnamed) => {
+                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
+                        .collect();
+                    let field_writes: Vec<_> = unnamed
+                        .unnamed
+                        .iter()
+                        .zip(&field_idents)
+                        .map(|(f, ident)| gen_enum_field_write(ident, &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #name::#variant_name(#(#field_idents),*) => {
+                            #write_disc
+                            #( #field_writes )*
+                        }
+                    }
+                }
+            }
+        });
+    let read_arms = enum_data
+        .variants
+        .iter()
+        .zip(&discriminants)
+        .map(|(variant, disc_tokens)| {
+            let variant_name = &variant.ident;
 
+            match &variant.fields {
+                Fields::Unit => quote! {
+                    #disc_tokens => Ok(#name::#variant_name),
+                },
+                Fields::Named(named) => {
+                    let field_idents: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| f.ident.as_ref().unwrap())
+                        .collect();
+                    let field_reads: Vec<_> = named
+                        .named
+                        .iter()
+                        .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #disc_tokens => {
+                            #( #field_reads )*
+                            Ok(#name::#variant_name { #(#field_idents),* })
+                        }
+                    }
+                }
+                Fields::Unnamed(unnamed) => {
+                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
+                        .collect();
+                    let field_reads: Vec<_> = unnamed
+                        .unnamed
+                        .iter()
+                        .zip(&field_idents)
+                        .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
+                        .collect();
+                    quote! {
+                        #disc_tokens => {
+                            #( #field_reads )*
+                            Ok(#name::#variant_name(#(#field_idents),*))
+                        }
+                    }
+                }
+            }
+        });
     quote! {
-        #[derive(Clone, Copy, Debug)]
-        #[repr(transparent)]
-        #[doc(hidden)]
-        #[allow(non_camel_case_types)]
-        #vis struct #raw_name(#raw_type_wrapper);
-
-        #raw_impls
-
-        impl From<#enum_name> for #raw_name {
-            #[inline]
-            fn from(value: #enum_name) -> Self {
-                let discriminant: #repr_ty = value as _;
-                Self(discriminant.into())
+        impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
+            fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
+                use #bc::WriteValue;
+                match self {
+                    #(#write_arms)*
+                }
+                Ok(())
             }
         }
 
-        impl TryFrom<#raw_name> for #enum_name {
-            type Error = #bc::DecodeError;
-            #[inline]
-            fn try_from(value: #raw_name) -> Result<Self, Self::Error> {
-                let value = #raw_type_get;
-                match value {
-                    #(#from_discriminant_arms)*
-                    invalid => Err(#bc::DecodeError::new(invalid, ::core::any::type_name::<Self>())),
+
+        impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
+                use #bc::ReadValue;
+                #read_disc
+                match disc {
+                    #(#read_arms)*
+                    _ => Err(#bc::ReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
                 }
             }
         }
-
-        impl #bc::TryRawRepr for #enum_name { type Raw = #raw_name; }
-
-        impl #impl_generics #bc::ByteRepr for #enum_name #type_generics #where_clause {
-            type ByteArray = <#raw_name as #bc::ByteRepr>::ByteArray;
-        }
-
-        impl #impl_generics #bc::IntoByteArray for #enum_name #type_generics #where_clause {
-            #[inline]
-            fn into_byte_array(self) -> Self::ByteArray {
-                let raw: #raw_name = self.into();
-                <#raw_name as #bc::IntoByteArray>::into_byte_array(raw)
-            }
-        }
-
-        impl #impl_generics #bc::TryFromByteArray for #enum_name #type_generics #where_clause {
-            type Error = <Self as TryFrom<#raw_name>>::Error;
-            #[inline]
-            fn try_from_byte_array(bytes: Self::ByteArray) -> Result<Self, Self::Error> {
-                let raw = <#raw_name as #bc::FromByteArray>::from_byte_array(bytes);
-                raw.try_into()
-            }
-        }
-    }
+    }.into()
 }
 
-/// Returns `true` if `ty` is a bare multi-byte primitive (`u16`, `u32`, `f32`, etc.) that cannot
-/// be serialized without an explicit endianness annotation.
-fn is_multibyte_primitive(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(tp) = ty {
-        if tp.qself.is_none() {
-            if let Some(ident) = tp.path.get_ident() {
-                return matches!(
-                    ident.to_string().as_str(),
-                    "u16"
-                        | "i16"
-                        | "u32"
-                        | "i32"
-                        | "u64"
-                        | "i64"
-                        | "u128"
-                        | "i128"
-                        | "f32"
-                        | "f64"
-                        | "usize"
-                        | "isize"
-                );
-            }
-        }
-    }
-    false
-}
-
-/// Generates the token stream for writing a single variant field, respecting its `#[byteable]`
-/// attribute. Panics at compile time if the field is a multi-byte primitive with no annotation.
-fn gen_field_write(
-    field_ident: &Ident,
-    field_ty: &syn::Type,
-    attrs: &[syn::Attribute],
-    bc: &proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    match parse_byteable_attr(attrs) {
-        AttributeType::LittleEndian => quote! {
-            writer.write_value(&#bc::LittleEndian::new(*#field_ident))?;
-        },
-        AttributeType::BigEndian => quote! {
-            writer.write_value(&#bc::BigEndian::new(*#field_ident))?;
-        },
-        AttributeType::None => {
-            if is_multibyte_primitive(field_ty) {
-                quote! {
-                    writer.write_value(&#bc::LittleEndian::new(*#field_ident))?;
-                }
-            } else {
-                quote! { writer.write_value(#field_ident)?; }
-            }
-        }
-        other => panic!(
-            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
-             only little_endian and big_endian are supported here"
-        ),
-    }
-}
-
-/// Generates the token stream for reading a single variant field, respecting its `#[byteable]`
-/// attribute. Panics at compile time if the field is a multi-byte primitive with no annotation.
-fn gen_field_read(
-    field_ident: &Ident,
-    field_ty: &syn::Type,
-    attrs: &[syn::Attribute],
-    bc: &proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    match parse_byteable_attr(attrs) {
-        AttributeType::LittleEndian => quote! {
-            let #field_ident: #field_ty =
-                reader.read_value::<#bc::LittleEndian<#field_ty>>()?.get();
-        },
-        AttributeType::BigEndian => quote! {
-            let #field_ident: #field_ty =
-                reader.read_value::<#bc::BigEndian<#field_ty>>()?.get();
-        },
-        AttributeType::None => {
-            if is_multibyte_primitive(field_ty) {
-                quote! {
-                    let #field_ident: #field_ty =
-                        reader.read_value::<#bc::LittleEndian<#field_ty>>()?.get();
-                }
-            } else {
-                quote! { let #field_ident: #field_ty = reader.read_value()?; }
-            }
-        }
-        other => panic!(
-            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
-             only little_endian and big_endian are supported here"
-        ),
-    }
-}
-
-/// Attempts to evaluate an integer literal expression to a `u128` value.
-///
-/// Handles decimal, hex (`0x`), octal (`0o`), and binary (`0b`) literals, plus type suffixes.
-/// Returns `None` for non-literal or non-integer expressions.
 fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {
     match expr {
         syn::Expr::Lit(el) => {
@@ -1174,35 +1030,14 @@ fn compute_discriminants(
         .collect()
 }
 
-/// Handles deriving `Readable` and `Writable` for enums that have at least one variant with fields.
-///
-/// The discriminant is written/read first (using the `#[repr(...)]` type and optional endianness),
-/// followed by the fields of the matched variant. All variant fields must implement [`Readable`] /
-/// [`Writable`].
-///
-/// ## Optional attributes
-///
-/// - `#[repr(...)]` — if omitted, the repr is auto-selected from the variant count:
-///   ≤256 → `u8`, ≤65536 → `u16`, ≤2³² → `u32`, otherwise `u64`.
-/// - Explicit discriminants — if omitted, values are auto-assigned starting at `0` and
-///   incrementing by one, following Rust's own default discriminant rules.
-/// - Endianness — defaults to little-endian for multi-byte reprs when not explicitly annotated.
-fn handle_field_enum_derive(
-    enum_name: Ident,
-    generics: syn::Generics,
-    attrs: Vec<syn::Attribute>,
-    enum_data: &syn::DataEnum,
-    bc: proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
+    let bc = byteable_crate_path();
+    let Data::Enum(enum_data) = &input.data else {
+        unreachable!();
+    };
+    let enum_name = &input.ident;
 
-    let endianness = parse_byteable_attr(&attrs);
-    if matches!(endianness, AttributeType::TryTransparent) {
-        panic!("try_transparent attribute is not supported for enums");
-    }
-
-    // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
-    let repr_ty = extract_repr_type(&attrs).unwrap_or_else(|| {
+    let repr_ty = extract_repr_type(&input.attrs).unwrap_or_else(|| {
         let n = enum_data.variants.len();
         let ty_str = if n <= 256 {
             "u8"
@@ -1216,180 +1051,81 @@ fn handle_field_enum_derive(
         Ident::new(ty_str, enum_name.span())
     });
 
-    let repr_ty_str = repr_ty.to_string();
-    let is_single_byte = matches!(repr_ty_str.as_str(), "u8" | "i8");
-
-    // For multi-byte repr with no endianness annotation: default to little-endian.
-    let effective_endianness = if !is_single_byte
-        && !matches!(
-            endianness,
-            AttributeType::LittleEndian | AttributeType::BigEndian
-        ) {
-        AttributeType::LittleEndian
-    } else {
-        endianness
-    };
-
-    // Pre-compute discriminant tokens for every variant (auto-assign where absent).
+    let endian_attr = parse_byteable_attr(&input.attrs);
     let discriminants = compute_discriminants(&enum_data.variants);
 
-    // Tokens that read the discriminant and bind it as `disc: #repr_ty`.
-    let read_disc = if is_single_byte {
-        quote! { let disc: #repr_ty = reader.read_value()?; }
-    } else {
-        match effective_endianness {
-            AttributeType::LittleEndian => quote! {
-                let disc: #repr_ty = reader.read_value::<#bc::LittleEndian<#repr_ty>>()?.get();
-            },
-            AttributeType::BigEndian => quote! {
-                let disc: #repr_ty = reader.read_value::<#bc::BigEndian<#repr_ty>>()?.get();
-            },
-            _ => unreachable!(),
-        }
+    let from_discriminant_arms =
+        enum_data
+            .variants
+            .iter()
+            .zip(&discriminants)
+            .map(|(variant, disc)| {
+                let variant_name = &variant.ident;
+                quote! { #disc => Ok(#enum_name::#variant_name), }
+            });
+
+    let into_byte_array_body = match endian_attr {
+        AttributeType::LittleEndian => quote! {
+            let v: #repr_ty = *self as _;
+            <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).into_byte_array()
+        },
+        AttributeType::BigEndian => quote! {
+            let v: #repr_ty = *self as _;
+            <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).into_byte_array()
+        },
+        _ => quote! {
+            let v: #repr_ty = *self as _;
+            <#repr_ty as #bc::IntoByteArray>::into_byte_array(&v)
+        },
     };
 
-    let write_arms = enum_data
-        .variants
-        .iter()
-        .zip(&discriminants)
-        .map(|(variant, disc_tokens)| {
-            let variant_name = &variant.ident;
-
-            let write_disc = if is_single_byte {
-                quote! {
-                    let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                    writer.write_value(&disc_val)?;
-                }
-            } else {
-                match effective_endianness {
-                    AttributeType::LittleEndian => quote! {
-                        let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                        writer.write_value(&#bc::LittleEndian::new(disc_val))?;
-                    },
-                    AttributeType::BigEndian => quote! {
-                        let disc_val: #repr_ty = #disc_tokens as #repr_ty;
-                        writer.write_value(&#bc::BigEndian::new(disc_val))?;
-                    },
-                    _ => unreachable!(),
-                }
-            };
-
-            match &variant.fields {
-                Fields::Unit => quote! {
-                    #enum_name::#variant_name => { #write_disc }
-                },
-                Fields::Named(named) => {
-                    let field_names: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| f.ident.as_ref().unwrap())
-                        .collect();
-                    let field_writes: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| gen_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #enum_name::#variant_name { #(#field_names),* } => {
-                            #write_disc
-                            #( #field_writes )*
-                        }
-                    }
-                }
-                Fields::Unnamed(unnamed) => {
-                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                        .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
-                        .collect();
-                    let field_writes: Vec<_> = unnamed
-                        .unnamed
-                        .iter()
-                        .zip(&field_idents)
-                        .map(|(f, ident)| gen_field_write(ident, &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #enum_name::#variant_name(#(#field_idents),*) => {
-                            #write_disc
-                            #( #field_writes )*
-                        }
-                    }
-                }
-            }
-        });
-
-    let read_arms = enum_data
-        .variants
-        .iter()
-        .zip(&discriminants)
-        .map(|(variant, disc_tokens)| {
-            let variant_name = &variant.ident;
-
-            match &variant.fields {
-                Fields::Unit => quote! {
-                    #disc_tokens => Ok(#enum_name::#variant_name),
-                },
-                Fields::Named(named) => {
-                    let field_idents: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| f.ident.as_ref().unwrap())
-                        .collect();
-                    let field_reads: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #disc_tokens => {
-                            #( #field_reads )*
-                            Ok(#enum_name::#variant_name { #(#field_idents),* })
-                        }
-                    }
-                }
-                Fields::Unnamed(unnamed) => {
-                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                        .map(|i| Ident::new(&format!("__field_{i}"), enum_name.span()))
-                        .collect();
-                    let field_reads: Vec<_> = unnamed
-                        .unnamed
-                        .iter()
-                        .zip(&field_idents)
-                        .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #disc_tokens => {
-                            #( #field_reads )*
-                            Ok(#enum_name::#variant_name(#(#field_idents),*))
-                        }
-                    }
-                }
-            }
-        });
-
-    let enum_name_str = enum_name.to_string();
+    let try_from_byte_array_body = match endian_attr {
+        AttributeType::LittleEndian => quote! {
+            let le = <<#repr_ty as #bc::HasEndianRepr>::LE as #bc::FromByteArray>::from_byte_array(byte_array);
+            let raw = <#repr_ty as #bc::FromEndianRepr>::from_little_endian(le);
+            <Self as #bc::TryFromRawRepr>::try_from_raw(raw)
+        },
+        AttributeType::BigEndian => quote! {
+            let be = <<#repr_ty as #bc::HasEndianRepr>::BE as #bc::FromByteArray>::from_byte_array(byte_array);
+            let raw = <#repr_ty as #bc::FromEndianRepr>::from_big_endian(be);
+            <Self as #bc::TryFromRawRepr>::try_from_raw(raw)
+        },
+        _ => quote! {
+            let raw = <#repr_ty as #bc::FromByteArray>::from_byte_array(byte_array);
+            <Self as #bc::TryFromRawRepr>::try_from_raw(raw)
+        },
+    };
 
     quote! {
-        impl #impl_generics #bc::Writable for #enum_name #type_generics #where_clause {
-            fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                use #bc::WriteValue;
-                match self {
-                    #(#write_arms)*
-                }
-                Ok(())
+        impl #bc::RawRepr for #enum_name {
+            type Raw = #repr_ty;
+            fn to_raw(&self) -> #repr_ty {
+                *self as _
             }
         }
 
-        impl #impl_generics #bc::Readable for #enum_name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> ::std::io::Result<Self> {
-                use #bc::ReadValue;
-                #read_disc
-                match disc {
-                    #(#read_arms)*
-                    _ => Err(::std::io::Error::new(
-                        ::std::io::ErrorKind::InvalidData,
-                        format!("invalid discriminant for enum {}", #enum_name_str),
-                    )),
+        impl #bc::TryFromRawRepr for #enum_name {
+            fn try_from_raw(raw: Self::Raw) -> Result<Self, #bc::DecodeError> {
+                match raw {
+                    #(#from_discriminant_arms)*
+                    _ => Err(#bc::DecodeError::InvalidDiscriminant { raw: raw as u64, type_name: ::core::stringify!(#enum_name) })
                 }
             }
         }
+
+        impl #bc::IntoByteArray for #enum_name {
+            type ByteArray = [u8; ::core::mem::size_of::<#repr_ty>()];
+            fn into_byte_array(&self) -> Self::ByteArray {
+                #into_byte_array_body
+            }
+        }
+
+        impl #bc::TryFromByteArray for #enum_name {
+            fn try_from_byte_array(byte_array: Self::ByteArray) -> Result<Self, #bc::DecodeError> {
+                #try_from_byte_array_body
+            }
+        }
+
     }
+    .into()
 }
