@@ -1,7 +1,92 @@
+use crate::{PlainOldData, RawRepr, TryFromRawRepr, byteable_trait::DecodeError};
 use core::{error, fmt};
 use std::io::{self, Read, Write};
 
-use crate::{PlainOldData, RawRepr, TryFromRawRepr, byteable_trait::DecodeError};
+struct CountingReader<'a, R: Read + ?Sized> {
+    inner: &'a mut R,
+    count: usize,
+}
+
+impl<'a, R: Read + ?Sized> CountingReader<'a, R> {
+    fn new(inner: &'a mut R) -> Self {
+        Self { inner, count: 0 }
+    }
+
+    fn count(&self) -> usize {
+        self.count
+    }
+}
+
+impl<R: Read + ?Sized> Read for CountingReader<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        let n = self.inner.read_vectored(bufs)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        let n = self.inner.read_to_end(buf)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
+        let n = self.inner.read_to_string(buf)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        self.inner.read_exact(buf)?;
+        self.count += buf.len();
+        Ok(())
+    }
+}
+
+struct CountingWriter<'a, W: Write + ?Sized> {
+    inner: &'a mut W,
+    count: usize,
+}
+
+impl<'a, W: Write + ?Sized> CountingWriter<'a, W> {
+    fn new(inner: &'a mut W) -> Self {
+        Self { inner, count: 0 }
+    }
+
+    fn count(&self) -> usize {
+        self.count
+    }
+}
+
+impl<W: Write + ?Sized> Write for CountingWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        let n = self.inner.write_vectored(bufs)?;
+        self.count += n;
+        Ok(n)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.inner.write_all(buf)?;
+        self.count += buf.len();
+        Ok(())
+    }
+}
 
 /// Error returned when reading a value from a [`Read`] source fails.
 ///
@@ -167,6 +252,13 @@ pub trait ReadFixed: Read {
     fn read_fixed<T: FixedReadable>(&mut self) -> Result<T, ReadableError> {
         T::read_fixed_from(self)
     }
+
+    #[inline]
+    fn read_fixed_counted<T: FixedReadable>(&mut self) -> Result<(T, usize), ReadableError> {
+        let mut reader = CountingReader::new(self);
+        let v = reader.read_fixed()?;
+        Ok((v, reader.count()))
+    }
 }
 
 impl<T: Read + ?Sized> ReadFixed for T {}
@@ -197,6 +289,13 @@ pub trait ReadValue: Read {
     fn read_value<T: Readable>(&mut self) -> Result<T, ReadableError> {
         T::read_from(self)
     }
+
+    #[inline]
+    fn read_value_counted<T: Readable>(&mut self) -> Result<(T, usize), ReadableError> {
+        let mut reader = CountingReader::new(self);
+        let v = reader.read_value()?;
+        Ok((v, reader.count()))
+    }
 }
 
 impl<T: Read> ReadValue for T {}
@@ -213,6 +312,13 @@ pub trait WriteFixed: Write {
     #[inline]
     fn write_fixed(&mut self, val: &impl FixedWritable) -> io::Result<()> {
         val.write_fixed_to(self)
+    }
+
+    #[inline]
+    fn write_fixed_counted(&mut self, val: &impl FixedWritable) -> io::Result<usize> {
+        let mut w = CountingWriter::new(self);
+        w.write_fixed(val)?;
+        Ok(w.count())
     }
 }
 
@@ -241,6 +347,13 @@ pub trait WriteValue: Write {
     #[inline]
     fn write_value<T: Writable + ?Sized>(&mut self, data: &T) -> io::Result<()> {
         data.write_to(self)
+    }
+
+    #[inline]
+    fn write_value_counted<T: Writable + ?Sized>(&mut self, data: &T) -> io::Result<usize> {
+        let mut w = CountingWriter::new(self);
+        w.write_value(data)?;
+        Ok(w.count())
     }
 }
 

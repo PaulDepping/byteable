@@ -597,6 +597,186 @@ mod io_only_derive {
     }
 }
 
+// ── Counted I/O ───────────────────────────────────────────────────────────────
+
+mod counted_io {
+    use byteable::{Byteable, LittleEndian, ReadFixed, ReadValue, WriteFixed, WriteValue};
+    use std::mem::size_of;
+    use std::io::Cursor;
+
+    #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
+    struct SmallHeader {
+        #[byteable(big_endian)]
+        magic: u32,
+        version: u8,
+    }
+
+    // ── write_fixed_counted ───────────────────────────────────────────────
+
+    #[test]
+    fn write_fixed_counted_primitive() {
+        let mut buf = Vec::new();
+        let n = buf.write_fixed_counted(&0xDEADBEEFu32).unwrap();
+        assert_eq!(n, size_of::<u32>());
+        assert_eq!(buf.len(), n);
+    }
+
+    #[test]
+    fn write_fixed_counted_struct() {
+        let header = SmallHeader { magic: 0xCAFEBABE, version: 1 };
+        let mut buf = Vec::new();
+        let n = buf.write_fixed_counted(&header).unwrap();
+        // 4 bytes (magic) + 1 byte (version) — serialized size, not size_of
+        assert_eq!(n, 5);
+        assert_eq!(buf.len(), n);
+    }
+
+    #[test]
+    fn write_fixed_counted_endian_wrapper() {
+        let val = LittleEndian::new(0x1234u16);
+        let mut buf = Vec::new();
+        let n = buf.write_fixed_counted(&val).unwrap();
+        assert_eq!(n, size_of::<u16>());
+    }
+
+    #[test]
+    fn write_fixed_counted_multiple_sequential() {
+        let mut buf = Vec::new();
+        let n1 = buf.write_fixed_counted(&42u8).unwrap();
+        let n2 = buf.write_fixed_counted(&0xDEADBEEFu32).unwrap();
+        assert_eq!(n1, 1);
+        assert_eq!(n2, 4);
+        assert_eq!(buf.len(), n1 + n2);
+    }
+
+    // ── read_fixed_counted ────────────────────────────────────────────────
+
+    #[test]
+    fn read_fixed_counted_primitive() {
+        let data = 0xDEADBEEFu32.to_ne_bytes().to_vec();
+        let (val, n): (u32, usize) = Cursor::new(data).read_fixed_counted().unwrap();
+        assert_eq!(val, 0xDEADBEEF);
+        assert_eq!(n, size_of::<u32>());
+    }
+
+    #[test]
+    fn read_fixed_counted_struct() {
+        let header = SmallHeader { magic: 0xCAFEBABE, version: 7 };
+        let mut buf = Vec::new();
+        buf.write_fixed(&header).unwrap();
+        let (restored, n): (SmallHeader, usize) = Cursor::new(buf).read_fixed_counted().unwrap();
+        assert_eq!(restored, header);
+        // 4 bytes (magic) + 1 byte (version) — serialized size, not size_of
+        assert_eq!(n, 5);
+    }
+
+    #[test]
+    fn read_fixed_counted_matches_write_fixed_counted() {
+        let header = SmallHeader { magic: 0x01020304, version: 9 };
+        let mut buf = Vec::new();
+        let written = buf.write_fixed_counted(&header).unwrap();
+        let (_, read): (SmallHeader, usize) = Cursor::new(buf).read_fixed_counted().unwrap();
+        assert_eq!(written, read);
+    }
+
+    #[test]
+    fn read_fixed_counted_sequential() {
+        let mut buf = Vec::new();
+        buf.write_fixed(&42u8).unwrap();
+        buf.write_fixed(&0x1234u16).unwrap();
+        let mut cursor = Cursor::new(buf);
+        let (v1, n1): (u8, usize) = cursor.read_fixed_counted().unwrap();
+        let (v2, n2): (u16, usize) = cursor.read_fixed_counted().unwrap();
+        assert_eq!(v1, 42);
+        assert_eq!(n1, 1);
+        assert_eq!(v2, 0x1234);
+        assert_eq!(n2, 2);
+    }
+
+    // ── write_value_counted ───────────────────────────────────────────────
+
+    #[test]
+    fn write_value_counted_vec() {
+        let data: Vec<u8> = vec![0xAA, 0xBB, 0xCC];
+        let mut buf = Vec::new();
+        let n = buf.write_value_counted(&data).unwrap();
+        // 8-byte LE u64 length prefix + 3 bytes payload
+        assert_eq!(n, 8 + 3);
+        assert_eq!(buf.len(), n);
+    }
+
+    #[test]
+    fn write_value_counted_string() {
+        let s = String::from("hi");
+        let mut buf = Vec::new();
+        let n = buf.write_value_counted(&s).unwrap();
+        // 8-byte LE u64 length prefix + 2 bytes UTF-8
+        assert_eq!(n, 8 + 2);
+        assert_eq!(buf.len(), n);
+    }
+
+    #[test]
+    fn write_value_counted_primitive_matches_fixed() {
+        let mut buf_val = Vec::new();
+        let n_val = buf_val.write_value_counted(&0xDEADBEEFu32).unwrap();
+        let mut buf_fix = Vec::new();
+        let n_fix = buf_fix.write_fixed_counted(&0xDEADBEEFu32).unwrap();
+        assert_eq!(n_val, n_fix);
+        assert_eq!(buf_val, buf_fix);
+    }
+
+    // ── read_value_counted ────────────────────────────────────────────────
+
+    #[test]
+    fn read_value_counted_vec() {
+        let original: Vec<u8> = vec![0xAA, 0xBB, 0xCC];
+        let mut buf = Vec::new();
+        let written = buf.write_value_counted(&original).unwrap();
+        let (restored, n): (Vec<u8>, usize) = Cursor::new(buf).read_value_counted().unwrap();
+        assert_eq!(restored, original);
+        assert_eq!(n, written);
+    }
+
+    #[test]
+    fn read_value_counted_string() {
+        let original = String::from("hello");
+        let mut buf = Vec::new();
+        let written = buf.write_value_counted(&original).unwrap();
+        let (restored, n): (String, usize) = Cursor::new(buf).read_value_counted().unwrap();
+        assert_eq!(restored, original);
+        assert_eq!(n, written);
+    }
+
+    #[test]
+    fn read_value_counted_sequential_framing() {
+        // Simulate a simple framing protocol: write two variable-length payloads
+        // and use counts to verify each frame's boundary.
+        let a: Vec<u8> = vec![1, 2, 3];
+        let b: Vec<u8> = vec![4, 5];
+        let mut buf = Vec::new();
+        let n_a = buf.write_value_counted(&a).unwrap();
+        let n_b = buf.write_value_counted(&b).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let (ra, count_a): (Vec<u8>, usize) = cursor.read_value_counted().unwrap();
+        let (rb, count_b): (Vec<u8>, usize) = cursor.read_value_counted().unwrap();
+        assert_eq!(ra, a);
+        assert_eq!(rb, b);
+        assert_eq!(count_a, n_a);
+        assert_eq!(count_b, n_b);
+    }
+
+    #[test]
+    fn read_value_counted_primitive() {
+        let original = 42u32;
+        let mut buf = Vec::new();
+        buf.write_value(&original).unwrap();
+        let (val, n): (u32, usize) = Cursor::new(buf).read_value_counted().unwrap();
+        assert_eq!(val, original);
+        assert_eq!(n, size_of::<u32>());
+    }
+}
+
 // ── Collection types ──────────────────────────────────────────────────────────
 
 mod collections {
