@@ -204,3 +204,37 @@ mod alloc_collections {
         ));
     }
 }
+
+#[cfg(feature = "std")]
+mod hash_collections {
+    use byteable::eio_async::{EioAsyncReadValue, EioAsyncWriteValue};
+    use std::collections::{HashMap, HashSet};
+
+    #[tokio::test]
+    async fn hashmap_roundtrip() {
+        let mut m: HashMap<u32, u32> = HashMap::new();
+        m.insert(1, 10);
+        m.insert(2, 20);
+        let mut buf = [0u8; 32];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&m).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: HashMap<u32, u32> = r.read_value().await.unwrap();
+        assert_eq!(restored, m);
+    }
+
+    #[tokio::test]
+    async fn hashset_roundtrip() {
+        let s: HashSet<u32> = HashSet::from([1, 2, 3]);
+        let mut buf = [0u8; 20];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&s).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: HashSet<u32> = r.read_value().await.unwrap();
+        assert_eq!(restored, s);
+    }
+}

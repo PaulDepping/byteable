@@ -25,6 +25,11 @@ use crate::eio::{
     EioReadFixed, EioReadValue, EioReadable, EioReadableError, EioReader, EioWritable,
     EioWriteFixed, EioWriteValue, EioWriter,
 };
+#[cfg(feature = "embedded-io-async")]
+use crate::eio_async::{
+    EioAsyncReadFixed, EioAsyncReadValue, EioAsyncReadable, EioAsyncReader, EioAsyncWritable,
+    EioAsyncWriteFixed, EioAsyncWriteValue, EioAsyncWriter,
+};
 use crate::{
     DecodeError, FromRawRepr, RawRepr, TryFromRawRepr,
     io::{ReadFixed, ReadValue, Readable, ReadableError, Writable, WriteFixed, WriteValue},
@@ -232,6 +237,103 @@ where
             writer.write_value(el)?;
         }
         Ok(())
+    }
+}
+
+// eio_async counterpart of the HashMap/HashSet impls above. Same std-only rationale as the
+// sync eio impls: HashMap/HashSet need std's RandomState hasher (OS randomness).
+#[cfg(feature = "embedded-io-async")]
+impl<K, V, S> EioAsyncReadable for HashMap<K, V, S>
+where
+    K: EioAsyncReadable + Eq + std::hash::Hash,
+    V: EioAsyncReadable,
+    S: BuildHasher + Default,
+{
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let len: u64 = reader.read_fixed().await?;
+            let len: usize = len.try_into().expect("could not convert u64 to usize");
+            let mut map = HashMap::with_capacity_and_hasher(len, S::default());
+            for _ in 0..len {
+                let key = reader.read_value().await?;
+                let val = reader.read_value().await?;
+                map.insert(key, val);
+            }
+            Ok(map)
+        }
+    }
+}
+
+#[cfg(feature = "embedded-io-async")]
+impl<K, V, S> EioAsyncWritable for HashMap<K, V, S>
+where
+    K: EioAsyncWritable,
+    V: EioAsyncWritable,
+    S: BuildHasher,
+{
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            let len: u64 = self
+                .len()
+                .try_into()
+                .expect("could not convert usize to u64");
+            writer.write_fixed(&len).await?;
+            for (k, v) in self {
+                writer.write_value(k).await?;
+                writer.write_value(v).await?;
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "embedded-io-async")]
+impl<T, S> EioAsyncReadable for HashSet<T, S>
+where
+    T: EioAsyncReadable + Eq + Hash,
+    S: BuildHasher + Default,
+{
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let len: u64 = reader.read_fixed().await?;
+            let len: usize = len.try_into().expect("could not convert u64 to usize");
+            let mut set = HashSet::with_capacity_and_hasher(len, S::default());
+            for _ in 0..len {
+                set.insert(reader.read_value().await?);
+            }
+            Ok(set)
+        }
+    }
+}
+
+#[cfg(feature = "embedded-io-async")]
+impl<T, S> EioAsyncWritable for HashSet<T, S>
+where
+    T: EioAsyncWritable,
+    S: BuildHasher,
+{
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            let len: u64 = self
+                .len()
+                .try_into()
+                .expect("could not convert usize to u64");
+            writer.write_fixed(&len).await?;
+            for el in self {
+                writer.write_value(el).await?;
+            }
+            Ok(())
+        }
     }
 }
 
