@@ -87,6 +87,9 @@ pub mod io;
 #[cfg(feature = "embedded-io")]
 pub mod eio;
 
+#[cfg(feature = "embedded-io-async")]
+pub mod eio_async;
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
