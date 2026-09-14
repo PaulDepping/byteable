@@ -16,7 +16,8 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     for attr in attrs {
         if attr.path().is_ident("byteable") {
             if let Meta::List(meta_list) = &attr.meta {
-                return match meta_list.tokens.to_string().as_str() {
+                let tokens = meta_list.tokens.to_string();
+                return match tokens.as_str() {
                     "little_endian" => AttributeType::LittleEndian,
                     "big_endian" => AttributeType::BigEndian,
                     "transparent" => AttributeType::None,
@@ -24,17 +25,53 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                     "io_only" => AttributeType::IoOnly,
                     other => panic!(
                         "Unknown byteable attribute: {other}. \
-                         Valid attributes are: little_endian, big_endian, try_transparent, io_only"
+                         Valid attributes are: little_endian, big_endian, try_transparent, io_only."
                     ),
                 };
             }
             panic!(
                 "Unknown byteable attribute. \
-                 Valid attributes are: little_endian, big_endian, try_transparent, io_only"
+                 Valid attributes are: little_endian, big_endian, try_transparent, io_only."
             );
         }
     }
     AttributeType::None
+}
+
+/// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from a `std::io`-based
+/// impl block and an `embedded-io`-based one, keeping only the ones this build of `byteable`
+/// actually supports.
+///
+/// This can't be done with `#[cfg(feature = "std")]` inside the emitted tokens themselves —
+/// that cfg would be evaluated against the *downstream* crate's own Cargo features (e.g. a
+/// `#![no_std]` binary that doesn't define a `std` feature at all), not `byteable`'s. Instead
+/// `byteable_derive` mirrors `byteable`'s `std`/`embedded-io` features onto itself (forwarded
+/// via `byteable_derive?/std` and `byteable_derive?/embedded-io` in `byteable/Cargo.toml`), so
+/// `cfg!` here — evaluated once, at the time this proc-macro crate itself was compiled —
+/// correctly reflects which wire formats are actually available for whoever is deriving.
+fn dynamic_pipeline_impls(
+    type_name: &Ident,
+    std_impl: proc_macro2::TokenStream,
+    eio_impl: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    if !cfg!(feature = "std") && !cfg!(feature = "embedded-io") {
+        panic!(
+            "deriving Byteable on `{type_name}` needs the io_only/field-enum dynamic pipeline, \
+             which requires the `std` and/or `embedded-io` feature of `byteable` to be enabled — \
+             neither is active for this build"
+        );
+    }
+    let std_impl = if cfg!(feature = "std") {
+        std_impl
+    } else {
+        quote! {}
+    };
+    let eio_impl = if cfg!(feature = "embedded-io") {
+        eio_impl
+    } else {
+        quote! {}
+    };
+    quote! { #std_impl #eio_impl }
 }
 
 /// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
@@ -58,7 +95,13 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///   A hidden `#[repr(C, packed)]` raw struct is created to hold the on-wire layout.
 ///
 /// - **I/O streaming** (`#[byteable(io_only)]` on structs, always for field enums):
-///   generates [`Readable`] and [`Writable`], reading/writing fields sequentially.
+///   generates [`Readable`]/[`Writable`] (`std::io`-based) when the `std` feature of
+///   `byteable` is enabled, and/or [`eio::EioReadable`]/[`eio::EioWritable`] (the
+///   `no_std`-friendly counterparts, identical field-by-field wire format) when the
+///   `embedded-io` feature is enabled — both if both are on, and a compile error at the
+///   derive site if neither is. Not opt-in per type: if a field type doesn't support the
+///   wire format a given feature implies, that surfaces as a normal compile error, same as
+///   any other trait with field requirements.
 ///
 /// - **Unit enums** (all variants are unit): generates [`TryFromRawRepr`],
 ///   [`IntoByteArray`], and [`TryFromByteArray`] using an automatically-chosen
@@ -72,6 +115,8 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// [`TryFromByteArray`]: byteable::TryFromByteArray
 /// [`Readable`]: byteable::Readable
 /// [`Writable`]: byteable::Writable
+/// [`eio::EioReadable`]: byteable::eio::EioReadable
+/// [`eio::EioWritable`]: byteable::eio::EioWritable
 ///
 /// # Struct-level attributes
 ///
@@ -81,7 +126,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// |-----------|--------|
 /// | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
 /// | `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
-/// | `#[byteable(io_only)]` | Generate `Readable`/`Writable` instead of fixed-size traits |
+/// | `#[byteable(io_only)]` | Generate `Readable`/`Writable`/`EioReadable`/`EioWritable` (per enabled feature) instead of fixed-size traits |
 ///
 /// # Field-level attributes
 ///
@@ -377,7 +422,7 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         (bindings, quote! { Ok(Self { #(#field_idents),* }) })
     };
 
-    quote! {
+    let std_impl = quote! {
         impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
             fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
                 use #bc::ReadValue;
@@ -392,7 +437,25 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 Ok(())
             }
         }
-    }.into()
+    };
+    let eio_impl = quote! {
+        impl #impl_generics #bc::eio::EioReadable for #name #type_generics #where_clause {
+            fn read_from<__ByteableEioR: #bc::eio::EioReader + ?Sized>(mut reader: &mut __ByteableEioR) -> Result<Self, #bc::eio::EioReadableError<__ByteableEioR::Error>> {
+                use #bc::eio::EioReadValue;
+                #( #read_bindings )*
+                #construct_expr
+            }
+        }
+        impl #impl_generics #bc::eio::EioWritable for #name #type_generics #where_clause {
+            fn write_to<__ByteableEioW: #bc::eio::EioWriter + ?Sized>(&self, mut writer: &mut __ByteableEioW) -> Result<(), __ByteableEioW::Error> {
+                use #bc::eio::EioWriteValue;
+                #( #write_stmts )*
+                Ok(())
+            }
+        }
+    };
+
+    dynamic_pipeline_impls(name, std_impl, eio_impl).into()
 }
 
 fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
@@ -828,7 +891,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         },
     };
 
-    let write_arms = enum_data
+    let write_arms: Vec<_> = enum_data
         .variants
         .iter()
         .zip(&discriminants)
@@ -890,8 +953,9 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
             }
-        });
-    let read_arms = enum_data
+        })
+        .collect();
+    let read_arms: Vec<_> = enum_data
         .variants
         .iter()
         .zip(&discriminants)
@@ -938,8 +1002,10 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
             }
-        });
-    quote! {
+        })
+        .collect();
+
+    let std_impl = quote! {
         impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
                 use #bc::WriteValue;
@@ -949,7 +1015,6 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 Ok(())
             }
         }
-
 
         impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
             fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
@@ -961,7 +1026,31 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 }
             }
         }
-    }.into()
+    };
+    let eio_impl = quote! {
+        impl #impl_generics #bc::eio::EioWritable for #name #type_generics #where_clause {
+            fn write_to<__ByteableEioW: #bc::eio::EioWriter + ?Sized>(&self, mut writer: &mut __ByteableEioW) -> Result<(), __ByteableEioW::Error> {
+                use #bc::eio::EioWriteValue;
+                match self {
+                    #(#write_arms)*
+                }
+                Ok(())
+            }
+        }
+
+        impl #impl_generics #bc::eio::EioReadable for #name #type_generics #where_clause {
+            fn read_from<__ByteableEioR: #bc::eio::EioReader + ?Sized>(mut reader: &mut __ByteableEioR) -> Result<Self, #bc::eio::EioReadableError<__ByteableEioR::Error>> {
+                use #bc::eio::EioReadValue;
+                #read_disc
+                match disc {
+                    #(#read_arms)*
+                    _ => Err(#bc::eio::EioReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
+                }
+            }
+        }
+    };
+
+    dynamic_pipeline_impls(&name, std_impl, eio_impl).into()
 }
 
 fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {

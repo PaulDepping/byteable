@@ -1,0 +1,13 @@
+[package]
+name = "no_std_check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+byteable = { path = "..", default-features = false, features = ["derive", "embedded-io"] }
+cortex-m-rt = "0.7.6"
+panic-halt = "1.0.0"
+
+[profile.release]
+panic = "abort"

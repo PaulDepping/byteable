@@ -20,6 +20,11 @@
 //!
 //! All multi-byte length prefixes are little-endian `u64`.
 
+#[cfg(feature = "embedded-io")]
+use crate::eio::{
+    EioReadFixed, EioReadValue, EioReadable, EioReadableError, EioReader, EioWritable,
+    EioWriteFixed, EioWriteValue, EioWriter,
+};
 use crate::{
     DecodeError, FromRawRepr, RawRepr, TryFromRawRepr,
     io::{ReadFixed, ReadValue, Readable, ReadableError, Writable, WriteFixed, WriteValue},
@@ -141,6 +146,95 @@ where
     }
 }
 
+// eio counterpart of the `Readable`/`Writable` impls above. `HashMap`/`HashSet` need `std`'s
+// `RandomState` hasher (OS randomness), so — unlike the `alloc`-backed collections in
+// `alloc_types_eio.rs` — these live here, gated on `std` (this module) rather than `alloc`.
+// Additionally gated on `embedded-io` here, matching `alloc_types_eio.rs`'s
+// `#[cfg(all(feature = "embedded-io", feature = "alloc"))]`: `eio`'s traits would compile and
+// resolve fine without it (see `eio.rs`'s module doc comment), but the convention in this
+// crate is to keep eio-specific impls out of the build entirely unless `embedded-io` is on,
+// not merely unreachable.
+#[cfg(feature = "embedded-io")]
+impl<K, V, S> EioReadable for HashMap<K, V, S>
+where
+    K: EioReadable + Eq + std::hash::Hash,
+    V: EioReadable,
+    S: BuildHasher + Default,
+{
+    fn read_from<R: EioReader + ?Sized>(
+        reader: &mut R,
+    ) -> Result<Self, EioReadableError<R::Error>> {
+        let len: u64 = reader.read_fixed()?;
+        let len: usize = len.try_into().expect("could not convert u64 to usize");
+        let mut map = HashMap::with_capacity_and_hasher(len, S::default());
+        for _ in 0..len {
+            let key = reader.read_value()?;
+            let val = reader.read_value()?;
+            map.insert(key, val);
+        }
+        Ok(map)
+    }
+}
+
+#[cfg(feature = "embedded-io")]
+impl<K, V, S> EioWritable for HashMap<K, V, S>
+where
+    K: EioWritable,
+    V: EioWritable,
+    S: BuildHasher,
+{
+    fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+        let len: u64 = self
+            .len()
+            .try_into()
+            .expect("could not convert usize to u64");
+        writer.write_fixed(&len)?;
+        for (k, v) in self {
+            writer.write_value(k)?;
+            writer.write_value(v)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "embedded-io")]
+impl<T, S> EioReadable for HashSet<T, S>
+where
+    T: EioReadable + Eq + Hash,
+    S: BuildHasher + Default,
+{
+    fn read_from<R: EioReader + ?Sized>(
+        reader: &mut R,
+    ) -> Result<Self, EioReadableError<R::Error>> {
+        let len: u64 = reader.read_fixed()?;
+        let len: usize = len.try_into().expect("could not convert u64 to usize");
+        let mut set = HashSet::with_capacity_and_hasher(len, S::default());
+        for _ in 0..len {
+            set.insert(reader.read_value()?);
+        }
+        Ok(set)
+    }
+}
+
+#[cfg(feature = "embedded-io")]
+impl<T, S> EioWritable for HashSet<T, S>
+where
+    T: EioWritable,
+    S: BuildHasher,
+{
+    fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+        let len: u64 = self
+            .len()
+            .try_into()
+            .expect("could not convert usize to u64");
+        writer.write_fixed(&len)?;
+        for el in self {
+            writer.write_value(el)?;
+        }
+        Ok(())
+    }
+}
+
 // Wire format: `u64` entry count (LE), then alternating key/value pairs in sorted order.
 impl<K: Readable + Ord, V: Readable> Readable for BTreeMap<K, V> {
     fn read_from(mut reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
@@ -213,7 +307,7 @@ impl Readable for String {
 // Wire format: same as String (UTF-8). Non-UTF-8 paths cannot be deserialized.
 impl Readable for PathBuf {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
-        let s = String::read_from(reader)?;
+        let s = <String as Readable>::read_from(reader)?;
         Ok(PathBuf::from(s))
     }
 }
@@ -221,7 +315,7 @@ impl Readable for PathBuf {
 // Wire format: Vec<u8> bytes without the null terminator. Rejects interior nulls.
 impl Readable for CString {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
-        let v = Vec::read_from(reader)?;
+        let v = <Vec<u8> as Readable>::read_from(reader)?;
         CString::new(v).map_err(|_| ReadableError::DecodeError(DecodeError::InvalidCString))
     }
 }
@@ -383,7 +477,7 @@ impl Writable for str {
 impl Writable for Path {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
         match self.to_str() {
-            Some(s) => s.write_to(writer),
+            Some(s) => Writable::write_to(s, writer),
             None => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "path contains invalid UTF-8 characters",
@@ -394,19 +488,19 @@ impl Writable for Path {
 
 impl Writable for CStr {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
-        self.to_bytes().write_to(writer)
+        Writable::write_to(self.to_bytes(), writer)
     }
 }
 
 impl Writable for String {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
-        self.as_str().write_to(writer)
+        Writable::write_to(self.as_str(), writer)
     }
 }
 
 impl Writable for CString {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
-        self.as_bytes().write_to(writer)
+        Writable::write_to(self.as_bytes(), writer)
     }
 }
 

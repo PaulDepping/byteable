@@ -27,16 +27,19 @@ self-describing wire formats.
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.31"
+byteable = "0.33"
 
 # with async (tokio) support
-byteable = { version = "0.31", features = ["tokio"] }
+byteable = { version = "0.33", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.31", features = ["ordered-float"] }
+byteable = { version = "0.33", features = ["ordered-float"] }
+
+# with embedded-io support (no_std friendly — combine with `alloc` for Vec/String support)
+byteable = { version = "0.33", features = ["embedded-io"] }
 
 # everything
-byteable = { version = "0.31", features = ["all"] }
+byteable = { version = "0.33", features = ["all"] }
 ```
 
 ## Quick Start
@@ -89,6 +92,44 @@ buf.write_value(&wp).unwrap();
 let wp2 = std::io::Cursor::new(&buf).read_value::<Waypoint>().unwrap();
 assert_eq!(wp.id, wp2.id);
 assert_eq!(wp.label, wp2.label);
+```
+
+### Embedded-IO I/O streaming
+
+`#[byteable(io_only)]` structs and field/variant enums generate `Readable`/`Writable`
+(`std::io`-based) and/or `EioReadable`/`EioWritable` (`embedded-io`-based) purely from which of
+`byteable`'s own `std`/`embedded-io` features are enabled — both if both are on, and it's a
+compile error at the derive site if neither is. In a genuinely `no_std` build (`embedded-io`
+enabled, `std` not), only the `EioReadable`/`EioWritable` impls are generated, so no `std`
+reference ever appears — no separate opt-in attribute needed.
+
+```rust
+use byteable::Byteable;
+use byteable::eio::{EioReadValue, EioWriteValue};
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Reading {
+    sensor_id: u16,
+    value: Option<i32>,
+}
+
+// Field enums always use this pipeline — no `#[byteable(io_only)]` needed.
+#[derive(Byteable, Debug, PartialEq)]
+enum Command {
+    Ping,
+    SetThreshold(i32),
+}
+
+let r = Reading { sensor_id: 3, value: Some(-12) };
+let mut buf = [0u8; 16];
+{
+    let mut w: &mut [u8] = &mut buf;
+    w.write_value(&r).unwrap();
+}
+let mut cursor: &[u8] = &buf;
+let r2: Reading = cursor.read_value().unwrap();
+assert_eq!(r, r2);
 ```
 
 ### Controlling endianness
