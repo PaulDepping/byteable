@@ -154,3 +154,53 @@ mod borrowed_write {
         assert_eq!(&buf[8..10], b"hi");
     }
 }
+
+#[cfg(feature = "alloc")]
+mod alloc_collections {
+    extern crate alloc;
+
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use byteable::eio_async::{EioAsyncReadValue, EioAsyncWriteValue};
+
+    #[tokio::test]
+    async fn vec_roundtrip() {
+        let v: Vec<u32> = alloc::vec![1, 2, 3];
+        let mut buf = [0u8; 20];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&v).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: Vec<u32> = r.read_value().await.unwrap();
+        assert_eq!(restored, v);
+    }
+
+    #[tokio::test]
+    async fn string_roundtrip() {
+        let s: String = String::from("hello");
+        let mut buf = [0u8; 13];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&s).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: String = r.read_value().await.unwrap();
+        assert_eq!(restored, s);
+    }
+
+    #[tokio::test]
+    async fn string_invalid_utf8_is_decode_error() {
+        use byteable::DecodeError;
+        use byteable::eio::EioReadableError;
+        let mut buf = [0u8; 9];
+        buf[..8].copy_from_slice(&1u64.to_le_bytes());
+        buf[8] = 0xFF; // invalid UTF-8 byte
+        let mut r: &[u8] = &buf;
+        let err = r.read_value::<String>().await.unwrap_err();
+        assert!(matches!(
+            err,
+            EioReadableError::DecodeError(DecodeError::InvalidUtf8)
+        ));
+    }
+}

@@ -96,6 +96,9 @@ extern crate alloc;
 #[cfg(all(feature = "embedded-io", feature = "alloc"))]
 mod alloc_types_eio;
 
+#[cfg(all(feature = "embedded-io-async", feature = "alloc"))]
+mod alloc_types_eio_async;
+
 mod core_types;
 
 #[cfg(feature = "std")]
