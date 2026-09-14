@@ -9,7 +9,8 @@
 //! - **Dynamic types** (`#[byteable(io_only)]`) write fields sequentially and
 //!   support `Vec<T>`, `String`, and other variable-length collections.
 
-use byteable::{Byteable, FromByteArray, IntoByteArray, ReadValue, ReadableError, WriteValue};
+use byteable::io::{ReadValue, ReadableError, WriteValue};
+use byteable::{Byteable, FromByteArray, IntoByteArray};
 use std::io::Cursor;
 
 // ── Fixed-size struct ─────────────────────────────────────────────────────────

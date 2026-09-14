@@ -3,7 +3,8 @@
 //! Field enums implement `Readable` + `Writable` (stream-based I/O) rather than
 //! `IntoByteArray`/`FromByteArray`, because variant sizes differ.
 #![cfg(all(feature = "std", feature = "derive"))]
-use byteable::{Byteable, ReadValue, ReadableError, WriteValue};
+use byteable::Byteable;
+use byteable::io::{ReadValue, ReadableError, WriteValue};
 use std::io::Cursor;
 
 // ── Basic field enum with u8 discriminant ────────────────────────────────────
@@ -173,9 +174,18 @@ fn big_endian_field_variant_roundtrip() {
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum Typed {
-    Small { val: u8 } = 0,
-    Wide { val: u32 } = 1,
-    Network { #[byteable(big_endian)] port: u16, #[byteable(big_endian)] addr: u32 } = 2,
+    Small {
+        val: u8,
+    } = 0,
+    Wide {
+        val: u32,
+    } = 1,
+    Network {
+        #[byteable(big_endian)]
+        port: u16,
+        #[byteable(big_endian)]
+        addr: u32,
+    } = 2,
 }
 
 #[test]
