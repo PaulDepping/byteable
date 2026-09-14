@@ -316,3 +316,57 @@ mod collections {
         assert_eq!(roundtrip(&original).await, original);
     }
 }
+
+mod io_only_derive {
+    use byteable::Byteable;
+    use byteable::async_io::{AsyncReadValue, AsyncWriteValue};
+    use std::io::Cursor;
+
+    #[derive(Byteable, Debug, PartialEq)]
+    #[byteable(io_only)]
+    struct Message {
+        id: u32,
+        flag: Option<u8>,
+    }
+
+    #[tokio::test]
+    async fn io_only_struct_roundtrip_over_tokio() {
+        let msg = Message {
+            id: 42,
+            flag: Some(1),
+        };
+        let mut buf = Cursor::new(Vec::new());
+        buf.write_value(&msg).await.unwrap();
+        buf.set_position(0);
+        let restored: Message = buf.read_value().await.unwrap();
+        assert_eq!(restored, msg);
+    }
+}
+
+mod field_enum {
+    use byteable::Byteable;
+    use byteable::async_io::{AsyncReadValue, AsyncWriteValue};
+    use std::io::Cursor;
+
+    #[derive(Byteable, Debug, PartialEq)]
+    enum Command {
+        Nothing,
+        Read(u32, u64),
+        Write { a: u32, b: u64 },
+    }
+
+    #[tokio::test]
+    async fn tuple_and_named_variants_roundtrip_over_tokio() {
+        for cmd in [
+            Command::Nothing,
+            Command::Read(1, 2),
+            Command::Write { a: 3, b: 4 },
+        ] {
+            let mut buf = Cursor::new(Vec::new());
+            buf.write_value(&cmd).await.unwrap();
+            buf.set_position(0);
+            let restored: Command = buf.read_value().await.unwrap();
+            assert_eq!(restored, cmd);
+        }
+    }
+}

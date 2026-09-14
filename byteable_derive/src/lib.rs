@@ -53,6 +53,8 @@ fn dynamic_pipeline_impls(
     type_name: &Ident,
     std_impl: proc_macro2::TokenStream,
     eio_impl: proc_macro2::TokenStream,
+    async_impl: proc_macro2::TokenStream,
+    eio_async_impl: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     if !cfg!(feature = "std") && !cfg!(feature = "embedded-io") {
         panic!(
@@ -71,7 +73,21 @@ fn dynamic_pipeline_impls(
     } else {
         quote! {}
     };
-    quote! { #std_impl #eio_impl }
+    // tokio/embedded-io-async are "bonus" async impls layered on an already-guaranteed sync
+    // base (tokio implies std, embedded-io-async implies embedded-io — see Cargo.toml), so
+    // they need no analog of the panic! above: it is structurally impossible to enable either
+    // without its sync base already satisfying it.
+    let async_impl = if cfg!(feature = "tokio") {
+        async_impl
+    } else {
+        quote! {}
+    };
+    let eio_async_impl = if cfg!(feature = "embedded-io-async") {
+        eio_async_impl
+    } else {
+        quote! {}
+    };
+    quote! { #std_impl #eio_impl #async_impl #eio_async_impl }
 }
 
 /// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
@@ -96,10 +112,13 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///
 /// - **I/O streaming** (`#[byteable(io_only)]` on structs, always for field enums):
 ///   generates [`Readable`]/[`Writable`] (`std::io`-based) when the `std` feature of
-///   `byteable` is enabled, and/or [`eio::EioReadable`]/[`eio::EioWritable`] (the
-///   `no_std`-friendly counterparts, identical field-by-field wire format) when the
-///   `embedded-io` feature is enabled — both if both are on, and a compile error at the
-///   derive site if neither is. Not opt-in per type: if a field type doesn't support the
+///   `byteable` is enabled, [`eio::EioReadable`]/[`eio::EioWritable`] (the `no_std`-friendly
+///   counterpart) when `embedded-io` is enabled, [`async_io::AsyncReadable`]/
+///   [`async_io::AsyncWritable`] (tokio-based) when `tokio` is enabled, and
+///   [`eio_async::EioAsyncReadable`]/[`eio_async::EioAsyncWritable`] (the async, `no_std`-friendly
+///   counterpart) when `embedded-io-async` is enabled — any combination of the four, and a
+///   compile error at the derive site if none of `std`/`embedded-io` is on (the two async
+///   flavors each imply one of these). Not opt-in per type: if a field type doesn't support the
 ///   wire format a given feature implies, that surfaces as a normal compile error, same as
 ///   any other trait with field requirements.
 ///
@@ -117,6 +136,10 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// [`Writable`]: byteable::io::Writable
 /// [`eio::EioReadable`]: byteable::eio::EioReadable
 /// [`eio::EioWritable`]: byteable::eio::EioWritable
+/// [`async_io::AsyncReadable`]: byteable::async_io::AsyncReadable
+/// [`async_io::AsyncWritable`]: byteable::async_io::AsyncWritable
+/// [`eio_async::EioAsyncReadable`]: byteable::eio_async::EioAsyncReadable
+/// [`eio_async::EioAsyncWritable`]: byteable::eio_async::EioAsyncWritable
 ///
 /// # Struct-level attributes
 ///
@@ -126,7 +149,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// |-----------|--------|
 /// | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
 /// | `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
-/// | `#[byteable(io_only)]` | Generate `Readable`/`Writable`/`EioReadable`/`EioWritable` (per enabled feature) instead of fixed-size traits |
+/// | `#[byteable(io_only)]` | Generate `Readable`/`Writable`/`EioReadable`/`EioWritable`/`AsyncReadable`/`AsyncWritable`/`EioAsyncReadable`/`EioAsyncWritable` (per enabled feature) instead of fixed-size traits |
 ///
 /// # Field-level attributes
 ///
@@ -251,15 +274,16 @@ fn gen_struct_field_write(
     field_type: &Type,
     attrs: &[syn::Attribute],
     bc: &proc_macro2::TokenStream,
+    awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
-            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(#field_access))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(#field_access))#awaited?;
         },
         AttributeType::BigEndian => quote! {
-            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(#field_access))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(#field_access))#awaited?;
         },
-        AttributeType::None => quote! { writer.write_value(&#field_access)?; },
+        AttributeType::None => quote! { writer.write_value(&#field_access)#awaited?; },
         AttributeType::IoOnly => {
             panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
         }
@@ -275,15 +299,18 @@ fn gen_field_read(
     field_ty: &syn::Type,
     attrs: &[syn::Attribute],
     bc: &proc_macro2::TokenStream,
+    awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => {
-            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::LE>()?.get(); }
+            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::LE>()#awaited?.get(); }
         }
         AttributeType::BigEndian => {
-            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::BE>()?.get(); }
+            quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::BE>()#awaited?.get(); }
         }
-        AttributeType::None => quote! { let #field_ident: #field_ty = reader.read_value()?; },
+        AttributeType::None => {
+            quote! { let #field_ident: #field_ty = reader.read_value()#awaited?; }
+        }
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
              only little_endian and big_endian are supported here"
@@ -388,7 +415,10 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         syn::Fields::Unit => unreachable!(),
     };
 
-    let write_stmts: Vec<_> = fields
+    let awaited_sync = quote! {};
+    let awaited_async = quote! { .await };
+
+    let field_accesses: Vec<_> = fields
         .iter()
         .enumerate()
         .map(|(i, field)| {
@@ -399,27 +429,72 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 let fname = field.ident.as_ref().unwrap();
                 quote! { self.#fname }
             };
-            gen_struct_field_write(&field_access, &field.ty, &field.attrs, &bc)
+            (field_access, field)
+        })
+        .collect();
+    let write_stmts: Vec<_> = field_accesses
+        .iter()
+        .map(|(access, field)| {
+            gen_struct_field_write(access, &field.ty, &field.attrs, &bc, &awaited_sync)
+        })
+        .collect();
+    let write_stmts_async: Vec<_> = field_accesses
+        .iter()
+        .map(|(access, field)| {
+            gen_struct_field_write(access, &field.ty, &field.attrs, &bc, &awaited_async)
         })
         .collect();
 
-    let (read_bindings, construct_expr): (Vec<_>, proc_macro2::TokenStream) = if is_tuple {
+    let (read_bindings, read_bindings_async, construct_expr): (
+        Vec<_>,
+        Vec<_>,
+        proc_macro2::TokenStream,
+    ) = if is_tuple {
         let idents: Vec<_> = (0..fields.len())
             .map(|i| syn::Ident::new(&format!("__field_{i}"), name.span()))
             .collect();
         let bindings = fields
             .iter()
             .zip(&idents)
-            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc))
+            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc, &awaited_sync))
             .collect();
-        (bindings, quote! { Ok(Self(#(#idents),*)) })
+        let bindings_async = fields
+            .iter()
+            .zip(&idents)
+            .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc, &awaited_async))
+            .collect();
+        (bindings, bindings_async, quote! { Ok(Self(#(#idents),*)) })
     } else {
         let field_idents: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
         let bindings = fields
             .iter()
-            .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
+            .map(|f| {
+                gen_field_read(
+                    f.ident.as_ref().unwrap(),
+                    &f.ty,
+                    &f.attrs,
+                    &bc,
+                    &awaited_sync,
+                )
+            })
             .collect();
-        (bindings, quote! { Ok(Self { #(#field_idents),* }) })
+        let bindings_async = fields
+            .iter()
+            .map(|f| {
+                gen_field_read(
+                    f.ident.as_ref().unwrap(),
+                    &f.ty,
+                    &f.attrs,
+                    &bc,
+                    &awaited_async,
+                )
+            })
+            .collect();
+        (
+            bindings,
+            bindings_async,
+            quote! { Ok(Self { #(#field_idents),* }) },
+        )
     };
 
     let std_impl = quote! {
@@ -454,8 +529,48 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
             }
         }
     };
+    let async_impl = quote! {
+        impl #impl_generics #bc::async_io::AsyncReadable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
+                async move {
+                    use #bc::async_io::AsyncReadValue;
+                    #( #read_bindings_async )*
+                    #construct_expr
+                }
+            }
+        }
+        impl #impl_generics #bc::async_io::AsyncWritable for #name #type_generics #where_clause {
+            fn write_to(&self, mut writer: &mut (impl ::tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
+                async move {
+                    use #bc::async_io::AsyncWriteValue;
+                    #( #write_stmts_async )*
+                    Ok(())
+                }
+            }
+        }
+    };
+    let eio_async_impl = quote! {
+        impl #impl_generics #bc::eio_async::EioAsyncReadable for #name #type_generics #where_clause {
+            fn read_from<__ByteableEioAsyncR: #bc::eio_async::EioAsyncReader + ?Sized>(mut reader: &mut __ByteableEioAsyncR) -> impl ::core::future::Future<Output = Result<Self, #bc::eio::EioReadableError<__ByteableEioAsyncR::Error>>> {
+                async move {
+                    use #bc::eio_async::EioAsyncReadValue;
+                    #( #read_bindings_async )*
+                    #construct_expr
+                }
+            }
+        }
+        impl #impl_generics #bc::eio_async::EioAsyncWritable for #name #type_generics #where_clause {
+            fn write_to<__ByteableEioAsyncW: #bc::eio_async::EioAsyncWriter + ?Sized>(&self, mut writer: &mut __ByteableEioAsyncW) -> impl ::core::future::Future<Output = Result<(), __ByteableEioAsyncW::Error>> {
+                async move {
+                    use #bc::eio_async::EioAsyncWriteValue;
+                    #( #write_stmts_async )*
+                    Ok(())
+                }
+            }
+        }
+    };
 
-    dynamic_pipeline_impls(name, std_impl, eio_impl).into()
+    dynamic_pipeline_impls(name, std_impl, eio_impl, async_impl, eio_async_impl).into()
 }
 
 fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
@@ -821,16 +936,17 @@ fn gen_enum_field_write(
     field_type: &Type,
     attrs: &[syn::Attribute],
     bc: &proc_macro2::TokenStream,
+    awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     match parse_byteable_attr(attrs) {
         AttributeType::LittleEndian => quote! {
-            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(*#field_ident))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(*#field_ident))#awaited?;
         },
         AttributeType::BigEndian => quote! {
-            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(*#field_ident))?;
+            writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(*#field_ident))#awaited?;
         },
         AttributeType::None => quote! {
-            writer.write_value(#field_ident)?;
+            writer.write_value(#field_ident)#awaited?;
         },
         other => panic!(
             "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
@@ -875,135 +991,157 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     let endian_attr = parse_byteable_attr(&input.attrs);
     let discriminants = compute_discriminants(&enum_data.variants);
 
-    let read_disc = match endian_attr {
+    let awaited_sync = quote! {};
+    let awaited_async = quote! { .await };
+
+    let gen_read_disc = |awaited: &proc_macro2::TokenStream| match endian_attr {
         AttributeType::LittleEndian => quote! {
             let disc: #repr_ty = <#repr_ty as #bc::FromEndianRepr>::from_little_endian(
-                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::LE>()?
+                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::LE>()#awaited?
             );
         },
         AttributeType::BigEndian => quote! {
             let disc: #repr_ty = <#repr_ty as #bc::FromEndianRepr>::from_big_endian(
-                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::BE>()?
+                reader.read_value::<<#repr_ty as #bc::HasEndianRepr>::BE>()#awaited?
             );
         },
         _ => quote! {
-            let disc: #repr_ty = reader.read_value()?;
+            let disc: #repr_ty = reader.read_value()#awaited?;
         },
     };
+    let read_disc = gen_read_disc(&awaited_sync);
+    let read_disc_async = gen_read_disc(&awaited_async);
 
-    let write_arms: Vec<_> = enum_data
-        .variants
-        .iter()
-        .zip(&discriminants)
-        .map(|(variant, disc_tokens)| {
-            let variant_name = &variant.ident;
-            let write_disc = match endian_attr {
-                AttributeType::LittleEndian => quote! {
-                    let disc_val: #repr_ty = #disc_tokens;
-                    writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_little_endian(disc_val))?;
-                },
-                AttributeType::BigEndian => quote! {
-                    let disc_val: #repr_ty = #disc_tokens;
-                    writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_big_endian(disc_val))?;
-                },
-                _ => quote! {
-                    let disc_val: #repr_ty = #disc_tokens;
-                    writer.write_value(&disc_val)?;
-                },
-            };
-            match &variant.fields {
-                Fields::Unit => quote! {
-                    #name::#variant_name => { #write_disc }
-                },
-                Fields::Named(named) => {
-                    let field_names: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| f.ident.as_ref().unwrap())
-                        .collect();
-                    let field_writes: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| {
-                            gen_enum_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc)
-                        })
-                        .collect();
-                    quote! {
-                        #name::#variant_name { #(#field_names),* } => {
-                            #write_disc
-                            #( #field_writes )*
+    let gen_write_arms = |awaited: &proc_macro2::TokenStream| -> Vec<proc_macro2::TokenStream> {
+        enum_data
+            .variants
+            .iter()
+            .zip(&discriminants)
+            .map(|(variant, disc_tokens)| {
+                let variant_name = &variant.ident;
+                let write_disc = match endian_attr {
+                    AttributeType::LittleEndian => quote! {
+                        let disc_val: #repr_ty = #disc_tokens;
+                        writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_little_endian(disc_val))#awaited?;
+                    },
+                    AttributeType::BigEndian => quote! {
+                        let disc_val: #repr_ty = #disc_tokens;
+                        writer.write_value(&<#repr_ty as #bc::HasEndianRepr>::to_big_endian(disc_val))#awaited?;
+                    },
+                    _ => quote! {
+                        let disc_val: #repr_ty = #disc_tokens;
+                        writer.write_value(&disc_val)#awaited?;
+                    },
+                };
+                match &variant.fields {
+                    Fields::Unit => quote! {
+                        #name::#variant_name => { #write_disc }
+                    },
+                    Fields::Named(named) => {
+                        let field_names: Vec<_> = named
+                            .named
+                            .iter()
+                            .map(|f| f.ident.as_ref().unwrap())
+                            .collect();
+                        let field_writes: Vec<_> = named
+                            .named
+                            .iter()
+                            .map(|f| {
+                                gen_enum_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc, awaited)
+                            })
+                            .collect();
+                        quote! {
+                            #name::#variant_name { #(#field_names),* } => {
+                                #write_disc
+                                #( #field_writes )*
+                            }
+                        }
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                            .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
+                            .collect();
+                        let field_writes: Vec<_> = unnamed
+                            .unnamed
+                            .iter()
+                            .zip(&field_idents)
+                            .map(|(f, ident)| gen_enum_field_write(ident, &f.ty, &f.attrs, &bc, awaited))
+                            .collect();
+                        quote! {
+                            #name::#variant_name(#(#field_idents),*) => {
+                                #write_disc
+                                #( #field_writes )*
+                            }
                         }
                     }
                 }
-                Fields::Unnamed(unnamed) => {
-                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                        .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
-                        .collect();
-                    let field_writes: Vec<_> = unnamed
-                        .unnamed
-                        .iter()
-                        .zip(&field_idents)
-                        .map(|(f, ident)| gen_enum_field_write(ident, &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #name::#variant_name(#(#field_idents),*) => {
-                            #write_disc
-                            #( #field_writes )*
-                        }
-                    }
-                }
-            }
-        })
-        .collect();
-    let read_arms: Vec<_> = enum_data
-        .variants
-        .iter()
-        .zip(&discriminants)
-        .map(|(variant, disc_tokens)| {
-            let variant_name = &variant.ident;
+            })
+            .collect()
+    };
+    let write_arms = gen_write_arms(&awaited_sync);
+    let write_arms_async = gen_write_arms(&awaited_async);
 
-            match &variant.fields {
-                Fields::Unit => quote! {
-                    #disc_tokens => Ok(#name::#variant_name),
-                },
-                Fields::Named(named) => {
-                    let field_idents: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| f.ident.as_ref().unwrap())
-                        .collect();
-                    let field_reads: Vec<_> = named
-                        .named
-                        .iter()
-                        .map(|f| gen_field_read(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #disc_tokens => {
-                            #( #field_reads )*
-                            Ok(#name::#variant_name { #(#field_idents),* })
+    let gen_read_arms = |awaited: &proc_macro2::TokenStream| -> Vec<proc_macro2::TokenStream> {
+        enum_data
+            .variants
+            .iter()
+            .zip(&discriminants)
+            .map(|(variant, disc_tokens)| {
+                let variant_name = &variant.ident;
+
+                match &variant.fields {
+                    Fields::Unit => quote! {
+                        #disc_tokens => Ok(#name::#variant_name),
+                    },
+                    Fields::Named(named) => {
+                        let field_idents: Vec<_> = named
+                            .named
+                            .iter()
+                            .map(|f| f.ident.as_ref().unwrap())
+                            .collect();
+                        let field_reads: Vec<_> = named
+                            .named
+                            .iter()
+                            .map(|f| {
+                                gen_field_read(
+                                    f.ident.as_ref().unwrap(),
+                                    &f.ty,
+                                    &f.attrs,
+                                    &bc,
+                                    awaited,
+                                )
+                            })
+                            .collect();
+                        quote! {
+                            #disc_tokens => {
+                                #( #field_reads )*
+                                Ok(#name::#variant_name { #(#field_idents),* })
+                            }
+                        }
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                            .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
+                            .collect();
+                        let field_reads: Vec<_> = unnamed
+                            .unnamed
+                            .iter()
+                            .zip(&field_idents)
+                            .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc, awaited))
+                            .collect();
+                        quote! {
+                            #disc_tokens => {
+                                #( #field_reads )*
+                                Ok(#name::#variant_name(#(#field_idents),*))
+                            }
                         }
                     }
                 }
-                Fields::Unnamed(unnamed) => {
-                    let field_idents: Vec<_> = (0..unnamed.unnamed.len())
-                        .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
-                        .collect();
-                    let field_reads: Vec<_> = unnamed
-                        .unnamed
-                        .iter()
-                        .zip(&field_idents)
-                        .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc))
-                        .collect();
-                    quote! {
-                        #disc_tokens => {
-                            #( #field_reads )*
-                            Ok(#name::#variant_name(#(#field_idents),*))
-                        }
-                    }
-                }
-            }
-        })
-        .collect();
+            })
+            .collect()
+    };
+    let read_arms = gen_read_arms(&awaited_sync);
+    let read_arms_async = gen_read_arms(&awaited_async);
 
     let std_impl = quote! {
         impl #impl_generics #bc::io::Writable for #name #type_generics #where_clause {
@@ -1049,8 +1187,60 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             }
         }
     };
+    let async_impl = quote! {
+        impl #impl_generics #bc::async_io::AsyncWritable for #name #type_generics #where_clause {
+            fn write_to(&self, mut writer: &mut (impl ::tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
+                async move {
+                    use #bc::async_io::AsyncWriteValue;
+                    match self {
+                        #(#write_arms_async)*
+                    }
+                    Ok(())
+                }
+            }
+        }
 
-    dynamic_pipeline_impls(&name, std_impl, eio_impl).into()
+        impl #impl_generics #bc::async_io::AsyncReadable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
+                async move {
+                    use #bc::async_io::AsyncReadValue;
+                    #read_disc_async
+                    match disc {
+                        #(#read_arms_async)*
+                        _ => Err(#bc::io::ReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
+                    }
+                }
+            }
+        }
+    };
+    let eio_async_impl = quote! {
+        impl #impl_generics #bc::eio_async::EioAsyncWritable for #name #type_generics #where_clause {
+            fn write_to<__ByteableEioAsyncW: #bc::eio_async::EioAsyncWriter + ?Sized>(&self, mut writer: &mut __ByteableEioAsyncW) -> impl ::core::future::Future<Output = Result<(), __ByteableEioAsyncW::Error>> {
+                async move {
+                    use #bc::eio_async::EioAsyncWriteValue;
+                    match self {
+                        #(#write_arms_async)*
+                    }
+                    Ok(())
+                }
+            }
+        }
+
+        impl #impl_generics #bc::eio_async::EioAsyncReadable for #name #type_generics #where_clause {
+            fn read_from<__ByteableEioAsyncR: #bc::eio_async::EioAsyncReader + ?Sized>(mut reader: &mut __ByteableEioAsyncR) -> impl ::core::future::Future<Output = Result<Self, #bc::eio::EioReadableError<__ByteableEioAsyncR::Error>>> {
+                async move {
+                    use #bc::eio_async::EioAsyncReadValue;
+                    #read_disc_async
+                    match disc {
+                        #(#read_arms_async)*
+                        _ => Err(#bc::eio::EioReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
+                    }
+                }
+            }
+        }
+    };
+
+    dynamic_pipeline_impls(&name, std_impl, eio_impl, async_impl, eio_async_impl).into()
 }
 
 fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {

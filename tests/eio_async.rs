@@ -238,3 +238,74 @@ mod hash_collections {
         assert_eq!(restored, s);
     }
 }
+
+mod dynamic_struct {
+    use byteable::Byteable;
+    use byteable::eio_async::{EioAsyncReadValue, EioAsyncWriteValue};
+
+    #[derive(Byteable, Debug, PartialEq)]
+    #[byteable(io_only)]
+    struct Message {
+        id: u32,
+        flag: Option<u8>,
+    }
+
+    #[tokio::test]
+    async fn io_only_struct_roundtrip_over_eio_async() {
+        let msg = Message {
+            id: 42,
+            flag: Some(1),
+        };
+        let mut buf = [0u8; 6];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&msg).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: Message = r.read_value().await.unwrap();
+        assert_eq!(restored, msg);
+    }
+
+    #[tokio::test]
+    async fn io_only_struct_roundtrip_none_flag() {
+        let msg = Message { id: 1, flag: None };
+        let mut buf = [0u8; 5];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&msg).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: Message = r.read_value().await.unwrap();
+        assert_eq!(restored, msg);
+    }
+}
+
+mod field_enum {
+    use byteable::Byteable;
+    use byteable::eio_async::{EioAsyncReadValue, EioAsyncWriteValue};
+
+    #[derive(Byteable, Debug, PartialEq)]
+    enum Command {
+        Nothing,
+        Read(u32, u64),
+        Write { a: u32, b: u64 },
+    }
+
+    #[tokio::test]
+    async fn tuple_and_named_variants_roundtrip_over_eio_async() {
+        for cmd in [
+            Command::Nothing,
+            Command::Read(1, 2),
+            Command::Write { a: 3, b: 4 },
+        ] {
+            let mut buf = [0u8; 32];
+            {
+                let mut w: &mut [u8] = &mut buf;
+                w.write_value(&cmd).await.unwrap();
+            }
+            let mut r: &[u8] = &buf;
+            let restored: Command = r.read_value().await.unwrap();
+            assert_eq!(restored, cmd);
+        }
+    }
+}
