@@ -96,22 +96,29 @@ assert_eq!(wp.label, wp2.label);
 
 ### Embedded-IO I/O streaming
 
-Requires both `std` and `embedded-io` features (an `io_only` struct's generated code always
-references `std`-only trait names regardless of `embedded-io`; see the crate docs for why). For
-a genuinely `no_std` (no `std` feature) target, use the fixed-size derive path directly with
-`byteable::eio`'s `EioFixedReadable`/`EioFixedWritable`, or the hand-written `EioReadable`/
-`EioWritable` impls for `Option`/`Result`/collections, without `#[byteable(io_only)]`.
+`#[byteable(io_only)]` structs and field/variant enums generate `Readable`/`Writable`
+(`std::io`-based) and/or `EioReadable`/`EioWritable` (`embedded-io`-based) purely from which of
+`byteable`'s own `std`/`embedded-io` features are enabled — both if both are on, and it's a
+compile error at the derive site if neither is. In a genuinely `no_std` build (`embedded-io`
+enabled, `std` not), only the `EioReadable`/`EioWritable` impls are generated, so no `std`
+reference ever appears — no separate opt-in attribute needed.
 
 ```rust
-use byteable::{Byteable, Writable, Readable};
+use byteable::Byteable;
 use byteable::eio::{EioReadValue, EioWriteValue};
 
 #[derive(Byteable, Debug, PartialEq)]
 #[byteable(io_only)]
-#[byteable(eio)]
 struct Reading {
     sensor_id: u16,
     value: Option<i32>,
+}
+
+// Field enums always use this pipeline — no `#[byteable(io_only)]` needed.
+#[derive(Byteable, Debug, PartialEq)]
+enum Command {
+    Ping,
+    SetThreshold(i32),
 }
 
 let r = Reading { sensor_id: 3, value: Some(-12) };

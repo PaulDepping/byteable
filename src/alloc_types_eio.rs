@@ -2,7 +2,9 @@
 //!
 //! The `eio`/embedded-io counterpart of the collection impls in `std_types.rs`, gated on
 //! `alloc` instead of `std` (no OS/heap-randomness dependent types like `HashMap`/`HashSet`
-//! here — those stay `std`-only). Mirrors `std_types.rs`'s wire formats exactly.
+//! here — those stay `std`-only, and get their `EioReadable`/`EioWritable` impls alongside
+//! their `Readable`/`Writable` ones directly in `std_types.rs` instead). Mirrors
+//! `std_types.rs`'s wire formats exactly.
 //!
 //! No `extern crate alloc;` needed here — `src/lib.rs` already declares it crate-wide (gated
 //! on the same `alloc` feature this module requires), which puts `alloc` in the 2018+ extern

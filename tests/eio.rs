@@ -161,7 +161,6 @@ mod dynamic_struct {
 
     #[derive(Byteable, Debug, PartialEq)]
     #[byteable(io_only)]
-    #[byteable(eio)]
     struct Message {
         id: u32,
         flag: Option<u8>,
@@ -202,7 +201,6 @@ mod field_enum {
     use byteable::eio::{EioReadValue, EioWriteValue};
 
     #[derive(Byteable, Debug, PartialEq)]
-    #[byteable(eio)]
     enum Shape {
         Circle { radius: f32 },
         Rect { width: f32, height: f32 },
@@ -235,6 +233,31 @@ mod field_enum {
         let mut r: &[u8] = &buf;
         let restored: Shape = r.read_value().unwrap();
         assert_eq!(restored, s);
+    }
+
+    #[derive(Byteable, Debug, PartialEq)]
+    enum Command {
+        Nothing,
+        Read(u32, u64),
+        Write { a: u32, b: u64 },
+    }
+
+    #[test]
+    fn tuple_and_named_variants_roundtrip_over_eio() {
+        for cmd in [
+            Command::Nothing,
+            Command::Read(1, 2),
+            Command::Write { a: 3, b: 4 },
+        ] {
+            let mut buf = [0u8; 32];
+            {
+                let mut w: &mut [u8] = &mut buf;
+                w.write_value(&cmd).unwrap();
+            }
+            let mut r: &[u8] = &buf;
+            let restored: Command = r.read_value().unwrap();
+            assert_eq!(restored, cmd);
+        }
     }
 }
 

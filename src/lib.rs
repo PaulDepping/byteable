@@ -89,6 +89,7 @@ pub mod io;
 #[cfg(feature = "std")]
 pub use io::*;
 
+#[cfg(feature = "embedded-io")]
 pub mod eio;
 
 #[cfg(feature = "alloc")]

@@ -12,6 +12,13 @@ struct Header {
     version: u16,
 }
 
+#[derive(Byteable, Debug, PartialEq)]
+enum TestEnum {
+    Nothing,
+    Read(u32, u64),
+    Write { a: u32, b: u64 },
+}
+
 #[entry]
 fn main() -> ! {
     let mut buf = [0u8; 64];
@@ -37,6 +44,18 @@ fn main() -> ! {
     }
     let mut r: &[u8] = &buf;
     let _flag2: Option<u32> = r.read_value().unwrap();
+
+    // Field enum over embedded-io. This crate has no `std` feature at all, so this only
+    // compiles because the derive macro's dynamic-pipeline codegen is feature-driven: with
+    // only `embedded-io` enabled (not `std`), it emits solely the `EioReadable`/`EioWritable`
+    // impls, never a `::std::io`-based `Readable`/`Writable`.
+    let cmd = TestEnum::Write { a: 1, b: 2 };
+    {
+        let mut w: &mut [u8] = &mut buf;
+        w.write_value(&cmd).unwrap();
+    }
+    let mut r: &[u8] = &buf;
+    let _cmd2: TestEnum = r.read_value().unwrap();
 
     loop {}
 }

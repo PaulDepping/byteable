@@ -1,11 +1,19 @@
 [package]
 name = "byteable_derive"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2024"
 description = "Custom derive macros for the byteable crate."
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
 readme = "README.md"
+
+[features]
+# Mirrors of the `byteable` crate's own `std`/`embedded-io` features, forwarded from
+# `byteable/Cargo.toml` so the derive macro can tell, at expansion time, which of the two
+# dynamic-pipeline wire formats (`std::io`-based, `embedded-io`-based) are actually available
+# to generate against. Not tied to any real dependency here — pure compile-time switches.
+std = []
+embedded-io = []
 
 [dependencies]
 proc-macro-crate = "3.5.0"

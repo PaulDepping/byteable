@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -12,13 +12,13 @@ all = ["derive", "tokio", "std", "ordered-float", "embedded-io"]
 default = ["derive", "std"]
 derive = ["dep:byteable_derive"]
 alloc = []
-std = ["alloc"]
+std = ["alloc", "byteable_derive?/std"]
 tokio = ["dep:tokio", "std"]
 ordered-float = ["dep:ordered-float"]
-embedded-io = ["dep:embedded-io"]
+embedded-io = ["dep:embedded-io", "byteable_derive?/embedded-io"]
 
 [dependencies]
-byteable_derive = { version = "0.21.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.22.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ordered-float = { version = "5", optional = true }
 embedded-io = { version = "0.7", optional = true }

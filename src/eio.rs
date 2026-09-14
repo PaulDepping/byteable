@@ -1,18 +1,13 @@
 //! `embedded-io` (sync) support — the `no_std`-friendly counterpart to [`crate::io`].
 //!
 //! Mirrors `io.rs`'s shape, but is generic over the [`EioReader`]/[`EioWriter`] marker traits
-//! defined here rather than bound directly to `embedded_io::Read`/`Write`. This module is
-//! compiled **unconditionally** (not gated on the `embedded-io` feature) because the derive
-//! macro's generated code references these marker traits regardless of whether `embedded-io`
-//! is enabled on the calling crate — a proc-macro cannot detect an upstream dependency's own
-//! optional Cargo feature, so the generated code must always name-resolve. Only the bridge
-//! impls connecting these traits to the real `embedded_io` crate are feature-gated (normal
-//! `#[cfg(feature = "embedded-io")]`, which works correctly here since this is ordinary
-//! crate-internal code, not macro output spliced into a foreign crate).
-//!
-//! When `embedded-io` is off, `EioReadable`/`EioWritable` still exist but are unusable (nothing
-//! implements `EioReader`/`EioWriter`) — a minor, harmless API-surface consequence of this
-//! technique.
+//! defined here rather than bound directly to `embedded_io::Read`/`Write`. Gated on the
+//! `embedded-io` feature (`src/lib.rs`), same as `io.rs` is gated on `std`. The derive macro
+//! only ever emits references to this module's traits when `byteable_derive`'s own mirrored
+//! `embedded-io` feature is active (see `dynamic_pipeline_impls` in `byteable_derive/src/lib.rs`),
+//! which is forwarded 1:1 from this crate's own `embedded-io` feature — so generated code and
+//! this module's availability always agree; there's no case where generated code needs to
+//! name-resolve these traits while this module is absent.
 
 use crate::{DecodeError, PlainOldData, RawRepr, TryFromRawRepr};
 use core::fmt;
@@ -66,7 +61,6 @@ impl<E: fmt::Debug> fmt::Display for EioReadExactError<E> {
 #[cfg(feature = "std")]
 impl<E: fmt::Debug> std::error::Error for EioReadExactError<E> {}
 
-#[cfg(feature = "embedded-io")]
 impl<T: ::embedded_io::Read + ?Sized> EioReader for T {
     type Error = T::Error;
 
@@ -84,7 +78,6 @@ impl<T: ::embedded_io::Read + ?Sized> EioReader for T {
     }
 }
 
-#[cfg(feature = "embedded-io")]
 impl<T: ::embedded_io::Write + ?Sized> EioWriter for T {
     type Error = T::Error;
 
