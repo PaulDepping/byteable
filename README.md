@@ -27,16 +27,19 @@ self-describing wire formats.
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.31"
+byteable = "0.33"
 
 # with async (tokio) support
-byteable = { version = "0.31", features = ["tokio"] }
+byteable = { version = "0.33", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.31", features = ["ordered-float"] }
+byteable = { version = "0.33", features = ["ordered-float"] }
+
+# with embedded-io support (no_std friendly — combine with `alloc` for Vec/String support)
+byteable = { version = "0.33", features = ["embedded-io"] }
 
 # everything
-byteable = { version = "0.31", features = ["all"] }
+byteable = { version = "0.33", features = ["all"] }
 ```
 
 ## Quick Start
@@ -89,6 +92,37 @@ buf.write_value(&wp).unwrap();
 let wp2 = std::io::Cursor::new(&buf).read_value::<Waypoint>().unwrap();
 assert_eq!(wp.id, wp2.id);
 assert_eq!(wp.label, wp2.label);
+```
+
+### Embedded-IO I/O streaming
+
+Requires both `std` and `embedded-io` features (an `io_only` struct's generated code always
+references `std`-only trait names regardless of `embedded-io`; see the crate docs for why). For
+a genuinely `no_std` (no `std` feature) target, use the fixed-size derive path directly with
+`byteable::eio`'s `EioFixedReadable`/`EioFixedWritable`, or the hand-written `EioReadable`/
+`EioWritable` impls for `Option`/`Result`/collections, without `#[byteable(io_only)]`.
+
+```rust
+use byteable::{Byteable, Writable, Readable};
+use byteable::eio::{EioReadValue, EioWriteValue};
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+#[byteable(eio)]
+struct Reading {
+    sensor_id: u16,
+    value: Option<i32>,
+}
+
+let r = Reading { sensor_id: 3, value: Some(-12) };
+let mut buf = [0u8; 16];
+{
+    let mut w: &mut [u8] = &mut buf;
+    w.write_value(&r).unwrap();
+}
+let mut cursor: &[u8] = &buf;
+let r2: Reading = cursor.read_value().unwrap();
+assert_eq!(r, r2);
 ```
 
 ### Controlling endianness

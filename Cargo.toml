@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -8,17 +8,20 @@ description = "A Rust crate for convenient serialization and deserialization of 
 readme = "README.md"
 
 [features]
-all = ["derive", "tokio", "std", "ordered-float"]
+all = ["derive", "tokio", "std", "ordered-float", "embedded-io"]
 default = ["derive", "std"]
 derive = ["dep:byteable_derive"]
-std = []
+alloc = []
+std = ["alloc"]
 tokio = ["dep:tokio", "std"]
 ordered-float = ["dep:ordered-float"]
+embedded-io = ["dep:embedded-io"]
 
 [dependencies]
-byteable_derive = { version = "0.19.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.21.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ordered-float = { version = "5", optional = true }
+embedded-io = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -16,7 +16,14 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     for attr in attrs {
         if attr.path().is_ident("byteable") {
             if let Meta::List(meta_list) = &attr.meta {
-                return match meta_list.tokens.to_string().as_str() {
+                let tokens = meta_list.tokens.to_string();
+                if tokens == "eio" {
+                    // Handled separately by `has_eio_attr` below — not one of this
+                    // function's recognized single-value attributes. Skip past it so a
+                    // combined `#[byteable(io_only)] #[byteable(eio)]` still resolves.
+                    continue;
+                }
+                return match tokens.as_str() {
                     "little_endian" => AttributeType::LittleEndian,
                     "big_endian" => AttributeType::BigEndian,
                     "transparent" => AttributeType::None,
@@ -24,17 +31,34 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                     "io_only" => AttributeType::IoOnly,
                     other => panic!(
                         "Unknown byteable attribute: {other}. \
-                         Valid attributes are: little_endian, big_endian, try_transparent, io_only"
+                         Valid attributes are: little_endian, big_endian, try_transparent, io_only, eio. \
+                         Note: each #[byteable(...)] attribute holds exactly one value — to combine \
+                         io_only and eio, write two separate attributes: #[byteable(io_only)] #[byteable(eio)]"
                     ),
                 };
             }
             panic!(
                 "Unknown byteable attribute. \
-                 Valid attributes are: little_endian, big_endian, try_transparent, io_only"
+                 Valid attributes are: little_endian, big_endian, try_transparent, io_only, eio. \
+                 Note: each #[byteable(...)] attribute holds exactly one value — to combine io_only \
+                 and eio, write two separate attributes: #[byteable(io_only)] #[byteable(eio)]"
             );
         }
     }
     AttributeType::None
+}
+
+/// Returns true if the item has a `#[byteable(eio)]` marker attribute anywhere among its
+/// attributes (in addition to, and independent of, whatever `parse_byteable_attr` recognizes).
+/// Opts a `#[byteable(io_only)]` struct or a field enum into also generating
+/// `EioReadable`/`EioWritable` — required to be explicit rather than automatic because the
+/// macro cannot verify at expansion time that every field type actually implements
+/// `EioReadable`/`EioWritable` (see the module doc comment's "I/O streaming" section).
+fn has_eio_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("byteable")
+            && matches!(&attr.meta, Meta::List(meta_list) if meta_list.tokens.to_string() == "eio")
+    })
 }
 
 /// Resolves the path to the `byteable` crate (handles renamed imports and in-crate use).
@@ -58,7 +82,12 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///   A hidden `#[repr(C, packed)]` raw struct is created to hold the on-wire layout.
 ///
 /// - **I/O streaming** (`#[byteable(io_only)]` on structs, always for field enums):
-///   generates [`Readable`] and [`Writable`], reading/writing fields sequentially.
+///   generates [`Readable`] and [`Writable`] (`std::io`-based). Adding `#[byteable(eio)]`
+///   alongside also generates [`eio::EioReadable`] and [`eio::EioWritable`] (the
+///   `no_std`-friendly counterparts, identical field-by-field wire format) — opt-in because
+///   the macro cannot verify every field type supports it; get it wrong and it's a normal
+///   compile error at your struct's derive site, same as any other trait with field
+///   requirements.
 ///
 /// - **Unit enums** (all variants are unit): generates [`TryFromRawRepr`],
 ///   [`IntoByteArray`], and [`TryFromByteArray`] using an automatically-chosen
@@ -72,6 +101,8 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// [`TryFromByteArray`]: byteable::TryFromByteArray
 /// [`Readable`]: byteable::Readable
 /// [`Writable`]: byteable::Writable
+/// [`eio::EioReadable`]: byteable::eio::EioReadable
+/// [`eio::EioWritable`]: byteable::eio::EioWritable
 ///
 /// # Struct-level attributes
 ///
@@ -82,6 +113,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
 /// | `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
 /// | `#[byteable(io_only)]` | Generate `Readable`/`Writable` instead of fixed-size traits |
+/// | `#[byteable(eio)]` | Additionally generate `EioReadable`/`EioWritable` (combine with `io_only` on structs; usable directly on field enums) |
 ///
 /// # Field-level attributes
 ///
@@ -377,6 +409,27 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         (bindings, quote! { Ok(Self { #(#field_idents),* }) })
     };
 
+    let eio_impls = if has_eio_attr(&input.attrs) {
+        quote! {
+            impl #impl_generics #bc::eio::EioReadable for #name #type_generics #where_clause {
+                fn read_from<__ByteableEioR: #bc::eio::EioReader + ?Sized>(mut reader: &mut __ByteableEioR) -> Result<Self, #bc::eio::EioReadableError<__ByteableEioR::Error>> {
+                    use #bc::eio::EioReadValue;
+                    #( #read_bindings )*
+                    #construct_expr
+                }
+            }
+            impl #impl_generics #bc::eio::EioWritable for #name #type_generics #where_clause {
+                fn write_to<__ByteableEioW: #bc::eio::EioWriter + ?Sized>(&self, mut writer: &mut __ByteableEioW) -> Result<(), __ByteableEioW::Error> {
+                    use #bc::eio::EioWriteValue;
+                    #( #write_stmts )*
+                    Ok(())
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
         impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
             fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
@@ -392,6 +445,7 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 Ok(())
             }
         }
+        #eio_impls
     }.into()
 }
 
@@ -828,7 +882,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         },
     };
 
-    let write_arms = enum_data
+    let write_arms: Vec<_> = enum_data
         .variants
         .iter()
         .zip(&discriminants)
@@ -890,8 +944,9 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
             }
-        });
-    let read_arms = enum_data
+        })
+        .collect();
+    let read_arms: Vec<_> = enum_data
         .variants
         .iter()
         .zip(&discriminants)
@@ -938,7 +993,36 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
             }
-        });
+        })
+        .collect();
+
+    let eio_impls = if has_eio_attr(&input.attrs) {
+        quote! {
+            impl #impl_generics #bc::eio::EioWritable for #name #type_generics #where_clause {
+                fn write_to<__ByteableEioW: #bc::eio::EioWriter + ?Sized>(&self, mut writer: &mut __ByteableEioW) -> Result<(), __ByteableEioW::Error> {
+                    use #bc::eio::EioWriteValue;
+                    match self {
+                        #(#write_arms)*
+                    }
+                    Ok(())
+                }
+            }
+
+            impl #impl_generics #bc::eio::EioReadable for #name #type_generics #where_clause {
+                fn read_from<__ByteableEioR: #bc::eio::EioReader + ?Sized>(mut reader: &mut __ByteableEioR) -> Result<Self, #bc::eio::EioReadableError<__ByteableEioR::Error>> {
+                    use #bc::eio::EioReadValue;
+                    #read_disc
+                    match disc {
+                        #(#read_arms)*
+                        _ => Err(#bc::eio::EioReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
         impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
@@ -961,6 +1045,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 }
             }
         }
+        #eio_impls
     }.into()
 }
 
