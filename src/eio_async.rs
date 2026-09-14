@@ -12,7 +12,7 @@
 //! rather than defining its own, so there is nothing sync-specific to diverge from.
 
 use crate::{
-    PlainOldData, RawRepr, TryFromRawRepr,
+    DecodeError, PlainOldData, RawRepr, TryFromRawRepr,
     eio::{EioReadExactError, EioReadableError},
 };
 
@@ -222,3 +222,116 @@ pub trait EioAsyncWriteValue: EioAsyncWriter {
     }
 }
 impl<T: EioAsyncWriter + ?Sized> EioAsyncWriteValue for T {}
+
+// Wire format: 1-byte tag (0 = None, 1 = Some), followed by the value when Some. No alloc needed.
+impl<T: EioAsyncReadable> EioAsyncReadable for Option<T> {
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(None),
+                1 => Ok(Some(reader.read_value().await?)),
+                _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "Option",
+                })),
+            }
+        }
+    }
+}
+
+impl<T: EioAsyncWritable> EioAsyncWritable for Option<T> {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            match self {
+                None => writer.write_fixed(&0u8).await,
+                Some(val) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_value(val).await
+                }
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = Ok, 1 = Err), followed by the Ok value or Err value.
+impl<V: EioAsyncReadable, E: EioAsyncReadable> EioAsyncReadable for Result<V, E> {
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let discriminator: u8 = reader.read_fixed().await?;
+            match discriminator {
+                0 => Ok(Ok(reader.read_value().await?)),
+                1 => Ok(Err(reader.read_value().await?)),
+                _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: discriminator,
+                    type_name: "Result",
+                })),
+            }
+        }
+    }
+}
+
+impl<V: EioAsyncWritable, Er: EioAsyncWritable> EioAsyncWritable for Result<V, Er> {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            match self {
+                Ok(val) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_value(val).await
+                }
+                Err(err) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_value(err).await
+                }
+            }
+        }
+    }
+}
+
+// Wire format: `u64` element count (LE) + elements in order. Write-only (borrowed): never
+// allocates, so this is available without the `alloc` feature.
+impl<T: EioAsyncWritable> EioAsyncWritable for [T] {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            let len: u64 = self
+                .len()
+                .try_into()
+                .expect("could not convert usize to u64");
+            writer.write_fixed(&len).await?;
+            for el in self {
+                writer.write_value(el).await?;
+            }
+            Ok(())
+        }
+    }
+}
+
+// Wire format: `u64` byte length (LE) + UTF-8 bytes. Write-only (borrowed), no `alloc` needed.
+impl EioAsyncWritable for str {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            let len: u64 = self
+                .len()
+                .try_into()
+                .expect("could not convert usize to u64");
+            writer.write_fixed(&len).await?;
+            writer.write_all(self.as_bytes()).await
+        }
+    }
+}
