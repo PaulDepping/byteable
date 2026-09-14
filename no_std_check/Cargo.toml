@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-byteable = { path = "..", default-features = false, features = ["derive", "embedded-io"] }
+byteable = { path = "..", default-features = false, features = ["derive", "embedded-io", "embedded-io-async"] }
 cortex-m-rt = "0.7.6"
 panic-halt = "1.0.0"
 
