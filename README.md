@@ -27,19 +27,22 @@ self-describing wire formats.
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.33"
+byteable = "0.35"
 
 # with async (tokio) support
-byteable = { version = "0.33", features = ["tokio"] }
+byteable = { version = "0.35", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.33", features = ["ordered-float"] }
+byteable = { version = "0.35", features = ["ordered-float"] }
 
-# with embedded-io support (no_std friendly — combine with `alloc` for Vec/String support)
-byteable = { version = "0.33", features = ["embedded-io"] }
+# with embedded-io support (no_std friendly, sync — combine with `alloc` for Vec/String support)
+byteable = { version = "0.35", features = ["embedded-io"] }
+
+# with embedded-io-async support (no_std friendly, async — combine with `alloc` for Vec/String support)
+byteable = { version = "0.35", features = ["embedded-io-async"] }
 
 # everything
-byteable = { version = "0.33", features = ["all"] }
+byteable = { version = "0.35", features = ["all"] }
 ```
 
 ## Quick Start
@@ -132,6 +135,35 @@ let r2: Reading = cursor.read_value().unwrap();
 assert_eq!(r, r2);
 ```
 
+### Embedded-IO-Async I/O streaming
+
+The async, `no_std`-friendly counterpart, generated automatically alongside the sync flavors
+above whenever the `embedded-io-async` feature is on — no separate opt-in attribute.
+
+```rust
+use byteable::Byteable;
+use byteable::eio_async::{EioAsyncReadValue, EioAsyncWriteValue};
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Reading {
+    sensor_id: u16,
+    value: Option<i32>,
+}
+
+# #[tokio::main] async fn main() {
+let r = Reading { sensor_id: 3, value: Some(-12) };
+let mut buf = [0u8; 16];
+{
+    let mut w: &mut [u8] = &mut buf;
+    w.write_value(&r).await.unwrap();
+}
+let mut cursor: &[u8] = &buf;
+let r2: Reading = cursor.read_value().await.unwrap();
+assert_eq!(r, r2);
+# }
+```
+
 ### Controlling endianness
 
 ```rust
@@ -156,6 +188,9 @@ struct NetworkHeader {
 | `std` | yes | `Readable` / `Writable` I/O traits and `std` type impls |
 | `tokio` | no | Async `AsyncReadable` / `AsyncWritable` via tokio |
 | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
+| `alloc` | no (implied by `std`) | `alloc`-backed collection types over `eio`/`eio_async` |
+| `embedded-io` | no | `eio` module: `embedded-io`-based (sync) I/O traits for `no_std` targets |
+| `embedded-io-async` | no | `eio_async` module: `embedded-io-async`-based (async) I/O traits for `no_std` targets |
 | `all` | no | Enable all of the above |
 
 ## Wire Format Reference
@@ -272,6 +307,60 @@ Async counterparts of the sync traits above, backed by `tokio::io`.
 [`AsyncWriteValue`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncWriteValue.html
 [`AsyncReadFixed`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncReadFixed.html
 [`AsyncWriteFixed`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncWriteFixed.html
+
+### Embedded-IO traits (`embedded-io` feature)
+
+The `no_std`-friendly, sync counterparts of the I/O streaming traits above, backed by the
+`embedded-io` crate via the [`eio::EioReader`]/[`eio::EioWriter`] marker traits.
+
+| Trait | Counterpart of |
+|-------|---------------|
+| [`eio::EioReadable`] | [`Readable`] |
+| [`eio::EioWritable`] | [`Writable`] |
+| [`eio::EioFixedReadable`] | [`FixedReadable`] |
+| [`eio::EioFixedWritable`] | [`FixedWritable`] |
+| [`eio::EioReadValue`] | [`ReadValue`] |
+| [`eio::EioWriteValue`] | [`WriteValue`] |
+| [`eio::EioReadFixed`] | [`ReadFixed`] |
+| [`eio::EioWriteFixed`] | [`WriteFixed`] |
+
+[`eio::EioReader`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioReader.html
+[`eio::EioWriter`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioWriter.html
+[`eio::EioReadable`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioReadable.html
+[`eio::EioWritable`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioWritable.html
+[`eio::EioFixedReadable`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioFixedReadable.html
+[`eio::EioFixedWritable`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioFixedWritable.html
+[`eio::EioReadValue`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioReadValue.html
+[`eio::EioWriteValue`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioWriteValue.html
+[`eio::EioReadFixed`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioReadFixed.html
+[`eio::EioWriteFixed`]: https://docs.rs/byteable/latest/byteable/eio/trait.EioWriteFixed.html
+
+### Embedded-IO-Async traits (`embedded-io-async` feature)
+
+The async counterpart of the `embedded-io` traits above, backed by the `embedded-io-async`
+crate via the [`eio_async::EioAsyncReader`]/[`eio_async::EioAsyncWriter`] marker traits.
+
+| Trait | Counterpart of |
+|-------|---------------|
+| [`eio_async::EioAsyncReadable`] | [`eio::EioReadable`] |
+| [`eio_async::EioAsyncWritable`] | [`eio::EioWritable`] |
+| [`eio_async::EioAsyncFixedReadable`] | [`eio::EioFixedReadable`] |
+| [`eio_async::EioAsyncFixedWritable`] | [`eio::EioFixedWritable`] |
+| [`eio_async::EioAsyncReadValue`] | [`eio::EioReadValue`] |
+| [`eio_async::EioAsyncWriteValue`] | [`eio::EioWriteValue`] |
+| [`eio_async::EioAsyncReadFixed`] | [`eio::EioReadFixed`] |
+| [`eio_async::EioAsyncWriteFixed`] | [`eio::EioWriteFixed`] |
+
+[`eio_async::EioAsyncReader`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncReader.html
+[`eio_async::EioAsyncWriter`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncWriter.html
+[`eio_async::EioAsyncReadable`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncReadable.html
+[`eio_async::EioAsyncWritable`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncWritable.html
+[`eio_async::EioAsyncFixedReadable`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncFixedReadable.html
+[`eio_async::EioAsyncFixedWritable`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncFixedWritable.html
+[`eio_async::EioAsyncReadValue`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncReadValue.html
+[`eio_async::EioAsyncWriteValue`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncWriteValue.html
+[`eio_async::EioAsyncReadFixed`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncReadFixed.html
+[`eio_async::EioAsyncWriteFixed`]: https://docs.rs/byteable/latest/byteable/eio_async/trait.EioAsyncWriteFixed.html
 
 ### Endianness traits
 

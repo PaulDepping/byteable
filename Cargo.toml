@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.34.0"
+version = "0.35.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -19,7 +19,7 @@ embedded-io = ["dep:embedded-io", "byteable_derive?/embedded-io"]
 embedded-io-async = ["dep:embedded-io-async", "embedded-io", "byteable_derive?/embedded-io-async"]
 
 [dependencies]
-byteable_derive = { version = "0.22.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.23.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ordered-float = { version = "5", optional = true }
 embedded-io = { version = "0.7", optional = true }
