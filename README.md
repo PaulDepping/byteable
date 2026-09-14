@@ -69,8 +69,8 @@ assert_eq!(p.x, p2.x);
 ### Dynamic struct (I/O streaming)
 
 ```rust
-use byteable::{Byteable, Writable, Readable};
-use byteable::io::{WriteValue, ReadValue};
+use byteable::Byteable;
+use byteable::io::{Writable, Readable, WriteValue, ReadValue};
 
 #[derive(Byteable)]
 #[byteable(io_only)]
@@ -240,14 +240,14 @@ Extension traits that add ergonomic methods to any reader/writer:
 | [`ReadFixed`] | `.read_fixed::<T>()` | any `Read` |
 | [`WriteFixed`] | `.write_fixed(&val)` | any `Write` |
 
-[`Readable`]: https://docs.rs/byteable/latest/byteable/trait.Readable.html
-[`Writable`]: https://docs.rs/byteable/latest/byteable/trait.Writable.html
-[`FixedReadable`]: https://docs.rs/byteable/latest/byteable/trait.FixedReadable.html
-[`FixedWritable`]: https://docs.rs/byteable/latest/byteable/trait.FixedWritable.html
-[`ReadValue`]: https://docs.rs/byteable/latest/byteable/trait.ReadValue.html
-[`WriteValue`]: https://docs.rs/byteable/latest/byteable/trait.WriteValue.html
-[`ReadFixed`]: https://docs.rs/byteable/latest/byteable/trait.ReadFixed.html
-[`WriteFixed`]: https://docs.rs/byteable/latest/byteable/trait.WriteFixed.html
+[`Readable`]: https://docs.rs/byteable/latest/byteable/io/trait.Readable.html
+[`Writable`]: https://docs.rs/byteable/latest/byteable/io/trait.Writable.html
+[`FixedReadable`]: https://docs.rs/byteable/latest/byteable/io/trait.FixedReadable.html
+[`FixedWritable`]: https://docs.rs/byteable/latest/byteable/io/trait.FixedWritable.html
+[`ReadValue`]: https://docs.rs/byteable/latest/byteable/io/trait.ReadValue.html
+[`WriteValue`]: https://docs.rs/byteable/latest/byteable/io/trait.WriteValue.html
+[`ReadFixed`]: https://docs.rs/byteable/latest/byteable/io/trait.ReadFixed.html
+[`WriteFixed`]: https://docs.rs/byteable/latest/byteable/io/trait.WriteFixed.html
 
 ### Async I/O traits (`tokio` feature)
 
@@ -264,14 +264,14 @@ Async counterparts of the sync traits above, backed by `tokio::io`.
 | [`AsyncReadFixed`] | [`ReadFixed`] |
 | [`AsyncWriteFixed`] | [`WriteFixed`] |
 
-[`AsyncReadable`]: https://docs.rs/byteable/latest/byteable/trait.AsyncReadable.html
-[`AsyncWritable`]: https://docs.rs/byteable/latest/byteable/trait.AsyncWritable.html
-[`AsyncFixedReadable`]: https://docs.rs/byteable/latest/byteable/trait.AsyncFixedReadable.html
-[`AsyncFixedWritable`]: https://docs.rs/byteable/latest/byteable/trait.AsyncFixedWritable.html
-[`AsyncReadValue`]: https://docs.rs/byteable/latest/byteable/trait.AsyncReadValue.html
-[`AsyncWriteValue`]: https://docs.rs/byteable/latest/byteable/trait.AsyncWriteValue.html
-[`AsyncReadFixed`]: https://docs.rs/byteable/latest/byteable/trait.AsyncReadFixed.html
-[`AsyncWriteFixed`]: https://docs.rs/byteable/latest/byteable/trait.AsyncWriteFixed.html
+[`AsyncReadable`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncReadable.html
+[`AsyncWritable`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncWritable.html
+[`AsyncFixedReadable`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncFixedReadable.html
+[`AsyncFixedWritable`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncFixedWritable.html
+[`AsyncReadValue`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncReadValue.html
+[`AsyncWriteValue`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncWriteValue.html
+[`AsyncReadFixed`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncReadFixed.html
+[`AsyncWriteFixed`]: https://docs.rs/byteable/latest/byteable/async_io/trait.AsyncWriteFixed.html
 
 ### Endianness traits
 
@@ -312,7 +312,7 @@ These traits underpin per-field endian control in the derive macro and the
 | [`ReadableError`] | An I/O error or [`DecodeError`] while reading from a `Read` / async reader |
 
 [`DecodeError`]: https://docs.rs/byteable/latest/byteable/enum.DecodeError.html
-[`ReadableError`]: https://docs.rs/byteable/latest/byteable/enum.ReadableError.html
+[`ReadableError`]: https://docs.rs/byteable/latest/byteable/io/enum.ReadableError.html
 
 ## License
 

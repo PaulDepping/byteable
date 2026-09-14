@@ -8,9 +8,10 @@
 // ── Async fixed-size I/O ──────────────────────────────────────────────────────
 
 mod fixed_io {
-    use byteable::{
+    use byteable::{BigEndian, Byteable, LittleEndian};
+    use byteable::async_io::{
         AsyncFixedReadable, AsyncFixedWritable, AsyncReadFixed, AsyncReadValue, AsyncWriteFixed,
-        AsyncWriteValue, BigEndian, Byteable, LittleEndian,
+        AsyncWriteValue,
     };
     use std::io::Cursor;
 
@@ -70,7 +71,7 @@ mod fixed_io {
 
     #[tokio::test]
     async fn async_fixed_readable_also_implements_async_readable() {
-        fn assert_both<T: AsyncFixedReadable + byteable::AsyncReadable>() {}
+        fn assert_both<T: AsyncFixedReadable + byteable::async_io::AsyncReadable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<LittleEndian<u64>>();
@@ -79,7 +80,7 @@ mod fixed_io {
 
     #[tokio::test]
     async fn async_fixed_writable_also_implements_async_writable() {
-        fn assert_both<T: AsyncFixedWritable + byteable::AsyncWritable>() {}
+        fn assert_both<T: AsyncFixedWritable + byteable::async_io::AsyncWritable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<BigEndian<u16>>();
@@ -89,7 +90,7 @@ mod fixed_io {
     /// Vec<u32> is NOT accessible via `AsyncReadFixed` or `AsyncWriteFixed`.
     ///
     /// ```compile_fail
-    /// use byteable::AsyncReadFixed;
+    /// use byteable::async_io::AsyncReadFixed;
     /// use std::io::Cursor;
     /// # #[tokio::main] async fn main() {
     /// let mut cursor = Cursor::new(vec![0u8; 16]);
@@ -98,7 +99,7 @@ mod fixed_io {
     /// ```
     ///
     /// ```compile_fail
-    /// use byteable::AsyncWriteFixed;
+    /// use byteable::async_io::AsyncWriteFixed;
     /// use std::io::Cursor;
     /// # #[tokio::main] async fn main() {
     /// let mut cursor = Cursor::new(Vec::new());
@@ -112,10 +113,9 @@ mod fixed_io {
 // ── Async value / stream I/O ──────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{
-        AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue, Byteable, LittleEndian,
-        ReadableError,
-    };
+    use byteable::{Byteable, LittleEndian};
+    use byteable::async_io::{AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue};
+    use byteable::io::ReadableError;
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -266,13 +266,13 @@ mod value_io {
 // ── Async collection types ────────────────────────────────────────────────────
 
 mod collections {
-    use byteable::{AsyncReadValue, AsyncWritable, AsyncWriteValue};
+    use byteable::async_io::{AsyncReadValue, AsyncWritable, AsyncWriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
 
     async fn roundtrip<T>(original: &T) -> T
     where
-        T: AsyncWritable + byteable::AsyncReadable,
+        T: AsyncWritable + byteable::async_io::AsyncReadable,
     {
         let mut buf = Cursor::new(Vec::new());
         buf.write_value(original).await.unwrap();

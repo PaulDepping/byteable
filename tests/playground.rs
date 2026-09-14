@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
-use byteable::{Byteable, WriteValue};
+use byteable::Byteable;
+use byteable::io::WriteValue;
 
 #[derive(Byteable, Debug, PartialEq)]
 #[byteable(io_only)]

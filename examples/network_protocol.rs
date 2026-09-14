@@ -15,7 +15,8 @@
 //!   Error        →  [0xFF] [u16 BE code] [u64 desc_len] [desc bytes]
 //! ```
 
-use byteable::{Byteable, ReadValue, ReadableError, WriteValue};
+use byteable::Byteable;
+use byteable::io::{ReadValue, ReadableError, WriteValue};
 use std::io::Cursor;
 
 /// Messages exchanged between client and broker.

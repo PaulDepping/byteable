@@ -7,10 +7,11 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{
+use crate::DecodeError;
+use crate::async_io::{
     AsyncReadFixed, AsyncReadValue, AsyncReadable, AsyncWritable, AsyncWriteFixed, AsyncWriteValue,
-    DecodeError, io::ReadableError,
 };
+use crate::io::ReadableError;
 use core::{
     ffi::CStr,
     hash::{BuildHasher, Hash},

@@ -9,7 +9,7 @@
 //!   `transmute`, so no heap allocation or per-field iteration is required.
 //!
 //! - **Dynamic path** — For types that contain variable-length data (strings, vecs, maps). Add
-//!   `#[byteable(io_only)]` to derive [`Readable`] / [`Writable`] instead, which stream data
+//!   `#[byteable(io_only)]` to derive [`io::Readable`] / [`io::Writable`] instead, which stream data
 //!   through any [`std::io::Read`] / [`std::io::Write`] (or the async tokio equivalents when
 //!   the `tokio` feature is enabled).
 //!
@@ -36,8 +36,8 @@
 //! ## Dynamic struct (I/O streaming)
 //!
 //! ```rust
-//! use byteable::{Byteable, Writable, Readable};
-//! use byteable::io::{WriteValue, ReadValue};
+//! use byteable::Byteable;
+//! use byteable::io::{Writable, Readable, WriteValue, ReadValue};
 //!
 //! #[derive(Byteable)]
 //! #[byteable(io_only)]
@@ -58,7 +58,7 @@
 //! | Feature | Default | Description |
 //! |---------|---------|-------------|
 //! | `derive` | yes | `#[derive(Byteable)]` proc-macro |
-//! | `std` | yes | [`Readable`] / [`Writable`] I/O traits and `std` type impls |
+//! | `std` | yes | [`io::Readable`] / [`io::Writable`] I/O traits and `std` type impls |
 //! | `tokio` | no | Async I/O traits via tokio |
 //! | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
 //! | `alloc` | no (implied by `std`) | `alloc`-backed collection types over the `eio` module |
@@ -80,14 +80,9 @@ pub use byteable_derive::Byteable;
 pub mod async_io;
 #[cfg(feature = "tokio")]
 mod std_types_async;
-#[cfg(feature = "tokio")]
-pub use async_io::*;
 
 #[cfg(feature = "std")]
 pub mod io;
-
-#[cfg(feature = "std")]
-pub use io::*;
 
 #[cfg(feature = "embedded-io")]
 pub mod eio;

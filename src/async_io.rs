@@ -6,7 +6,8 @@
 
 use std::io;
 
-use crate::{PlainOldData, RawRepr, ReadableError, TryFromRawRepr};
+use crate::{PlainOldData, RawRepr, TryFromRawRepr};
+use crate::io::ReadableError;
 
 /// Async counterpart of [`crate::io::FixedReadable`].
 ///

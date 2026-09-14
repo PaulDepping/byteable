@@ -113,8 +113,8 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// [`IntoByteArray`]: byteable::IntoByteArray
 /// [`FromByteArray`]: byteable::FromByteArray
 /// [`TryFromByteArray`]: byteable::TryFromByteArray
-/// [`Readable`]: byteable::Readable
-/// [`Writable`]: byteable::Writable
+/// [`Readable`]: byteable::io::Readable
+/// [`Writable`]: byteable::io::Writable
 /// [`eio::EioReadable`]: byteable::eio::EioReadable
 /// [`eio::EioWritable`]: byteable::eio::EioWritable
 ///
@@ -175,8 +175,8 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// ## Dynamic struct with `io_only`
 ///
 /// ```rust
-/// use byteable::{Byteable, Writable, Readable};
-/// use byteable::io::{WriteValue, ReadValue};
+/// use byteable::Byteable;
+/// use byteable::io::{Writable, Readable, WriteValue, ReadValue};
 ///
 /// #[derive(Byteable)]
 /// #[byteable(io_only)]
@@ -214,8 +214,8 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// ## Field enum
 ///
 /// ```rust
-/// use byteable::{Byteable, Readable, Writable};
-/// use byteable::io::{WriteValue, ReadValue};
+/// use byteable::Byteable;
+/// use byteable::io::{Writable, Readable, WriteValue, ReadValue};
 ///
 /// #[derive(Byteable, Debug, PartialEq)]
 /// enum Shape {
@@ -423,16 +423,16 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
     };
 
     let std_impl = quote! {
-        impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
-                use #bc::ReadValue;
+        impl #impl_generics #bc::io::Readable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::io::ReadableError> {
+                use #bc::io::ReadValue;
                 #( #read_bindings )*
                 #construct_expr
             }
         }
-        impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
+        impl #impl_generics #bc::io::Writable for #name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                use #bc::WriteValue;
+                use #bc::io::WriteValue;
                 #( #write_stmts )*
                 Ok(())
             }
@@ -1006,9 +1006,9 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         .collect();
 
     let std_impl = quote! {
-        impl #impl_generics #bc::Writable for #name #type_generics #where_clause {
+        impl #impl_generics #bc::io::Writable for #name #type_generics #where_clause {
             fn write_to(&self, mut writer: &mut (impl ::std::io::Write + ?Sized)) -> ::std::io::Result<()> {
-                use #bc::WriteValue;
+                use #bc::io::WriteValue;
                 match self {
                     #(#write_arms)*
                 }
@@ -1016,13 +1016,13 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             }
         }
 
-        impl #impl_generics #bc::Readable for #name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::ReadableError> {
-                use #bc::ReadValue;
+        impl #impl_generics #bc::io::Readable for #name #type_generics #where_clause {
+            fn read_from(mut reader: &mut (impl ::std::io::Read + ?Sized)) -> Result<Self, #bc::io::ReadableError> {
+                use #bc::io::ReadValue;
                 #read_disc
                 match disc {
                     #(#read_arms)*
-                    _ => Err(#bc::ReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
+                    _ => Err(#bc::io::ReadableError::DecodeError(#bc::DecodeError::InvalidDiscriminant { raw: disc as u64, type_name: ::core::stringify!(#name) })),
                 }
             }
         }

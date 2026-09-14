@@ -8,9 +8,9 @@
 // ── Fixed-size I/O ────────────────────────────────────────────────────────────
 
 mod fixed_io {
-    use byteable::{
-        BigEndian, Byteable, FixedReadable, FixedWritable, LittleEndian, ReadFixed, ReadValue,
-        WriteFixed, WriteValue,
+    use byteable::{BigEndian, Byteable, LittleEndian};
+    use byteable::io::{
+        FixedReadable, FixedWritable, ReadFixed, ReadValue, WriteFixed, WriteValue,
     };
     use std::io::Cursor;
 
@@ -86,7 +86,7 @@ mod fixed_io {
 
     #[test]
     fn fixed_readable_also_implements_readable() {
-        fn assert_both<T: FixedReadable + byteable::Readable>() {}
+        fn assert_both<T: FixedReadable + byteable::io::Readable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<LittleEndian<u64>>();
@@ -95,7 +95,7 @@ mod fixed_io {
 
     #[test]
     fn fixed_writable_also_implements_writable() {
-        fn assert_both<T: FixedWritable + byteable::Writable>() {}
+        fn assert_both<T: FixedWritable + byteable::io::Writable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<BigEndian<u16>>();
@@ -105,14 +105,14 @@ mod fixed_io {
     /// Vec<u32> does NOT implement `FixedReadable` or `FixedWritable`.
     ///
     /// ```compile_fail
-    /// use byteable::ReadFixed;
+    /// use byteable::io::ReadFixed;
     /// use std::io::Cursor;
     /// let mut cursor = Cursor::new(vec![0u8; 16]);
     /// let _: Vec<u32> = cursor.read_fixed().unwrap();
     /// ```
     ///
     /// ```compile_fail
-    /// use byteable::WriteFixed;
+    /// use byteable::io::WriteFixed;
     /// use std::io::Cursor;
     /// let mut cursor = Cursor::new(Vec::new());
     /// cursor.write_fixed(&vec![1u32, 2, 3]).unwrap();
@@ -124,9 +124,8 @@ mod fixed_io {
 // ── Value / stream I/O ────────────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{
-        Byteable, LittleEndian, ReadFixed, ReadValue, ReadableError, WriteFixed, WriteValue,
-    };
+    use byteable::{Byteable, LittleEndian};
+    use byteable::io::{ReadFixed, ReadValue, ReadableError, WriteFixed, WriteValue};
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -277,13 +276,14 @@ mod value_io {
 // ── io_only struct derive ─────────────────────────────────────────────────────
 
 mod io_only_derive {
-    use byteable::{Byteable, ReadValue, WriteValue};
+    use byteable::Byteable;
+    use byteable::io::{ReadValue, WriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
 
     fn roundtrip<T>(original: &T) -> T
     where
-        T: byteable::Writable + byteable::Readable,
+        T: byteable::io::Writable + byteable::io::Readable,
     {
         let mut buf = Vec::new();
         buf.write_value(original).unwrap();
@@ -600,7 +600,8 @@ mod io_only_derive {
 // ── Counted I/O ───────────────────────────────────────────────────────────────
 
 mod counted_io {
-    use byteable::{Byteable, LittleEndian, ReadFixed, ReadValue, WriteFixed, WriteValue};
+    use byteable::{Byteable, LittleEndian};
+    use byteable::io::{ReadFixed, ReadValue, WriteFixed, WriteValue};
     use std::mem::size_of;
     use std::io::Cursor;
 
@@ -780,13 +781,13 @@ mod counted_io {
 // ── Collection types ──────────────────────────────────────────────────────────
 
 mod collections {
-    use byteable::{ReadValue, ReadableError, WriteValue};
+    use byteable::io::{ReadValue, ReadableError, WriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
 
     fn roundtrip<T>(original: &T) -> T
     where
-        T: byteable::Writable + byteable::Readable,
+        T: byteable::io::Writable + byteable::io::Readable,
     {
         let mut buf = Vec::new();
         buf.write_value(original).unwrap();
