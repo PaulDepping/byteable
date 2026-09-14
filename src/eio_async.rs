@@ -10,6 +10,20 @@
 //! than duplicating them — both are already generic over the backend's error type with no
 //! sync-specific bound, and `embedded-io-async` re-exports `embedded-io`'s own `ReadExactError`
 //! rather than defining its own, so there is nothing sync-specific to diverge from.
+//!
+//! # Importing alongside the sync `eio` traits
+//!
+//! The extension traits here deliberately share method names with their sync counterparts in
+//! [`crate::eio`] (`read_fixed`, `write_fixed`, `read_value`, `write_value`). Bringing both
+//! families into the same scope therefore makes plain method-call syntax ambiguous on types
+//! that implement both (e.g. `&[u8]` / `&mut [u8]`), which the compiler rejects with `E0034`.
+//! Either import only the family you need in a given scope, or disambiguate with fully-qualified
+//! syntax — e.g. `EioAsyncReadValue::read_value(&mut r).await` instead of `r.read_value().await`.
+
+// The `-> impl Future<Output = ...> { async move { ... } }` style here is deliberate, not a
+// missed `async fn`: it keeps the door open to adding a `+ Send` bound to the returned future
+// later, which the bare `async fn`-in-trait sugar cannot express.
+#![allow(clippy::manual_async_fn)]
 
 use crate::{
     DecodeError, PlainOldData, RawRepr, TryFromRawRepr,

@@ -8,10 +8,10 @@
 // ── Fixed-size I/O ────────────────────────────────────────────────────────────
 
 mod fixed_io {
-    use byteable::{BigEndian, Byteable, LittleEndian};
     use byteable::io::{
         FixedReadable, FixedWritable, ReadFixed, ReadValue, WriteFixed, WriteValue,
     };
+    use byteable::{BigEndian, Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -124,8 +124,8 @@ mod fixed_io {
 // ── Value / stream I/O ────────────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{Byteable, LittleEndian};
     use byteable::io::{ReadFixed, ReadValue, ReadableError, WriteFixed, WriteValue};
+    use byteable::{Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -600,10 +600,10 @@ mod io_only_derive {
 // ── Counted I/O ───────────────────────────────────────────────────────────────
 
 mod counted_io {
-    use byteable::{Byteable, LittleEndian};
     use byteable::io::{ReadFixed, ReadValue, WriteFixed, WriteValue};
-    use std::mem::size_of;
+    use byteable::{Byteable, LittleEndian};
     use std::io::Cursor;
+    use std::mem::size_of;
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
     struct SmallHeader {
@@ -624,7 +624,10 @@ mod counted_io {
 
     #[test]
     fn write_fixed_counted_struct() {
-        let header = SmallHeader { magic: 0xCAFEBABE, version: 1 };
+        let header = SmallHeader {
+            magic: 0xCAFEBABE,
+            version: 1,
+        };
         let mut buf = Vec::new();
         let n = buf.write_fixed_counted(&header).unwrap();
         // 4 bytes (magic) + 1 byte (version) — serialized size, not size_of
@@ -662,7 +665,10 @@ mod counted_io {
 
     #[test]
     fn read_fixed_counted_struct() {
-        let header = SmallHeader { magic: 0xCAFEBABE, version: 7 };
+        let header = SmallHeader {
+            magic: 0xCAFEBABE,
+            version: 7,
+        };
         let mut buf = Vec::new();
         buf.write_fixed(&header).unwrap();
         let (restored, n): (SmallHeader, usize) = Cursor::new(buf).read_fixed_counted().unwrap();
@@ -673,7 +679,10 @@ mod counted_io {
 
     #[test]
     fn read_fixed_counted_matches_write_fixed_counted() {
-        let header = SmallHeader { magic: 0x01020304, version: 9 };
+        let header = SmallHeader {
+            magic: 0x01020304,
+            version: 9,
+        };
         let mut buf = Vec::new();
         let written = buf.write_fixed_counted(&header).unwrap();
         let (_, read): (SmallHeader, usize) = Cursor::new(buf).read_fixed_counted().unwrap();

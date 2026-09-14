@@ -242,7 +242,14 @@ where
 
 // eio_async counterpart of the HashMap/HashSet impls above. Same std-only rationale as the
 // sync eio impls: HashMap/HashSet need std's RandomState hasher (OS randomness).
+//
+// The four impls below use the deliberate `-> impl Future<Output = ...> { async move { ... } }`
+// style of `eio_async.rs` rather than `async fn`: it preserves the option of adding a `+ Send`
+// bound to the returned future later, which the bare `async fn` sugar cannot express. Hence the
+// per-impl `allow(clippy::manual_async_fn)` — scoped here rather than file-wide, since the rest
+// of this module is synchronous.
 #[cfg(feature = "embedded-io-async")]
+#[allow(clippy::manual_async_fn)]
 impl<K, V, S> EioAsyncReadable for HashMap<K, V, S>
 where
     K: EioAsyncReadable + Eq + std::hash::Hash,
@@ -267,6 +274,7 @@ where
 }
 
 #[cfg(feature = "embedded-io-async")]
+#[allow(clippy::manual_async_fn)]
 impl<K, V, S> EioAsyncWritable for HashMap<K, V, S>
 where
     K: EioAsyncWritable,
@@ -293,6 +301,7 @@ where
 }
 
 #[cfg(feature = "embedded-io-async")]
+#[allow(clippy::manual_async_fn)]
 impl<T, S> EioAsyncReadable for HashSet<T, S>
 where
     T: EioAsyncReadable + Eq + Hash,
@@ -314,6 +323,7 @@ where
 }
 
 #[cfg(feature = "embedded-io-async")]
+#[allow(clippy::manual_async_fn)]
 impl<T, S> EioAsyncWritable for HashSet<T, S>
 where
     T: EioAsyncWritable,

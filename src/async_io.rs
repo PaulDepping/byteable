@@ -4,10 +4,15 @@
 //! synchronous API in [`crate::io`] but uses [`tokio::io::AsyncReadExt`] /
 //! [`tokio::io::AsyncWriteExt`] and returns `impl Future` from each method.
 
+// Deliberate `-> impl Future<Output = ...> { async move { ... } }` style: it preserves the option
+// of adding a `+ Send` bound to the returned future later, which the bare `async fn` sugar cannot
+// express.
+#![allow(clippy::manual_async_fn)]
+
 use std::io;
 
-use crate::{PlainOldData, RawRepr, TryFromRawRepr};
 use crate::io::ReadableError;
+use crate::{PlainOldData, RawRepr, TryFromRawRepr};
 
 /// Async counterpart of [`crate::io::FixedReadable`].
 ///

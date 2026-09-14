@@ -248,6 +248,8 @@ mod dynamic_struct {
     struct Message {
         id: u32,
         flag: Option<u8>,
+        #[byteable(big_endian)]
+        tag: u16,
     }
 
     #[tokio::test]
@@ -255,12 +257,16 @@ mod dynamic_struct {
         let msg = Message {
             id: 42,
             flag: Some(1),
+            tag: 0x0102,
         };
-        let mut buf = [0u8; 6];
+        let mut buf = [0u8; 8];
         {
             let mut w: &mut [u8] = &mut buf;
             w.write_value(&msg).await.unwrap();
         }
+        // id (4) + flag discriminant (1) + flag payload (1) = 6, so `tag` starts at offset 6
+        // and must be laid out most-significant byte first.
+        assert_eq!(&buf[6..8], &[0x01, 0x02]);
         let mut r: &[u8] = &buf;
         let restored: Message = r.read_value().await.unwrap();
         assert_eq!(restored, msg);
@@ -268,12 +274,18 @@ mod dynamic_struct {
 
     #[tokio::test]
     async fn io_only_struct_roundtrip_none_flag() {
-        let msg = Message { id: 1, flag: None };
-        let mut buf = [0u8; 5];
+        let msg = Message {
+            id: 1,
+            flag: None,
+            tag: 0x0304,
+        };
+        let mut buf = [0u8; 7];
         {
             let mut w: &mut [u8] = &mut buf;
             w.write_value(&msg).await.unwrap();
         }
+        // id (4) + flag discriminant (1) = 5, so `tag` starts at offset 5.
+        assert_eq!(&buf[5..7], &[0x03, 0x04]);
         let mut r: &[u8] = &buf;
         let restored: Message = r.read_value().await.unwrap();
         assert_eq!(restored, msg);

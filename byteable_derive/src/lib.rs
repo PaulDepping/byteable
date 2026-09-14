@@ -38,16 +38,18 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
     AttributeType::None
 }
 
-/// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from a `std::io`-based
-/// impl block and an `embedded-io`-based one, keeping only the ones this build of `byteable`
-/// actually supports.
+/// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from the four
+/// per-flavor impl blocks it is handed — `std::io`-based, `embedded-io`-based, tokio-based,
+/// and `embedded-io-async`-based — keeping only the ones this build of `byteable` actually
+/// supports. Each flavor is gated independently on its own feature.
 ///
 /// This can't be done with `#[cfg(feature = "std")]` inside the emitted tokens themselves —
 /// that cfg would be evaluated against the *downstream* crate's own Cargo features (e.g. a
 /// `#![no_std]` binary that doesn't define a `std` feature at all), not `byteable`'s. Instead
-/// `byteable_derive` mirrors `byteable`'s `std`/`embedded-io` features onto itself (forwarded
-/// via `byteable_derive?/std` and `byteable_derive?/embedded-io` in `byteable/Cargo.toml`), so
-/// `cfg!` here — evaluated once, at the time this proc-macro crate itself was compiled —
+/// `byteable_derive` mirrors `byteable`'s `std`/`embedded-io`/`tokio`/`embedded-io-async`
+/// features onto itself (forwarded via `byteable_derive?/std`, `byteable_derive?/embedded-io`,
+/// `byteable_derive?/tokio` and `byteable_derive?/embedded-io-async` in `byteable/Cargo.toml`),
+/// so `cfg!` here — evaluated once, at the time this proc-macro crate itself was compiled —
 /// correctly reflects which wire formats are actually available for whoever is deriving.
 fn dynamic_pipeline_impls(
     type_name: &Ident,
@@ -531,7 +533,7 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
     };
     let async_impl = quote! {
         impl #impl_generics #bc::async_io::AsyncReadable for #name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
+            fn read_from(mut reader: &mut (impl #bc::__tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
                 async move {
                     use #bc::async_io::AsyncReadValue;
                     #( #read_bindings_async )*
@@ -540,7 +542,7 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
             }
         }
         impl #impl_generics #bc::async_io::AsyncWritable for #name #type_generics #where_clause {
-            fn write_to(&self, mut writer: &mut (impl ::tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
+            fn write_to(&self, mut writer: &mut (impl #bc::__tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
                 async move {
                     use #bc::async_io::AsyncWriteValue;
                     #( #write_stmts_async )*
@@ -1189,7 +1191,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     };
     let async_impl = quote! {
         impl #impl_generics #bc::async_io::AsyncWritable for #name #type_generics #where_clause {
-            fn write_to(&self, mut writer: &mut (impl ::tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
+            fn write_to(&self, mut writer: &mut (impl #bc::__tokio::io::AsyncWriteExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = ::std::io::Result<()>> {
                 async move {
                     use #bc::async_io::AsyncWriteValue;
                     match self {
@@ -1201,7 +1203,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         }
 
         impl #impl_generics #bc::async_io::AsyncReadable for #name #type_generics #where_clause {
-            fn read_from(mut reader: &mut (impl ::tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
+            fn read_from(mut reader: &mut (impl #bc::__tokio::io::AsyncReadExt + ?Sized + Unpin)) -> impl ::core::future::Future<Output = Result<Self, #bc::io::ReadableError>> {
                 async move {
                     use #bc::async_io::AsyncReadValue;
                     #read_disc_async

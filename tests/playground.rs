@@ -1,3 +1,5 @@
+#![cfg(all(feature = "std", feature = "derive"))]
+
 use std::io::Cursor;
 
 use byteable::Byteable;

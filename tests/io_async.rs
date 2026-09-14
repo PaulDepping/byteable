@@ -8,11 +8,11 @@
 // ── Async fixed-size I/O ──────────────────────────────────────────────────────
 
 mod fixed_io {
-    use byteable::{BigEndian, Byteable, LittleEndian};
     use byteable::async_io::{
         AsyncFixedReadable, AsyncFixedWritable, AsyncReadFixed, AsyncReadValue, AsyncWriteFixed,
         AsyncWriteValue,
     };
+    use byteable::{BigEndian, Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -113,9 +113,9 @@ mod fixed_io {
 // ── Async value / stream I/O ──────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{Byteable, LittleEndian};
     use byteable::async_io::{AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue};
     use byteable::io::ReadableError;
+    use byteable::{Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -327,6 +327,8 @@ mod io_only_derive {
     struct Message {
         id: u32,
         flag: Option<u8>,
+        #[byteable(big_endian)]
+        tag: u16,
     }
 
     #[tokio::test]
@@ -334,9 +336,14 @@ mod io_only_derive {
         let msg = Message {
             id: 42,
             flag: Some(1),
+            tag: 0x0102,
         };
         let mut buf = Cursor::new(Vec::new());
         buf.write_value(&msg).await.unwrap();
+        // id (4) + flag discriminant (1) + flag payload (1) = 6, so `tag` starts at offset 6
+        // and must be laid out most-significant byte first.
+        assert_eq!(buf.get_ref().len(), 8);
+        assert_eq!(&buf.get_ref()[6..8], &[0x01, 0x02]);
         buf.set_position(0);
         let restored: Message = buf.read_value().await.unwrap();
         assert_eq!(restored, msg);

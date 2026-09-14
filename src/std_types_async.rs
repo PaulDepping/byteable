@@ -5,6 +5,11 @@
 //! encoding reference table. All reads and writes are performed asynchronously using
 //! [`tokio::io::AsyncReadExt`] / [`tokio::io::AsyncWriteExt`].
 
+// Deliberate `-> impl Future<Output = ...> { async move { ... } }` style, matching `async_io.rs`:
+// it preserves the option of adding a `+ Send` bound to the returned future later, which the bare
+// `async fn` sugar cannot express.
+#![allow(clippy::manual_async_fn)]
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::DecodeError;

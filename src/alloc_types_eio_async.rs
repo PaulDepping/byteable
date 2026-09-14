@@ -10,6 +10,12 @@
 //! on the same `alloc` feature this module requires), which puts `alloc` in the 2018+ extern
 //! prelude for every module in this crate.
 
+// Deliberate `-> impl Future<Output = ...> { async move { ... } }` style, matching `eio_async.rs`:
+// it preserves the option of adding a `+ Send` bound to the returned future later, which the
+// bare `async fn` sugar cannot express.
+#![allow(clippy::manual_async_fn)]
+
+use crate::eio::EioReadableError;
 use crate::{
     DecodeError,
     eio_async::{
@@ -17,7 +23,6 @@ use crate::{
         EioAsyncWriteFixed, EioAsyncWriteValue, EioAsyncWriter,
     },
 };
-use crate::eio::EioReadableError;
 use alloc::{
     collections::{BTreeMap, BTreeSet, LinkedList, VecDeque},
     string::String,

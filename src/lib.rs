@@ -10,8 +10,9 @@
 //!
 //! - **Dynamic path** — For types that contain variable-length data (strings, vecs, maps). Add
 //!   `#[byteable(io_only)]` to derive [`io::Readable`] / [`io::Writable`] instead, which stream data
-//!   through any [`std::io::Read`] / [`std::io::Write`] (or the async tokio equivalents when
-//!   the `tokio` feature is enabled).
+//!   through any [`std::io::Read`] / [`std::io::Write`], or their
+//!   `embedded-io`/`embedded-io-async`/tokio counterparts, depending on which features are
+//!   enabled.
 //!
 //! # Quick Start
 //!
@@ -61,8 +62,9 @@
 //! | `std` | yes | [`io::Readable`] / [`io::Writable`] I/O traits and `std` type impls |
 //! | `tokio` | no | Async I/O traits via tokio |
 //! | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
-//! | `alloc` | no (implied by `std`) | `alloc`-backed collection types over the `eio` module |
-//! | `embedded-io` | no | `eio` module: `embedded-io`-based I/O traits for `no_std` targets |
+//! | `alloc` | no (implied by `std`) | `alloc`-backed collection types over the `eio` and `eio_async` modules |
+//! | `embedded-io` | no | `eio` module: `embedded-io`-based (sync) I/O traits for `no_std` targets |
+//! | `embedded-io-async` | no | `eio_async` module: `embedded-io-async`-based (async) I/O traits for `no_std` targets |
 //! | `all` | no | All of the above |
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -80,6 +82,12 @@ pub use byteable_derive::Byteable;
 pub mod async_io;
 #[cfg(feature = "tokio")]
 mod std_types_async;
+
+/// Hidden re-export of `tokio` so derive-generated code can name its traits without the
+/// downstream crate needing `tokio` as a direct dependency of its own.
+#[cfg(feature = "tokio")]
+#[doc(hidden)]
+pub use ::tokio as __tokio;
 
 #[cfg(feature = "std")]
 pub mod io;

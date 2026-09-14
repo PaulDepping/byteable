@@ -151,17 +151,17 @@ struct Reading {
     value: Option<i32>,
 }
 
-# #[tokio::main] async fn main() {
-let r = Reading { sensor_id: 3, value: Some(-12) };
-let mut buf = [0u8; 16];
-{
-    let mut w: &mut [u8] = &mut buf;
-    w.write_value(&r).await.unwrap();
+async fn example() {
+    let r = Reading { sensor_id: 3, value: Some(-12) };
+    let mut buf = [0u8; 16];
+    {
+        let mut w: &mut [u8] = &mut buf;
+        w.write_value(&r).await.unwrap();
+    }
+    let mut cursor: &[u8] = &buf;
+    let r2: Reading = cursor.read_value().await.unwrap();
+    assert_eq!(r, r2);
 }
-let mut cursor: &[u8] = &buf;
-let r2: Reading = cursor.read_value().await.unwrap();
-assert_eq!(r, r2);
-# }
 ```
 
 ### Controlling endianness
@@ -179,6 +179,16 @@ struct NetworkHeader {
     version: u8,
 }
 ```
+
+## Upgrading to 0.35
+
+0.35 stops re-exporting the I/O traits at the crate root, so each set now lives only in its own
+module. Update imports as follows:
+
+- `byteable::{Readable, Writable, ReadValue, WriteValue, ReadFixed, WriteFixed, FixedReadable, FixedWritable, ReadableError}`
+  → `byteable::io::{...}`
+- `byteable::{AsyncReadable, AsyncWritable, AsyncReadValue, AsyncWriteValue, AsyncReadFixed, AsyncWriteFixed, AsyncFixedReadable, AsyncFixedWritable}`
+  → `byteable::async_io::{...}`
 
 ## Feature Flags
 
