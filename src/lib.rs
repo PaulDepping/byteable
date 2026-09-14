@@ -61,6 +61,8 @@
 //! | `std` | yes | [`Readable`] / [`Writable`] I/O traits and `std` type impls |
 //! | `tokio` | no | Async I/O traits via tokio |
 //! | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
+//! | `alloc` | no (implied by `std`) | `alloc`-backed collection types over the `eio` module |
+//! | `embedded-io` | no | `eio` module: `embedded-io`-based I/O traits for `no_std` targets |
 //! | `all` | no | All of the above |
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -86,6 +88,15 @@ pub mod io;
 
 #[cfg(feature = "std")]
 pub use io::*;
+
+#[cfg(feature = "embedded-io")]
+pub mod eio;
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(all(feature = "embedded-io", feature = "alloc"))]
+mod alloc_types_eio;
 
 mod core_types;
 
