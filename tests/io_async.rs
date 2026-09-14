@@ -8,10 +8,11 @@
 // ── Async fixed-size I/O ──────────────────────────────────────────────────────
 
 mod fixed_io {
-    use byteable::{
+    use byteable::async_io::{
         AsyncFixedReadable, AsyncFixedWritable, AsyncReadFixed, AsyncReadValue, AsyncWriteFixed,
-        AsyncWriteValue, BigEndian, Byteable, LittleEndian,
+        AsyncWriteValue,
     };
+    use byteable::{BigEndian, Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -70,7 +71,7 @@ mod fixed_io {
 
     #[tokio::test]
     async fn async_fixed_readable_also_implements_async_readable() {
-        fn assert_both<T: AsyncFixedReadable + byteable::AsyncReadable>() {}
+        fn assert_both<T: AsyncFixedReadable + byteable::async_io::AsyncReadable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<LittleEndian<u64>>();
@@ -79,7 +80,7 @@ mod fixed_io {
 
     #[tokio::test]
     async fn async_fixed_writable_also_implements_async_writable() {
-        fn assert_both<T: AsyncFixedWritable + byteable::AsyncWritable>() {}
+        fn assert_both<T: AsyncFixedWritable + byteable::async_io::AsyncWritable>() {}
         assert_both::<u8>();
         assert_both::<u32>();
         assert_both::<BigEndian<u16>>();
@@ -89,7 +90,7 @@ mod fixed_io {
     /// Vec<u32> is NOT accessible via `AsyncReadFixed` or `AsyncWriteFixed`.
     ///
     /// ```compile_fail
-    /// use byteable::AsyncReadFixed;
+    /// use byteable::async_io::AsyncReadFixed;
     /// use std::io::Cursor;
     /// # #[tokio::main] async fn main() {
     /// let mut cursor = Cursor::new(vec![0u8; 16]);
@@ -98,7 +99,7 @@ mod fixed_io {
     /// ```
     ///
     /// ```compile_fail
-    /// use byteable::AsyncWriteFixed;
+    /// use byteable::async_io::AsyncWriteFixed;
     /// use std::io::Cursor;
     /// # #[tokio::main] async fn main() {
     /// let mut cursor = Cursor::new(Vec::new());
@@ -112,10 +113,9 @@ mod fixed_io {
 // ── Async value / stream I/O ──────────────────────────────────────────────────
 
 mod value_io {
-    use byteable::{
-        AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue, Byteable, LittleEndian,
-        ReadableError,
-    };
+    use byteable::async_io::{AsyncReadFixed, AsyncReadValue, AsyncWriteFixed, AsyncWriteValue};
+    use byteable::io::ReadableError;
+    use byteable::{Byteable, LittleEndian};
     use std::io::Cursor;
 
     #[derive(Byteable, Clone, Copy, Debug, PartialEq)]
@@ -266,13 +266,13 @@ mod value_io {
 // ── Async collection types ────────────────────────────────────────────────────
 
 mod collections {
-    use byteable::{AsyncReadValue, AsyncWritable, AsyncWriteValue};
+    use byteable::async_io::{AsyncReadValue, AsyncWritable, AsyncWriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
 
     async fn roundtrip<T>(original: &T) -> T
     where
-        T: AsyncWritable + byteable::AsyncReadable,
+        T: AsyncWritable + byteable::async_io::AsyncReadable,
     {
         let mut buf = Cursor::new(Vec::new());
         buf.write_value(original).await.unwrap();
@@ -314,5 +314,66 @@ mod collections {
     async fn string_roundtrip() {
         let original = String::from("async hello!");
         assert_eq!(roundtrip(&original).await, original);
+    }
+}
+
+mod io_only_derive {
+    use byteable::Byteable;
+    use byteable::async_io::{AsyncReadValue, AsyncWriteValue};
+    use std::io::Cursor;
+
+    #[derive(Byteable, Debug, PartialEq)]
+    #[byteable(io_only)]
+    struct Message {
+        id: u32,
+        flag: Option<u8>,
+        #[byteable(big_endian)]
+        tag: u16,
+    }
+
+    #[tokio::test]
+    async fn io_only_struct_roundtrip_over_tokio() {
+        let msg = Message {
+            id: 42,
+            flag: Some(1),
+            tag: 0x0102,
+        };
+        let mut buf = Cursor::new(Vec::new());
+        buf.write_value(&msg).await.unwrap();
+        // id (4) + flag discriminant (1) + flag payload (1) = 6, so `tag` starts at offset 6
+        // and must be laid out most-significant byte first.
+        assert_eq!(buf.get_ref().len(), 8);
+        assert_eq!(&buf.get_ref()[6..8], &[0x01, 0x02]);
+        buf.set_position(0);
+        let restored: Message = buf.read_value().await.unwrap();
+        assert_eq!(restored, msg);
+    }
+}
+
+mod field_enum {
+    use byteable::Byteable;
+    use byteable::async_io::{AsyncReadValue, AsyncWriteValue};
+    use std::io::Cursor;
+
+    #[derive(Byteable, Debug, PartialEq)]
+    enum Command {
+        Nothing,
+        Read(u32, u64),
+        Write { a: u32, b: u64 },
+    }
+
+    #[tokio::test]
+    async fn tuple_and_named_variants_roundtrip_over_tokio() {
+        for cmd in [
+            Command::Nothing,
+            Command::Read(1, 2),
+            Command::Write { a: 3, b: 4 },
+        ] {
+            let mut buf = Cursor::new(Vec::new());
+            buf.write_value(&cmd).await.unwrap();
+            buf.set_position(0);
+            let restored: Command = buf.read_value().await.unwrap();
+            assert_eq!(restored, cmd);
+        }
     }
 }

@@ -8,20 +8,22 @@ description = "A Rust crate for convenient serialization and deserialization of 
 readme = "README.md"
 
 [features]
-all = ["derive", "tokio", "std", "ordered-float", "embedded-io"]
+all = ["derive", "tokio", "std", "ordered-float", "embedded-io", "embedded-io-async"]
 default = ["derive", "std"]
 derive = ["dep:byteable_derive"]
 alloc = []
 std = ["alloc", "byteable_derive?/std"]
-tokio = ["dep:tokio", "std"]
+tokio = ["dep:tokio", "std", "byteable_derive?/tokio"]
 ordered-float = ["dep:ordered-float"]
 embedded-io = ["dep:embedded-io", "byteable_derive?/embedded-io"]
+embedded-io-async = ["dep:embedded-io-async", "embedded-io", "byteable_derive?/embedded-io-async"]
 
 [dependencies]
 byteable_derive = { version = "0.19.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ordered-float = { version = "5", optional = true }
 embedded-io = { version = "0.7", optional = true }
+embedded-io-async = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
