@@ -3,7 +3,7 @@
 //!
 //! Wire formats and capacity-checking behavior are identical to
 //! [`crate::ext::arrayvec::io`]; see that module for the rationale. Neither `ArrayVec` nor
-//! `ArrayString` need the `alloc` feature — both are stack-allocated with a compile-time
+//! `ArrayString` need the `alloc` feature - both are stack-allocated with a compile-time
 //! capacity.
 
 use crate::{

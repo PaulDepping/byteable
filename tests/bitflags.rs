@@ -69,7 +69,7 @@ fn derived_struct_with_bitflags_field_roundtrip() {
 }
 
 // Proves that a bitflags type gets every I/O pipeline for free through this crate's existing
-// blanket impls over `RawRepr`/`TryFromRawRepr` — no pipeline-specific code needed for it.
+// blanket impls over `RawRepr`/`TryFromRawRepr` - no pipeline-specific code needed for it.
 
 #[cfg(feature = "std")]
 #[test]

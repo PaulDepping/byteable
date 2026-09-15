@@ -39,8 +39,8 @@ mod fixed_io {
     }
 
     // `Reverse<T>` only gets `FixedReadable`/`FixedWritable` (via the blanket `RawRepr`/
-    // `TryFromRawRepr` chain), not the `ToByteArray` fixed byte-array API directly — see
-    // `core_types.rs` — so it's exercised here rather than in `tests/type_impls.rs`.
+    // `TryFromRawRepr` chain), not the `ToByteArray` fixed byte-array API directly - see
+    // `core_types.rs` - so it's exercised here rather than in `tests/type_impls.rs`.
     #[test]
     fn reverse_roundtrip() {
         use std::cmp::Reverse;
@@ -645,7 +645,7 @@ mod counted_io {
         };
         let mut buf = Vec::new();
         let n = buf.write_fixed_counted(&header).unwrap();
-        // 4 bytes (magic) + 1 byte (version) — serialized size, not size_of
+        // 4 bytes (magic) + 1 byte (version) - serialized size, not size_of
         assert_eq!(n, 5);
         assert_eq!(buf.len(), n);
     }
@@ -688,7 +688,7 @@ mod counted_io {
         buf.write_fixed(&header).unwrap();
         let (restored, n): (SmallHeader, usize) = Cursor::new(buf).read_fixed_counted().unwrap();
         assert_eq!(restored, header);
-        // 4 bytes (magic) + 1 byte (version) — serialized size, not size_of
+        // 4 bytes (magic) + 1 byte (version) - serialized size, not size_of
         assert_eq!(n, 5);
     }
 
@@ -903,6 +903,29 @@ mod collections {
     fn bound_invalid_tag_is_err() {
         let result: Result<Bound<u32>, _> = Cursor::new(vec![3u8]).read_value();
         assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
+    }
+
+    #[test]
+    fn tuple_roundtrip() {
+        let pair: (u32, String) = (42, "hello".to_string());
+        assert_eq!(roundtrip(&pair), pair);
+
+        let triple: (u8, IpAddr, bool) = (7, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), true);
+        assert_eq!(roundtrip(&triple), triple);
+
+        let single: (u32,) = (0xDEAD_BEEF,);
+        assert_eq!(roundtrip(&single), single);
+
+        let twelve: (u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8) =
+            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+        assert_eq!(roundtrip(&twelve), twelve);
+    }
+
+    #[test]
+    fn tuple_wire_format_has_no_tag_or_length_prefix() {
+        let mut buf = Vec::new();
+        buf.write_value(&(1u8, 2u8)).unwrap();
+        assert_eq!(buf, vec![1u8, 2u8]);
     }
 
     #[test]

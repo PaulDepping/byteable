@@ -250,6 +250,50 @@ impl<T: AsyncReadable> AsyncReadable for Bound<T> {
     }
 }
 
+// Wire format: no tag or length prefix - arity is fixed at compile time, so each element is
+// just serialized in order. Implemented for tuples of arity 1 through 12; see `std_types.rs`
+// for why the macro reuses each type parameter identifier as a binding name.
+macro_rules! impl_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: AsyncReadable),+> AsyncReadable for ($($T,)+) {
+            fn read_from(
+                reader: &mut (impl AsyncReadExt + ?Sized + Unpin),
+            ) -> impl Future<Output = Result<Self, ReadableError>> {
+                async {
+                    Ok(($(reader.read_value::<$T>().await?,)+))
+                }
+            }
+        }
+
+        impl<$($T: AsyncWritable),+> AsyncWritable for ($($T,)+) {
+            fn write_to(
+                &self,
+                writer: &mut (impl AsyncWriteExt + ?Sized + Unpin),
+            ) -> impl Future<Output = io::Result<()>> {
+                async move {
+                    #[allow(non_snake_case)]
+                    let ($($T,)+) = self;
+                    $( writer.write_value($T).await?; )+
+                    Ok(())
+                }
+            }
+        }
+    };
+}
+
+impl_tuple!(A);
+impl_tuple!(A, B);
+impl_tuple!(A, B, C);
+impl_tuple!(A, B, C, D);
+impl_tuple!(A, B, C, D, E);
+impl_tuple!(A, B, C, D, E, F);
+impl_tuple!(A, B, C, D, E, F, G);
+impl_tuple!(A, B, C, D, E, F, G, H);
+impl_tuple!(A, B, C, D, E, F, G, H, I);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
 impl AsyncReadable for String {
     fn read_from(
         reader: &mut (impl AsyncReadExt + ?Sized + Unpin),

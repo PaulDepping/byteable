@@ -507,7 +507,7 @@ macro_rules! impl_endian_wrapper {
             }
         }
 
-        // Formats the semantic (native-endian) value via `get()`, not the raw stored bytes —
+        // Formats the semantic (native-endian) value via `get()`, not the raw stored bytes -
         // deriving would print the byte-swapped representation instead.
         #[cfg(feature = "defmt")]
         impl<T: defmt::Format + EndianConvert> defmt::Format for $name<T> {

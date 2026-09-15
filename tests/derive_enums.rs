@@ -5,7 +5,7 @@
 //! discriminants, and invalid-discriminant error reporting.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, DecodeError, ToByteArray, PlainOldData, RawRepr, TryFromByteArray};
+use byteable::{Byteable, DecodeError, PlainOldData, RawRepr, ToByteArray, TryFromByteArray};
 
 // ── u8 repr ───────────────────────────────────────────────────────────────────
 
@@ -317,10 +317,7 @@ enum SignedBE {
 
 #[test]
 fn i16_le_enum_byte_layout() {
-    assert_eq!(
-        SignedLE::Negative.to_byte_array(),
-        (-1000i16).to_le_bytes()
-    );
+    assert_eq!(SignedLE::Negative.to_byte_array(), (-1000i16).to_le_bytes());
     assert_eq!(SignedLE::Positive.to_byte_array(), 1000i16.to_le_bytes());
     assert_eq!(
         SignedLE::try_from_byte_array((-1000i16).to_le_bytes()).unwrap(),
@@ -330,10 +327,7 @@ fn i16_le_enum_byte_layout() {
 
 #[test]
 fn i16_be_enum_byte_layout() {
-    assert_eq!(
-        SignedBE::Negative.to_byte_array(),
-        (-1000i16).to_be_bytes()
-    );
+    assert_eq!(SignedBE::Negative.to_byte_array(), (-1000i16).to_be_bytes());
     assert_eq!(SignedBE::Positive.to_byte_array(), 1000i16.to_be_bytes());
     assert_eq!(
         SignedBE::try_from_byte_array((-1000i16).to_be_bytes()).unwrap(),
@@ -368,10 +362,7 @@ fn i32_le_enum_roundtrip() {
         (-2_000_000i32).to_le_bytes()
     );
     assert_eq!(SignedI32LE::Zero.to_byte_array(), 0i32.to_le_bytes());
-    assert_eq!(
-        SignedI32LE::Max.to_byte_array(),
-        2_000_000i32.to_le_bytes()
-    );
+    assert_eq!(SignedI32LE::Max.to_byte_array(), 2_000_000i32.to_le_bytes());
     assert_eq!(
         SignedI32LE::try_from_byte_array((-2_000_000i32).to_le_bytes()).unwrap(),
         SignedI32LE::Min
@@ -657,15 +648,9 @@ mod u128_enums {
 
     #[test]
     fn i128_enum_byte_layout() {
-        assert_eq!(
-            SignedI128::MinVal.to_byte_array(),
-            i128::MIN.to_le_bytes()
-        );
+        assert_eq!(SignedI128::MinVal.to_byte_array(), i128::MIN.to_le_bytes());
         assert_eq!(SignedI128::Zero.to_byte_array(), 0i128.to_le_bytes());
-        assert_eq!(
-            SignedI128::MaxVal.to_byte_array(),
-            i128::MAX.to_le_bytes()
-        );
+        assert_eq!(SignedI128::MaxVal.to_byte_array(), i128::MAX.to_le_bytes());
     }
 
     #[test]
@@ -690,10 +675,7 @@ mod u128_enums {
 
     #[test]
     fn u128_big_endian_enum() {
-        assert_eq!(
-            BigEndianU128::Low.to_byte_array(),
-            0x0001u128.to_be_bytes()
-        );
+        assert_eq!(BigEndianU128::Low.to_byte_array(), 0x0001u128.to_be_bytes());
         assert_eq!(
             BigEndianU128::High.to_byte_array(),
             0xFFFFu128.to_be_bytes()
@@ -710,7 +692,7 @@ mod u128_enums {
 // Every enum above derives `Clone, Copy`, which masked a bug: the unit-enum codegen used
 // to build `to_raw`/`to_byte_array` from `*self as _`, which only compiles when `Self`
 // is `Copy` (an enum-to-integer cast still needs to move the operand out of the `&self`
-// reference otherwise) — and, separately, never compiles for an empty enum regardless of
+// reference otherwise) - and, separately, never compiles for an empty enum regardless of
 // `Copy`, since there's no value to move at all.
 
 #[derive(Byteable, Debug, PartialEq)]

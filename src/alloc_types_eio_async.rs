@@ -2,11 +2,11 @@
 //!
 //! The `eio_async` counterpart of the collection impls in `alloc_types_eio.rs`, gated on
 //! `alloc` instead of `std` (no OS/heap-randomness dependent types like `HashMap`/`HashSet`
-//! here — those stay `std`-only, and get their `EioAsyncReadable`/`EioAsyncWritable` impls
+//! here - those stay `std`-only, and get their `EioAsyncReadable`/`EioAsyncWritable` impls
 //! alongside their sync `EioReadable`/`EioWritable` ones directly in `std_types.rs` instead).
 //! Mirrors `alloc_types_eio.rs`'s wire formats exactly.
 //!
-//! No `extern crate alloc;` needed here — `src/lib.rs` already declares it crate-wide (gated
+//! No `extern crate alloc;` needed here - `src/lib.rs` already declares it crate-wide (gated
 //! on the same `alloc` feature this module requires), which puts `alloc` in the 2018+ extern
 //! prelude for every module in this crate.
 

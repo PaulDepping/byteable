@@ -1,4 +1,4 @@
-//! `arrayvec`'s fixed-capacity collections — `io_only` support on every enabled I/O pipeline.
+//! `arrayvec`'s fixed-capacity collections - `io_only` support on every enabled I/O pipeline.
 
 #[cfg(feature = "std")]
 mod io;

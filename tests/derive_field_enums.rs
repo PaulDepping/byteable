@@ -290,7 +290,7 @@ fn bool_field_roundtrip() {
 
 // ── Auto-repr (no #[repr]) and auto-discriminants ────────────────────────────
 
-/// No #[repr] or explicit discriminants — fully automatic.
+/// No #[repr] or explicit discriminants - fully automatic.
 /// 3 variants → auto repr u8, discriminants 0/1/2.
 #[derive(Byteable, Debug, PartialEq)]
 enum Auto {
@@ -324,7 +324,7 @@ fn auto_repr_roundtrip() {
     }
 }
 
-/// Auto-discriminants with one explicit override — subsequent variants continue from there.
+/// Auto-discriminants with one explicit override - subsequent variants continue from there.
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum PartialDiscriminants {
@@ -363,7 +363,7 @@ fn partial_discriminants_roundtrip() {
     }
 }
 
-/// Hex discriminant — counter resumes correctly after a hex literal.
+/// Hex discriminant - counter resumes correctly after a hex literal.
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum HexDiscriminants {

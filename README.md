@@ -10,12 +10,12 @@ Byte-level serialization and deserialization for Rust types.
 
 `byteable` gives you two paths for working with binary data:
 
-- **Fixed-size path** — For types whose byte representation is known at compile time. Derive
+- **Fixed-size path** - For types whose byte representation is known at compile time. Derive
   `Byteable` and get zero-copy `to_byte_array()` / `from_byte_array()` with a compile-time
   `BYTE_SIZE` constant. Under the hood this uses `#[repr(C, packed)]` raw structs and
   `transmute`, so no allocation or iteration is involved.
 
-- **Dynamic path** — For types that contain variable-length data (strings, vecs, maps). Add
+- **Dynamic path** - For types that contain variable-length data (strings, vecs, maps). Add
   `#[byteable(io_only)]` to derive `Readable` / `Writable` instead, which stream data through
   any `std::io::Read` / `Write` (or their async `tokio` equivalents).
 
@@ -50,10 +50,10 @@ byteable = { version = "0.34", features = ["tinyvec"] }
 # with defmt support (Format impls for this crate's own error/wrapper types)
 byteable = { version = "0.34", features = ["defmt"] }
 
-# with embedded-io support (no_std friendly, sync — combine with `alloc` for Vec/String support)
+# with embedded-io support (no_std friendly, sync - combine with `alloc` for Vec/String support)
 byteable = { version = "0.34", features = ["embedded-io"] }
 
-# with embedded-io-async support (no_std friendly, async — combine with `alloc` for Vec/String support)
+# with embedded-io-async support (no_std friendly, async - combine with `alloc` for Vec/String support)
 byteable = { version = "0.34", features = ["embedded-io-async"] }
 
 # everything
@@ -76,7 +76,7 @@ struct Point3D {
 
 let p = Point3D { x: 1.0, y: 2.0, z: 3.0 };
 
-// Serialize to a fixed-size byte array — no allocation
+// Serialize to a fixed-size byte array - no allocation
 let bytes: [u8; 12] = p.to_byte_array();
 
 // Deserialize back
@@ -116,10 +116,10 @@ assert_eq!(wp.label, wp2.label);
 
 `#[byteable(io_only)]` structs and field/variant enums generate `Readable`/`Writable`
 (`std::io`-based) and/or `EioReadable`/`EioWritable` (`embedded-io`-based) purely from which of
-`byteable`'s own `std`/`embedded-io` features are enabled — both if both are on, and it's a
+`byteable`'s own `std`/`embedded-io` features are enabled - both if both are on, and it's a
 compile error at the derive site if neither is. In a genuinely `no_std` build (`embedded-io`
 enabled, `std` not), only the `EioReadable`/`EioWritable` impls are generated, so no `std`
-reference ever appears — no separate opt-in attribute needed.
+reference ever appears - no separate opt-in attribute needed.
 
 ```rust
 use byteable::Byteable;
@@ -132,7 +132,7 @@ struct Reading {
     value: Option<i32>,
 }
 
-// Field enums always use this pipeline — no `#[byteable(io_only)]` needed.
+// Field enums always use this pipeline - no `#[byteable(io_only)]` needed.
 #[derive(Byteable, Debug, PartialEq)]
 enum Command {
     Ping,
@@ -153,7 +153,7 @@ assert_eq!(r, r2);
 ### Embedded-IO-Async I/O streaming
 
 The async, `no_std`-friendly counterpart, generated automatically alongside the sync flavors
-above whenever the `embedded-io-async` feature is on — no separate opt-in attribute.
+above whenever the `embedded-io-async` feature is on - no separate opt-in attribute.
 
 ```rust
 use byteable::Byteable;
@@ -197,7 +197,7 @@ struct NetworkHeader {
 
 ### bitflags support
 
-Unlike `ordered-float`, `bitflags` types don't get support automatically — each type generated
+Unlike `ordered-float`, `bitflags` types don't get support automatically - each type generated
 by the `bitflags!` macro needs a one-line opt-in, since a blanket impl over the foreign `Flags`
 trait would conflict with this crate's other impls. Decoding preserves unknown bits
 (`from_bits_retain`) rather than rejecting them.
@@ -229,7 +229,7 @@ struct FileEntry {
 
 `heapless`'s fixed-capacity collections (`Vec<T, N>`, `String<N>`, `Deque<T, N>`, `IndexMap`,
 `IndexSet`, `LinearMap`) work automatically as `io_only` fields, on every I/O pipeline you have
-enabled (`std`, `tokio`, `embedded-io`, `embedded-io-async`) — no opt-in macro needed, unlike
+enabled (`std`, `tokio`, `embedded-io`, `embedded-io-async`) - no opt-in macro needed, unlike
 `bitflags`. Unlike `alloc`'s `Vec`/`String`/`HashMap`, none of these need the `alloc` feature at
 all, so they work on targets with no heap.
 
@@ -253,7 +253,7 @@ struct Sensor {
 ### arrayvec support
 
 `arrayvec::ArrayVec<T, N>` and `ArrayString<N>` work the same way as `heapless`'s collections
-above — automatically, as `io_only` fields, on every enabled I/O pipeline, no `alloc` needed,
+above - automatically, as `io_only` fields, on every enabled I/O pipeline, no `alloc` needed,
 capacity-checked on decode.
 
 ```rust
@@ -271,7 +271,7 @@ struct Sensor {
 
 ### tinyvec support
 
-`tinyvec::ArrayVec<[T; N]>` works the same way — automatically, as an `io_only` field, on every
+`tinyvec::ArrayVec<[T; N]>` works the same way - automatically, as an `io_only` field, on every
 enabled I/O pipeline, no `alloc` needed, capacity-checked on decode. Unlike `heapless` and
 `arrayvec`, tinyvec has no `unsafe` code anywhere in its implementation (its `Array::Item: Default`
 requirement is how it avoids needing `MaybeUninit`), which is why some safety-critical embedded
@@ -291,7 +291,7 @@ struct Sensor {
 
 ### defmt support
 
-Unlike the other embedded features above, `defmt` isn't a data type to serialize — it's the
+Unlike the other embedded features above, `defmt` isn't a data type to serialize - it's the
 de facto logging framework for embedded Rust. Enabling it adds `defmt::Format` impls for this
 crate's own error and wrapper types: `DecodeError`, `LittleEndian<T>`, `BigEndian<T>`,
 `eio::EioReadableError<E>`, and `eio::EioReadExactError<E>` (each requires its own type
@@ -311,7 +311,7 @@ fn log_value(v: BigEndian<u32>) {
 }
 ```
 
-This feature is scoped to byteable's own types only — it does **not** forward to the `defmt`
+This feature is scoped to byteable's own types only - it does **not** forward to the `defmt`
 features of `heapless`/`arrayvec`/`bitflags`/`tinyvec`. Those crates' own `defmt` support (where
 they have it) targets whatever `defmt` major version *they* pin, which doesn't necessarily match
 this crate's; enable their `defmt` feature directly alongside this one if you need it.
@@ -350,6 +350,7 @@ this crate's; enable their `defmt` feature directly alongside this one if you ne
 | `Option<T>` | 1-byte tag (`0` = None, `1` = Some) + optional value |
 | `Result<V, E>` | 1-byte tag (`0` = Ok, `1` = Err) + payload |
 | `Bound<T>` | 1-byte tag (`0` = Included, `1` = Excluded, `2` = Unbounded) + value for Included/Excluded |
+| `(A, B, ...)` (tuples, arity 1-12) | each element in order, no tag or length prefix |
 | `String` / `str` | `u64` byte length + UTF-8 bytes |
 | `Vec<T>` and other sequences | `u64` element count + elements |
 | `HashMap<K,V>` / `BTreeMap<K,V>` | `u64` entry count + alternating key/value pairs |
@@ -534,7 +535,7 @@ These traits underpin per-field endian control in the derive macro and the
 
 | Trait | Role |
 |-------|------|
-| [`PlainOldData`] | Unsafe marker: no padding, all bit patterns valid — enables `transmute`-based I/O |
+| [`PlainOldData`] | Unsafe marker: no padding, all bit patterns valid - enables `transmute`-based I/O |
 | [`ByteArray`] | Unsafe marker for `[u8; N]` used as the `ToByteArray::ByteArray` associated type |
 
 [`PlainOldData`]: https://docs.rs/byteable/latest/byteable/trait.PlainOldData.html
@@ -552,4 +553,4 @@ These traits underpin per-field endian control in the derive macro and the
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

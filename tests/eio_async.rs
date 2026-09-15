@@ -205,6 +205,32 @@ mod option_result {
             assert_eq!(restored, val);
         }
     }
+
+    #[tokio::test]
+    async fn tuple_roundtrip() {
+        let val: (u8, u32, bool) = (7, 0xDEAD_BEEF, true);
+        let mut buf = [0u8; 6];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&val).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: (u8, u32, bool) = r.read_value().await.unwrap();
+        assert_eq!(restored, val);
+    }
+
+    #[tokio::test]
+    async fn single_element_tuple_roundtrip() {
+        let val: (u32,) = (0xDEAD_BEEF,);
+        let mut buf = [0u8; 4];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_value(&val).await.unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: (u32,) = r.read_value().await.unwrap();
+        assert_eq!(restored, val);
+    }
 }
 
 mod borrowed_write {

@@ -39,17 +39,17 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
 }
 
 /// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from the four
-/// per-flavor impl blocks it is handed — `std::io`-based, `embedded-io`-based, tokio-based,
-/// and `embedded-io-async`-based — keeping only the ones this build of `byteable` actually
+/// per-flavor impl blocks it is handed - `std::io`-based, `embedded-io`-based, tokio-based,
+/// and `embedded-io-async`-based - keeping only the ones this build of `byteable` actually
 /// supports. Each flavor is gated independently on its own feature.
 ///
-/// This can't be done with `#[cfg(feature = "std")]` inside the emitted tokens themselves —
+/// This can't be done with `#[cfg(feature = "std")]` inside the emitted tokens themselves -
 /// that cfg would be evaluated against the *downstream* crate's own Cargo features (e.g. a
 /// `#![no_std]` binary that doesn't define a `std` feature at all), not `byteable`'s. Instead
 /// `byteable_derive` mirrors `byteable`'s `std`/`embedded-io`/`tokio`/`embedded-io-async`
 /// features onto itself (forwarded via `byteable_derive?/std`, `byteable_derive?/embedded-io`,
 /// `byteable_derive?/tokio` and `byteable_derive?/embedded-io-async` in `byteable/Cargo.toml`),
-/// so `cfg!` here — evaluated once, at the time this proc-macro crate itself was compiled —
+/// so `cfg!` here - evaluated once, at the time this proc-macro crate itself was compiled -
 /// correctly reflects which wire formats are actually available for whoever is deriving.
 fn dynamic_pipeline_impls(
     type_name: &Ident,
@@ -61,7 +61,7 @@ fn dynamic_pipeline_impls(
     if !cfg!(feature = "std") && !cfg!(feature = "embedded-io") {
         panic!(
             "deriving Byteable on `{type_name}` needs the io_only/field-enum dynamic pipeline, \
-             which requires the `std` and/or `embedded-io` feature of `byteable` to be enabled — \
+             which requires the `std` and/or `embedded-io` feature of `byteable` to be enabled - \
              neither is active for this build"
         );
     }
@@ -76,7 +76,7 @@ fn dynamic_pipeline_impls(
         quote! {}
     };
     // tokio/embedded-io-async are "bonus" async impls layered on an already-guaranteed sync
-    // base (tokio implies std, embedded-io-async implies embedded-io — see Cargo.toml), so
+    // base (tokio implies std, embedded-io-async implies embedded-io - see Cargo.toml), so
     // they need no analog of the panic! above: it is structurally impossible to enable either
     // without its sync base already satisfying it.
     let async_impl = if cfg!(feature = "tokio") {
@@ -118,7 +118,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///   counterpart) when `embedded-io` is enabled, [`async_io::AsyncReadable`]/
 ///   [`async_io::AsyncWritable`] (tokio-based) when `tokio` is enabled, and
 ///   [`eio_async::EioAsyncReadable`]/[`eio_async::EioAsyncWritable`] (the async, `no_std`-friendly
-///   counterpart) when `embedded-io-async` is enabled — any combination of the four, and a
+///   counterpart) when `embedded-io-async` is enabled - any combination of the four, and a
 ///   compile error at the derive site if none of `std`/`embedded-io` is on (the two async
 ///   flavors each imply one of these). Not opt-in per type: if a field type doesn't support the
 ///   wire format a given feature implies, that surfaces as a normal compile error, same as
@@ -975,7 +975,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
 
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    // Determine repr type — use explicit #[repr(...)] if present, otherwise auto-select.
+    // Determine repr type - use explicit #[repr(...)] if present, otherwise auto-select.
     let repr_ty = extract_repr_type(&input.attrs).unwrap_or_else(|| {
         let n = enum_data.variants.len();
         let ty_str = if n <= 256 {
@@ -1346,7 +1346,7 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             });
 
     // `*self as #repr_ty` would require moving `Self` out of the `&self` reference (it's not
-    // necessarily `Copy`), which rustc rejects with E0507 — and does so unconditionally, not
+    // necessarily `Copy`), which rustc rejects with E0507 - and does so unconditionally, not
     // just for empty enums; there's no special-cased discriminant-read lowering for fieldless
     // enum casts. Matching on `*self` instead never binds or moves anything (every variant is
     // a unit variant), and works uniformly down to zero variants (`match *self {}` is accepted
@@ -1366,7 +1366,7 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         }
     };
 
-    // For an empty enum, `to_raw_expr` (`match *self {}`) has type `!` — it already coerces to
+    // For an empty enum, `to_raw_expr` (`match *self {}`) has type `!` - it already coerces to
     // `Self::ByteArray` on its own. Binding it to `v` first and then converting `v` would leave
     // the conversion as dead code after a diverging `let`, which rustc flags as an
     // `unreachable_code` warning. So skip the intermediate binding entirely in that case; the

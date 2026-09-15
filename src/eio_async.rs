@@ -1,13 +1,13 @@
-//! `embedded-io-async` support — the async counterpart to [`crate::eio`] (sync) and
+//! `embedded-io-async` support - the async counterpart to [`crate::eio`] (sync) and
 //! [`crate::async_io`] (tokio). Mirrors `eio.rs`'s shape, but every method returns
 //! `impl Future<Output = ...>` instead of a bare `Result`, generic over the
 //! [`EioAsyncReader`]/[`EioAsyncWriter`] marker traits defined here rather than bound directly
 //! to `embedded_io_async::Read`/`Write`. Gated on the `embedded-io-async` feature (`src/lib.rs`),
-//! same as `eio.rs` is gated on `embedded-io` — `embedded-io-async` implies `embedded-io`
+//! same as `eio.rs` is gated on `embedded-io` - `embedded-io-async` implies `embedded-io`
 //! (`Cargo.toml`), so `crate::eio` is always available here.
 //!
 //! Reuses [`crate::eio::EioReadExactError`] and [`crate::eio::EioReadableError`] directly rather
-//! than duplicating them — both are already generic over the backend's error type with no
+//! than duplicating them - both are already generic over the backend's error type with no
 //! sync-specific bound, and `embedded-io-async` re-exports `embedded-io`'s own `ReadExactError`
 //! rather than defining its own, so there is nothing sync-specific to diverge from.
 //!
@@ -18,7 +18,7 @@
 //! families into the same scope therefore makes plain method-call syntax ambiguous on types
 //! that implement both (e.g. `&[u8]` / `&mut [u8]`), which the compiler rejects with `E0034`.
 //! Either import only the family you need in a given scope, or disambiguate with fully-qualified
-//! syntax — e.g. `EioAsyncReadValue::read_value(&mut r).await` instead of `r.read_value().await`.
+//! syntax - e.g. `EioAsyncReadValue::read_value(&mut r).await` instead of `r.read_value().await`.
 
 // The `-> impl Future<Output = ...> { async move { ... } }` style here is deliberate, not a
 // missed `async fn`: it keeps the door open to adding a `+ Send` bound to the returned future
@@ -435,6 +435,50 @@ impl<T: EioAsyncWritable> EioAsyncWritable for Bound<T> {
         }
     }
 }
+
+// Wire format: no tag or length prefix - arity is fixed at compile time, so each element is
+// just serialized in order. Implemented for tuples of arity 1 through 12; see `std_types.rs`
+// for why the macro reuses each type parameter identifier as a binding name. No alloc needed.
+macro_rules! impl_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: EioAsyncReadable),+> EioAsyncReadable for ($($T,)+) {
+            fn read_from<R: EioAsyncReader + ?Sized>(
+                reader: &mut R,
+            ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+                async move {
+                    Ok(($(reader.read_value::<$T>().await?,)+))
+                }
+            }
+        }
+
+        impl<$($T: EioAsyncWritable),+> EioAsyncWritable for ($($T,)+) {
+            fn write_to<W: EioAsyncWriter + ?Sized>(
+                &self,
+                writer: &mut W,
+            ) -> impl Future<Output = Result<(), W::Error>> {
+                async move {
+                    #[allow(non_snake_case)]
+                    let ($($T,)+) = self;
+                    $( writer.write_value($T).await?; )+
+                    Ok(())
+                }
+            }
+        }
+    };
+}
+
+impl_tuple!(A);
+impl_tuple!(A, B);
+impl_tuple!(A, B, C);
+impl_tuple!(A, B, C, D);
+impl_tuple!(A, B, C, D, E);
+impl_tuple!(A, B, C, D, E, F);
+impl_tuple!(A, B, C, D, E, F, G);
+impl_tuple!(A, B, C, D, E, F, G, H);
+impl_tuple!(A, B, C, D, E, F, G, H, I);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 // Wire format: `u64` element count (LE) + elements in order. Write-only (borrowed): never
 // allocates, so this is available without the `alloc` feature.

@@ -3,7 +3,7 @@
 //! wrappers, `PhantomData`, `u128`/`i128`, `NonZero*`, network types,
 //! `Duration`, `SystemTime`, range types, `bool`, and `char`.
 
-use byteable::{BigEndian, FromByteArray, ToByteArray, LittleEndian, TryFromByteArray};
+use byteable::{BigEndian, FromByteArray, LittleEndian, ToByteArray, TryFromByteArray};
 use core::cmp::Ordering;
 use core::marker::PhantomData;
 use core::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
@@ -279,10 +279,7 @@ fn range_roundtrips() {
     assert_eq!(Range::<u8>::from_byte_array(r.clone().to_byte_array()), r);
 
     let r: Range<u32> = 0..0xDEAD_BEEF;
-    assert_eq!(
-        Range::<u32>::from_byte_array(r.clone().to_byte_array()),
-        r
-    );
+    assert_eq!(Range::<u32>::from_byte_array(r.clone().to_byte_array()), r);
 
     let r: RangeInclusive<u32> = 1..=0xFFFF_FFFF;
     assert_eq!(
@@ -301,10 +298,7 @@ fn range_from_roundtrip() {
 #[test]
 fn range_to_roundtrips() {
     let r: RangeTo<u32> = ..999;
-    assert_eq!(
-        RangeTo::<u32>::from_byte_array(r.to_byte_array()).end,
-        999
-    );
+    assert_eq!(RangeTo::<u32>::from_byte_array(r.to_byte_array()).end, 999);
 
     let r: RangeToInclusive<u32> = ..=1000;
     assert_eq!(
@@ -414,10 +408,10 @@ fn char_specific_byte_layouts() {
 #[test]
 fn char_invalid_codepoints_are_err() {
     let invalid = [
-        [0x00, 0xD8, 0x00, 0x00], // U+D800 — surrogate
-        [0xFF, 0xDF, 0x00, 0x00], // U+DFFF — surrogate
-        [0x00, 0x00, 0x11, 0x00], // U+110000 — out of range
-        [0xFF, 0xFF, 0xFF, 0xFF], // 0xFFFFFFFF — out of range
+        [0x00, 0xD8, 0x00, 0x00], // U+D800 - surrogate
+        [0xFF, 0xDF, 0x00, 0x00], // U+DFFF - surrogate
+        [0x00, 0x00, 0x11, 0x00], // U+110000 - out of range
+        [0xFF, 0xFF, 0xFF, 0xFF], // 0xFFFFFFFF - out of range
     ];
     for bytes in invalid {
         let _ = char::try_from_byte_array(bytes).expect_err("expected error for {bytes:?}");
@@ -581,7 +575,7 @@ mod derive_std_types {
     fn annotation_invalid_char() {
         let mut bytes = [0u8; 9];
         bytes[0] = 1;
-        bytes[1..5].copy_from_slice(&[0x00, 0x00, 0x11, 0x00]); // U+110000 — invalid
+        bytes[1..5].copy_from_slice(&[0x00, 0x00, 0x11, 0x00]); // U+110000 - invalid
         assert!(Annotation::try_from_byte_array(bytes).is_err());
     }
 
