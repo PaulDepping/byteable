@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -8,22 +8,32 @@ description = "A Rust crate for convenient serialization and deserialization of 
 readme = "README.md"
 
 [features]
-all = ["derive", "tokio", "std", "ordered-float", "embedded-io", "embedded-io-async"]
+all = ["derive", "tokio", "std", "ordered-float", "embedded-io", "embedded-io-async", "bitflags", "heapless", "arrayvec", "tinyvec", "defmt"]
 default = ["derive", "std"]
 derive = ["dep:byteable_derive"]
 alloc = []
-std = ["alloc", "byteable_derive?/std"]
+std = ["alloc", "byteable_derive?/std", "ordered-float?/std"]
 tokio = ["dep:tokio", "std", "byteable_derive?/tokio"]
 ordered-float = ["dep:ordered-float"]
 embedded-io = ["dep:embedded-io", "byteable_derive?/embedded-io"]
 embedded-io-async = ["dep:embedded-io-async", "embedded-io", "byteable_derive?/embedded-io-async"]
+bitflags = ["dep:bitflags"]
+heapless = ["dep:heapless"]
+arrayvec = ["dep:arrayvec"]
+tinyvec = ["dep:tinyvec"]
+defmt = ["dep:defmt"]
 
 [dependencies]
-byteable_derive = { version = "0.19.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.20.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
-ordered-float = { version = "5", optional = true }
+ordered-float = { version = "5", optional = true, default-features = false }
 embedded-io = { version = "0.7", optional = true }
 embedded-io-async = { version = "0.7", optional = true }
+bitflags = { version = "2", optional = true }
+heapless = { version = "0.8", optional = true }
+arrayvec = { version = "0.7", optional = true, default-features = false }
+tinyvec = { version = "1", optional = true }
+defmt = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -62,6 +62,11 @@
 //! | `std` | yes | [`io::Readable`] / [`io::Writable`] I/O traits and `std` type impls |
 //! | `tokio` | no | Async I/O traits via tokio |
 //! | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
+//! | `bitflags` | no | `impl_bitflags!`/`impl_bitflags_endian!` opt-in macros for `bitflags::Flags` types |
+//! | `heapless` | no | `io_only` support for `heapless`'s fixed-capacity collections, on every enabled I/O pipeline |
+//! | `arrayvec` | no | `io_only` support for `arrayvec::ArrayVec`/`ArrayString`, on every enabled I/O pipeline |
+//! | `tinyvec` | no | `io_only` support for `tinyvec::ArrayVec`, on every enabled I/O pipeline |
+//! | `defmt` | no | `defmt::Format` impls for this crate's own error/wrapper types (`DecodeError`, `LittleEndian<T>`, `BigEndian<T>`, `eio::EioReadableError<E>`, `eio::EioReadExactError<E>`) |
 //! | `alloc` | no (implied by `std`) | `alloc`-backed collection types over the `eio` and `eio_async` modules |
 //! | `embedded-io` | no | `eio` module: `embedded-io`-based (sync) I/O traits for `no_std` targets |
 //! | `embedded-io-async` | no | `eio_async` module: `embedded-io-async`-based (async) I/O traits for `no_std` targets |
@@ -112,5 +117,10 @@ mod core_types;
 #[cfg(feature = "std")]
 mod std_types;
 
-#[cfg(feature = "ordered-float")]
-pub mod ordered_float_types;
+pub mod ext;
+
+/// Hidden re-export of `bitflags` so [`impl_bitflags!`] can name its traits without the
+/// downstream crate needing `bitflags` as a direct dependency of its own.
+#[cfg(feature = "bitflags")]
+#[doc(hidden)]
+pub use ::bitflags as __bitflags;

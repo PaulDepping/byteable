@@ -5,7 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
-byteable = { path = "..", default-features = false, features = ["derive", "embedded-io", "embedded-io-async"] }
+byteable = { path = "..", default-features = false, features = ["derive", "embedded-io", "embedded-io-async", "bitflags", "heapless", "arrayvec", "tinyvec", "defmt", "ordered-float"] }
+bitflags = { version = "2", default-features = false }
+heapless = { version = "0.8", default-features = false }
+arrayvec = { version = "0.7", default-features = false }
+tinyvec = { version = "1" }
+defmt = "1"
+ordered-float = { version = "5", default-features = false }
 cortex-m-rt = "0.7.6"
 panic-halt = "1.0.0"
 

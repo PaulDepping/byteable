@@ -199,6 +199,7 @@ unsafe_impl_plain_old_data!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f3
 /// [`TryFromRawRepr::try_from_raw`], and the I/O read traits when the raw bytes do not
 /// represent a valid value of the target type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum DecodeError {
     /// The raw discriminant value does not correspond to any variant of the enum.
     InvalidDiscriminant { raw: u64, type_name: &'static str },
@@ -217,6 +218,16 @@ pub enum DecodeError {
     InvalidZero,
     /// A `NotNan<T>` field decoded to NaN, which is not allowed.
     InvalidNaN,
+    /// A fixed-capacity collection (e.g. `heapless::Vec<T, N>`) was asked to decode more
+    /// elements than its compile-time capacity allows.
+    CapacityExceeded {
+        /// The element/byte count encoded on the wire.
+        len: u64,
+        /// The container's compile-time capacity.
+        capacity: usize,
+        /// The name of the type that was being decoded.
+        type_name: &'static str,
+    },
 }
 
 impl core::fmt::Display for DecodeError {
@@ -234,6 +245,14 @@ impl core::fmt::Display for DecodeError {
             DecodeError::InvalidCString => write!(f, "invalid CString: interior null byte"),
             DecodeError::InvalidZero => write!(f, "invalid value: zero not allowed"),
             DecodeError::InvalidNaN => write!(f, "invalid value: NaN not allowed"),
+            DecodeError::CapacityExceeded {
+                len,
+                capacity,
+                type_name,
+            } => write!(
+                f,
+                "capacity exceeded for {type_name}: got {len} elements, capacity is {capacity}"
+            ),
         }
     }
 }
@@ -480,6 +499,16 @@ macro_rules! impl_endian_wrapper {
             #[inline]
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.debug_tuple(stringify!($name)).field(&self.get()).finish()
+            }
+        }
+
+        // Formats the semantic (native-endian) value via `get()`, not the raw stored bytes —
+        // deriving would print the byte-swapped representation instead.
+        #[cfg(feature = "defmt")]
+        impl<T: defmt::Format + EndianConvert> defmt::Format for $name<T> {
+            #[inline]
+            fn format(&self, fmt: defmt::Formatter) {
+                defmt::write!(fmt, "{}({})", stringify!($name), self.get())
             }
         }
 

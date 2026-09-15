@@ -27,22 +27,37 @@ self-describing wire formats.
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.32"
+byteable = "0.33"
 
 # with async (tokio) support
-byteable = { version = "0.32", features = ["tokio"] }
+byteable = { version = "0.33", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.32", features = ["ordered-float"] }
+byteable = { version = "0.33", features = ["ordered-float"] }
+
+# with bitflags support
+byteable = { version = "0.33", features = ["bitflags"] }
+
+# with heapless support (fixed-capacity collections, no `alloc` needed)
+byteable = { version = "0.33", features = ["heapless"] }
+
+# with arrayvec support (fixed-capacity collections, no `alloc` needed)
+byteable = { version = "0.33", features = ["arrayvec"] }
+
+# with tinyvec support (fixed-capacity, no unsafe, no `alloc` needed)
+byteable = { version = "0.33", features = ["tinyvec"] }
+
+# with defmt support (Format impls for this crate's own error/wrapper types)
+byteable = { version = "0.33", features = ["defmt"] }
 
 # with embedded-io support (no_std friendly, sync — combine with `alloc` for Vec/String support)
-byteable = { version = "0.32", features = ["embedded-io"] }
+byteable = { version = "0.33", features = ["embedded-io"] }
 
 # with embedded-io-async support (no_std friendly, async — combine with `alloc` for Vec/String support)
-byteable = { version = "0.32", features = ["embedded-io-async"] }
+byteable = { version = "0.33", features = ["embedded-io-async"] }
 
 # everything
-byteable = { version = "0.32", features = ["all"] }
+byteable = { version = "0.33", features = ["all"] }
 ```
 
 ## Quick Start
@@ -180,6 +195,127 @@ struct NetworkHeader {
 }
 ```
 
+### bitflags support
+
+Unlike `ordered-float`, `bitflags` types don't get support automatically — each type generated
+by the `bitflags!` macro needs a one-line opt-in, since a blanket impl over the foreign `Flags`
+trait would conflict with this crate's other impls. Decoding preserves unknown bits
+(`from_bits_retain`) rather than rejecting them.
+
+```rust
+use byteable::{Byteable, IntoByteArray, FromByteArray};
+
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Perms: u32 {
+        const READ = 0b001;
+        const WRITE = 0b010;
+        const EXEC = 0b100;
+    }
+}
+byteable::impl_bitflags!(Perms);
+// Only needed for multi-byte-backed flags that use `#[byteable(little_endian)]` /
+// `#[byteable(big_endian)]` field attributes:
+byteable::impl_bitflags_endian!(Perms);
+
+#[derive(Byteable)]
+struct FileEntry {
+    #[byteable(big_endian)]
+    perms: Perms,
+}
+```
+
+### heapless support
+
+`heapless`'s fixed-capacity collections (`Vec<T, N>`, `String<N>`, `Deque<T, N>`, `IndexMap`,
+`IndexSet`, `LinearMap`) work automatically as `io_only` fields, on every I/O pipeline you have
+enabled (`std`, `tokio`, `embedded-io`, `embedded-io-async`) — no opt-in macro needed, unlike
+`bitflags`. Unlike `alloc`'s `Vec`/`String`/`HashMap`, none of these need the `alloc` feature at
+all, so they work on targets with no heap.
+
+Decoding checks the wire-format length against the container's compile-time capacity `N` and
+returns [`DecodeError::CapacityExceeded`](https://docs.rs/byteable/latest/byteable/enum.DecodeError.html)
+instead of panicking or truncating if the sender's data doesn't fit.
+
+```rust
+use byteable::Byteable;
+use heapless::{String, Vec};
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Sensor {
+    id: u32,
+    label: String<16>,
+    readings: Vec<u32, 8>,
+}
+```
+
+### arrayvec support
+
+`arrayvec::ArrayVec<T, N>` and `ArrayString<N>` work the same way as `heapless`'s collections
+above — automatically, as `io_only` fields, on every enabled I/O pipeline, no `alloc` needed,
+capacity-checked on decode.
+
+```rust
+use arrayvec::{ArrayString, ArrayVec};
+use byteable::Byteable;
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Sensor {
+    id: u32,
+    label: ArrayString<16>,
+    readings: ArrayVec<u32, 8>,
+}
+```
+
+### tinyvec support
+
+`tinyvec::ArrayVec<[T; N]>` works the same way — automatically, as an `io_only` field, on every
+enabled I/O pipeline, no `alloc` needed, capacity-checked on decode. Unlike `heapless` and
+`arrayvec`, tinyvec has no `unsafe` code anywhere in its implementation (its `Array::Item: Default`
+requirement is how it avoids needing `MaybeUninit`), which is why some safety-critical embedded
+projects prefer it over the other two. There's no `ArrayString` equivalent in tinyvec.
+
+```rust
+use byteable::Byteable;
+use tinyvec::ArrayVec;
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(io_only)]
+struct Sensor {
+    id: u32,
+    readings: ArrayVec<[u32; 8]>,
+}
+```
+
+### defmt support
+
+Unlike the other embedded features above, `defmt` isn't a data type to serialize — it's the
+de facto logging framework for embedded Rust. Enabling it adds `defmt::Format` impls for this
+crate's own error and wrapper types: `DecodeError`, `LittleEndian<T>`, `BigEndian<T>`,
+`eio::EioReadableError<E>`, and `eio::EioReadExactError<E>` (each requires its own type
+parameters, if any, to implement `Format` too). `LittleEndian`/`BigEndian` format the
+*semantic* (native-endian) value via their own `get()`, not the raw byte-swapped bits stored
+internally.
+
+```rust
+use byteable::{BigEndian, DecodeError};
+
+fn log_error(e: DecodeError) {
+    defmt::error!("decode failed: {}", e);
+}
+
+fn log_value(v: BigEndian<u32>) {
+    defmt::info!("value: {}", v); // prints the native-endian value, not the raw stored bytes
+}
+```
+
+This feature is scoped to byteable's own types only — it does **not** forward to the `defmt`
+features of `heapless`/`arrayvec`/`bitflags`/`tinyvec`. Those crates' own `defmt` support (where
+they have it) targets whatever `defmt` major version *they* pin, which doesn't necessarily match
+this crate's; enable their `defmt` feature directly alongside this one if you need it.
+
 ## Feature Flags
 
 | Feature | Default | Description |
@@ -188,6 +324,11 @@ struct NetworkHeader {
 | `std` | yes | `Readable` / `Writable` I/O traits and `std` type impls |
 | `tokio` | no | Async `AsyncReadable` / `AsyncWritable` via tokio |
 | `ordered-float` | no | Impls for `OrderedFloat<T>` and `NotNan<T>` |
+| `bitflags` | no | `impl_bitflags!`/`impl_bitflags_endian!` macros for types implementing `bitflags::Flags` |
+| `heapless` | no | `io_only` support for `heapless`'s fixed-capacity collections, on every enabled I/O pipeline |
+| `arrayvec` | no | `io_only` support for `arrayvec::ArrayVec`/`ArrayString`, on every enabled I/O pipeline |
+| `tinyvec` | no | `io_only` support for `tinyvec::ArrayVec`, on every enabled I/O pipeline |
+| `defmt` | no | `defmt::Format` impls for this crate's own error/wrapper types |
 | `alloc` | no (implied by `std`) | `alloc`-backed collection types over `eio`/`eio_async` |
 | `embedded-io` | no | `eio` module: `embedded-io`-based (sync) I/O traits for `no_std` targets |
 | `embedded-io-async` | no | `eio_async` module: `embedded-io-async`-based (async) I/O traits for `no_std` targets |
