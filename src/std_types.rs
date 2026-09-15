@@ -11,6 +11,9 @@
 //! | `BTreeMap<K,V>` / `BTreeSet<T>` | same as `HashMap` / `HashSet`, iteration order is sorted |
 //! | `Option<T>` | 1-byte tag: `0` = `None`, `1` = `Some` followed by the value |
 //! | `Result<V,E>` | 1-byte tag: `0` = `Ok` followed by value, `1` = `Err` followed by error |
+//! | `IpAddr` | 1-byte tag: `0` = `V4` followed by `Ipv4Addr`, `1` = `V6` followed by `Ipv6Addr` |
+//! | `SocketAddr` | 1-byte tag: `0` = `V4` followed by `SocketAddrV4`, `1` = `V6` followed by `SocketAddrV6` |
+//! | `Bound<T>` | 1-byte tag: `0` = `Included(T)`, `1` = `Excluded(T)`, `2` = `Unbounded` |
 //! | `String` | `u64` byte length + UTF-8 bytes (no null terminator) |
 //! | `str` (write only) | same as `String` |
 //! | `PathBuf` | serialized as `String`; returns [`io::Error`] for non-UTF-8 paths |
@@ -37,6 +40,8 @@ use crate::{
 use core::{
     ffi::CStr,
     hash::{BuildHasher, Hash},
+    net::{IpAddr, SocketAddr},
+    ops::Bound,
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, LinkedList, VecDeque},
@@ -405,6 +410,53 @@ impl<V: Readable, E: Readable> Readable for Result<V, E> {
     }
 }
 
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address.
+impl Readable for IpAddr {
+    fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(IpAddr::V4(reader.read_fixed()?)),
+            1 => Ok(IpAddr::V6(reader.read_fixed()?)),
+            _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "IpAddr",
+            })),
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address.
+impl Readable for SocketAddr {
+    fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(SocketAddr::V4(reader.read_fixed()?)),
+            1 => Ok(SocketAddr::V6(reader.read_fixed()?)),
+            _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "SocketAddr",
+            })),
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = Included, 1 = Excluded, 2 = Unbounded), followed by the bound
+// value for Included/Excluded.
+impl<T: Readable> Readable for Bound<T> {
+    fn read_from(mut reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(Bound::Included(reader.read_value()?)),
+            1 => Ok(Bound::Excluded(reader.read_value()?)),
+            2 => Ok(Bound::Unbounded),
+            _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "Bound",
+            })),
+        }
+    }
+}
+
 // Wire format: `u64` byte length (LE) + UTF-8 bytes. Rejects invalid UTF-8 with DecodeError.
 impl Readable for String {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
@@ -571,6 +623,52 @@ impl<V: Writable, E: Writable> Writable for Result<V, E> {
                 writer.write_fixed(&1u8)?;
                 writer.write_value(err)
             }
+        }
+    }
+}
+
+impl Writable for IpAddr {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
+        match self {
+            IpAddr::V4(addr) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_fixed(addr)
+            }
+            IpAddr::V6(addr) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_fixed(addr)
+            }
+        }
+    }
+}
+
+impl Writable for SocketAddr {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
+        match self {
+            SocketAddr::V4(addr) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_fixed(addr)
+            }
+            SocketAddr::V6(addr) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_fixed(addr)
+            }
+        }
+    }
+}
+
+impl<T: Writable> Writable for Bound<T> {
+    fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
+        match self {
+            Bound::Included(val) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_value(val)
+            }
+            Bound::Excluded(val) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_value(val)
+            }
+            Bound::Unbounded => writer.write_fixed(&2u8),
         }
     }
 }

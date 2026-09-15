@@ -33,6 +33,18 @@ mod fixed_io {
     }
 
     #[tokio::test]
+    async fn reverse_roundtrip() {
+        use std::cmp::Reverse;
+
+        let original = Reverse(0xDEADBEEFu32);
+        let mut buf = Cursor::new(Vec::new());
+        buf.write_fixed(&original).await.unwrap();
+        buf.set_position(0);
+        let restored: Reverse<u32> = buf.read_fixed().await.unwrap();
+        assert_eq!(restored, original);
+    }
+
+    #[tokio::test]
     async fn derived_struct_roundtrip() {
         let header = Header {
             magic: 0x12345678,
@@ -269,6 +281,8 @@ mod collections {
     use byteable::async_io::{AsyncReadValue, AsyncWritable, AsyncWriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+    use std::ops::Bound;
 
     async fn roundtrip<T>(original: &T) -> T
     where
@@ -314,6 +328,37 @@ mod collections {
     async fn string_roundtrip() {
         let original = String::from("async hello!");
         assert_eq!(roundtrip(&original).await, original);
+    }
+
+    #[tokio::test]
+    async fn ip_addr_roundtrip() {
+        let v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        assert_eq!(roundtrip(&v4).await, v4);
+        assert_eq!(roundtrip(&v6).await, v6);
+    }
+
+    #[tokio::test]
+    async fn socket_addr_roundtrip() {
+        let v4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 0, 1), 8080));
+        let v6 = SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+            443,
+            0,
+            0,
+        ));
+        assert_eq!(roundtrip(&v4).await, v4);
+        assert_eq!(roundtrip(&v6).await, v6);
+    }
+
+    #[tokio::test]
+    async fn bound_roundtrip() {
+        let included: Bound<u32> = Bound::Included(7);
+        let excluded: Bound<u32> = Bound::Excluded(9);
+        let unbounded: Bound<u32> = Bound::Unbounded;
+        assert_eq!(roundtrip(&included).await, included);
+        assert_eq!(roundtrip(&excluded).await, excluded);
+        assert_eq!(roundtrip(&unbounded).await, unbounded);
     }
 }
 

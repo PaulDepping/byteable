@@ -36,7 +36,13 @@
 //!
 //! ## Dynamic struct (I/O streaming)
 //!
+//! This example needs the `std` feature (for `byteable::io` and `String`) on top of `derive`;
+//! the body is a no-op without it, since a `no_std` build (e.g. `embedded-io` alone) can't
+//! compile a `std::io`-based example at all.
+//!
 //! ```rust
+//! # #[cfg(feature = "std")]
+//! # fn main() {
 //! use byteable::Byteable;
 //! use byteable::io::{Writable, Readable, WriteValue, ReadValue};
 //!
@@ -52,6 +58,9 @@
 //! buf.write_value(&wp).unwrap();
 //! let wp2 = std::io::Cursor::new(&buf).read_value::<Waypoint>().unwrap();
 //! assert_eq!(wp.id, wp2.id);
+//! # }
+//! # #[cfg(not(feature = "std"))]
+//! # fn main() {}
 //! ```
 //!
 //! # Feature Flags

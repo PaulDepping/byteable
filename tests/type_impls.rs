@@ -4,9 +4,10 @@
 //! `Duration`, `SystemTime`, range types, `bool`, and `char`.
 
 use byteable::{BigEndian, FromByteArray, IntoByteArray, LittleEndian, TryFromByteArray};
+use core::cmp::Ordering;
 use core::marker::PhantomData;
 use core::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
-use core::num::{NonZeroI32, NonZeroU8, NonZeroU32, NonZeroU64};
+use core::num::{NonZeroI32, NonZeroU8, NonZeroU32, NonZeroU64, Saturating, Wrapping};
 use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 use core::time::Duration;
 
@@ -124,6 +125,64 @@ fn nonzero_i32_roundtrip() {
 fn nonzero_zero_is_err() {
     assert!(NonZeroU8::try_from_byte_array([0]).is_err());
     assert!(NonZeroU32::try_from_byte_array([0, 0, 0, 0]).is_err());
+}
+
+// ── Wrapping / Saturating ─────────────────────────────────────────────────────
+
+#[test]
+fn wrapping_u32_roundtrip() {
+    let original = Wrapping(0xDEADBEEFu32);
+    let bytes = original.into_byte_array();
+    assert_eq!(Wrapping::<u32>::from_byte_array(bytes), original);
+}
+
+#[test]
+fn wrapping_i8_roundtrip() {
+    let original = Wrapping(-1i8);
+    let bytes = original.into_byte_array();
+    assert_eq!(Wrapping::<i8>::from_byte_array(bytes), original);
+}
+
+#[test]
+fn saturating_u32_roundtrip() {
+    let original = Saturating(0xDEADBEEFu32);
+    let bytes = original.into_byte_array();
+    assert_eq!(Saturating::<u32>::from_byte_array(bytes), original);
+}
+
+#[test]
+fn saturating_i8_roundtrip() {
+    let original = Saturating(-1i8);
+    let bytes = original.into_byte_array();
+    assert_eq!(Saturating::<i8>::from_byte_array(bytes), original);
+}
+
+#[test]
+fn wrapping_byte_size_matches_inner() {
+    assert_eq!(Wrapping::<u32>::BYTE_SIZE, u32::BYTE_SIZE);
+    assert_eq!(Saturating::<u32>::BYTE_SIZE, u32::BYTE_SIZE);
+}
+
+// ── Ordering ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn ordering_roundtrip() {
+    for original in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
+        let bytes = original.into_byte_array();
+        assert_eq!(Ordering::try_from_byte_array(bytes).unwrap(), original);
+    }
+}
+
+#[test]
+fn ordering_byte_layout() {
+    assert_eq!(Ordering::Less.into_byte_array(), [0]);
+    assert_eq!(Ordering::Equal.into_byte_array(), [1]);
+    assert_eq!(Ordering::Greater.into_byte_array(), [2]);
+}
+
+#[test]
+fn ordering_invalid_byte_is_err() {
+    assert!(Ordering::try_from_byte_array([3]).is_err());
 }
 
 // ── Network types ─────────────────────────────────────────────────────────────
@@ -273,8 +332,8 @@ fn bool_byte_size() {
 fn bool_roundtrip() {
     assert_eq!(true.into_byte_array(), [1]);
     assert_eq!(false.into_byte_array(), [0]);
-    assert_eq!(bool::try_from_byte_array([1]).unwrap(), true);
-    assert_eq!(bool::try_from_byte_array([0]).unwrap(), false);
+    assert!(bool::try_from_byte_array([1]).unwrap());
+    assert!(!bool::try_from_byte_array([0]).unwrap());
 }
 
 #[test]

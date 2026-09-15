@@ -11,6 +11,8 @@
 
 use crate::{DecodeError, PlainOldData, RawRepr, TryFromRawRepr};
 use core::fmt;
+use core::net::{IpAddr, SocketAddr};
+use core::ops::Bound;
 
 /// Minimal read primitive. Bridged to `embedded_io::Read` when the `embedded-io` feature is on.
 ///
@@ -293,6 +295,107 @@ impl<V: EioWritable, Er: EioWritable> EioWritable for Result<V, Er> {
                 writer.write_fixed(&1u8)?;
                 writer.write_value(err)
             }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address. No
+// alloc needed.
+impl EioReadable for IpAddr {
+    fn read_from<R: EioReader + ?Sized>(
+        reader: &mut R,
+    ) -> Result<Self, EioReadableError<R::Error>> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(IpAddr::V4(reader.read_fixed()?)),
+            1 => Ok(IpAddr::V6(reader.read_fixed()?)),
+            _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "IpAddr",
+            })),
+        }
+    }
+}
+
+impl EioWritable for IpAddr {
+    fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+        match self {
+            IpAddr::V4(addr) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_fixed(addr)
+            }
+            IpAddr::V6(addr) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_fixed(addr)
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address. No
+// alloc needed.
+impl EioReadable for SocketAddr {
+    fn read_from<R: EioReader + ?Sized>(
+        reader: &mut R,
+    ) -> Result<Self, EioReadableError<R::Error>> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(SocketAddr::V4(reader.read_fixed()?)),
+            1 => Ok(SocketAddr::V6(reader.read_fixed()?)),
+            _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "SocketAddr",
+            })),
+        }
+    }
+}
+
+impl EioWritable for SocketAddr {
+    fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+        match self {
+            SocketAddr::V4(addr) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_fixed(addr)
+            }
+            SocketAddr::V6(addr) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_fixed(addr)
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = Included, 1 = Excluded, 2 = Unbounded), followed by the bound
+// value for Included/Excluded. No alloc needed.
+impl<T: EioReadable> EioReadable for Bound<T> {
+    fn read_from<R: EioReader + ?Sized>(
+        reader: &mut R,
+    ) -> Result<Self, EioReadableError<R::Error>> {
+        let tag: u8 = reader.read_fixed()?;
+        match tag {
+            0 => Ok(Bound::Included(reader.read_value()?)),
+            1 => Ok(Bound::Excluded(reader.read_value()?)),
+            2 => Ok(Bound::Unbounded),
+            _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                raw: tag,
+                type_name: "Bound",
+            })),
+        }
+    }
+}
+
+impl<T: EioWritable> EioWritable for Bound<T> {
+    fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+        match self {
+            Bound::Included(val) => {
+                writer.write_fixed(&0u8)?;
+                writer.write_value(val)
+            }
+            Bound::Excluded(val) => {
+                writer.write_fixed(&1u8)?;
+                writer.write_value(val)
+            }
+            Bound::Unbounded => writer.write_fixed(&2u8),
         }
     }
 }

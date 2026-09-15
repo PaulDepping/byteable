@@ -115,6 +115,11 @@ pub trait IntoByteArray: Sized {
     const BYTE_SIZE: usize = Self::ByteArray::BYTE_SIZE;
 
     /// Serialize this value into a fixed-size byte array.
+    // Deliberately `&self`, not `self`: callers serialize the same value repeatedly (e.g. in a
+    // loop, or alongside other borrowing use of the value) without an explicit `.clone()`, and
+    // many implementors (`&str`-backed types, anything embedded in a larger struct) can't be
+    // consumed at all. `PlainOldData: Copy` types pay nothing extra for the borrow either way.
+    #[allow(clippy::wrong_self_convention)]
     fn into_byte_array(&self) -> Self::ByteArray;
 }
 

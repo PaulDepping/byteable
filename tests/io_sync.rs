@@ -38,6 +38,21 @@ mod fixed_io {
         assert_eq!(restored.get(), original.get());
     }
 
+    // `Reverse<T>` only gets `FixedReadable`/`FixedWritable` (via the blanket `RawRepr`/
+    // `TryFromRawRepr` chain), not the `IntoByteArray` fixed byte-array API directly — see
+    // `core_types.rs` — so it's exercised here rather than in `tests/type_impls.rs`.
+    #[test]
+    fn reverse_roundtrip() {
+        use std::cmp::Reverse;
+
+        let original = Reverse(0xDEADBEEFu32);
+        let mut buf = Cursor::new(Vec::new());
+        buf.write_fixed(&original).unwrap();
+        buf.set_position(0);
+        let restored: Reverse<u32> = buf.read_fixed().unwrap();
+        assert_eq!(restored, original);
+    }
+
     #[test]
     fn derived_struct_roundtrip() {
         let header = Header {
@@ -793,6 +808,8 @@ mod collections {
     use byteable::io::{ReadValue, ReadableError, WriteValue};
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::io::Cursor;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+    use std::ops::Bound;
 
     fn roundtrip<T>(original: &T) -> T
     where
@@ -849,6 +866,55 @@ mod collections {
         buf.write_value(s).unwrap();
         let restored: String = Cursor::new(&buf).read_value().unwrap();
         assert_eq!(restored, s);
+    }
+
+    #[test]
+    fn ip_addr_roundtrip() {
+        let v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        assert_eq!(roundtrip(&v4), v4);
+        assert_eq!(roundtrip(&v6), v6);
+    }
+
+    #[test]
+    fn socket_addr_roundtrip() {
+        let v4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 0, 1), 8080));
+        let v6 = SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+            443,
+            0,
+            0,
+        ));
+        assert_eq!(roundtrip(&v4), v4);
+        assert_eq!(roundtrip(&v6), v6);
+    }
+
+    #[test]
+    fn bound_roundtrip() {
+        let included: Bound<u32> = Bound::Included(7);
+        let excluded: Bound<u32> = Bound::Excluded(9);
+        let unbounded: Bound<u32> = Bound::Unbounded;
+        assert_eq!(roundtrip(&included), included);
+        assert_eq!(roundtrip(&excluded), excluded);
+        assert_eq!(roundtrip(&unbounded), unbounded);
+    }
+
+    #[test]
+    fn bound_invalid_tag_is_err() {
+        let result: Result<Bound<u32>, _> = Cursor::new(vec![3u8]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
+    }
+
+    #[test]
+    fn ip_addr_invalid_tag_is_err() {
+        let result: Result<IpAddr, _> = Cursor::new(vec![2u8]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
+    }
+
+    #[test]
+    fn socket_addr_invalid_tag_is_err() {
+        let result: Result<SocketAddr, _> = Cursor::new(vec![2u8]).read_value();
+        assert!(matches!(result.unwrap_err(), ReadableError::DecodeError(_)));
     }
 
     #[test]

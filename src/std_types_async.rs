@@ -20,6 +20,8 @@ use crate::io::ReadableError;
 use core::{
     ffi::CStr,
     hash::{BuildHasher, Hash},
+    net::{IpAddr, SocketAddr},
+    ops::Bound,
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, LinkedList, VecDeque},
@@ -183,6 +185,65 @@ impl<V: AsyncReadable, E: AsyncReadable> AsyncReadable for Result<V, E> {
                 _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
                     raw: discriminator,
                     type_name: "Result",
+                })),
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address.
+impl AsyncReadable for IpAddr {
+    fn read_from(
+        reader: &mut (impl AsyncReadExt + ?Sized + Unpin),
+    ) -> impl Future<Output = Result<Self, ReadableError>> {
+        async {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(IpAddr::V4(reader.read_fixed().await?)),
+                1 => Ok(IpAddr::V6(reader.read_fixed().await?)),
+                _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "IpAddr",
+                })),
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address.
+impl AsyncReadable for SocketAddr {
+    fn read_from(
+        reader: &mut (impl AsyncReadExt + ?Sized + Unpin),
+    ) -> impl Future<Output = Result<Self, ReadableError>> {
+        async {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(SocketAddr::V4(reader.read_fixed().await?)),
+                1 => Ok(SocketAddr::V6(reader.read_fixed().await?)),
+                _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "SocketAddr",
+                })),
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = Included, 1 = Excluded, 2 = Unbounded), followed by the bound
+// value for Included/Excluded.
+impl<T: AsyncReadable> AsyncReadable for Bound<T> {
+    fn read_from(
+        reader: &mut (impl AsyncReadExt + ?Sized + Unpin),
+    ) -> impl Future<Output = Result<Self, ReadableError>> {
+        async {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(Bound::Included(reader.read_value().await?)),
+                1 => Ok(Bound::Excluded(reader.read_value().await?)),
+                2 => Ok(Bound::Unbounded),
+                _ => Err(ReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "Bound",
                 })),
             }
         }
@@ -411,6 +472,67 @@ impl<V: AsyncWritable, E: AsyncWritable> AsyncWritable for Result<V, E> {
                     writer.write_fixed(&1u8).await?;
                     writer.write_value(err).await
                 }
+            }
+        }
+    }
+}
+
+impl AsyncWritable for IpAddr {
+    fn write_to(
+        &self,
+        writer: &mut (impl AsyncWriteExt + ?Sized + Unpin),
+    ) -> impl Future<Output = io::Result<()>> {
+        async move {
+            match self {
+                IpAddr::V4(addr) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_fixed(addr).await
+                }
+                IpAddr::V6(addr) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_fixed(addr).await
+                }
+            }
+        }
+    }
+}
+
+impl AsyncWritable for SocketAddr {
+    fn write_to(
+        &self,
+        writer: &mut (impl AsyncWriteExt + ?Sized + Unpin),
+    ) -> impl Future<Output = io::Result<()>> {
+        async move {
+            match self {
+                SocketAddr::V4(addr) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_fixed(addr).await
+                }
+                SocketAddr::V6(addr) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_fixed(addr).await
+                }
+            }
+        }
+    }
+}
+
+impl<T: AsyncWritable> AsyncWritable for Bound<T> {
+    fn write_to(
+        &self,
+        writer: &mut (impl AsyncWriteExt + ?Sized + Unpin),
+    ) -> impl Future<Output = io::Result<()>> {
+        async move {
+            match self {
+                Bound::Included(val) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_value(val).await
+                }
+                Bound::Excluded(val) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_value(val).await
+                }
+                Bound::Unbounded => writer.write_fixed(&2u8).await,
             }
         }
     }

@@ -29,6 +29,8 @@ use crate::{
     DecodeError, PlainOldData, RawRepr, TryFromRawRepr,
     eio::{EioReadExactError, EioReadableError},
 };
+use core::net::{IpAddr, SocketAddr};
+use core::ops::Bound;
 
 /// Minimal async read primitive. Bridged to `embedded_io_async::Read` when the
 /// `embedded-io-async` feature is on.
@@ -307,6 +309,128 @@ impl<V: EioAsyncWritable, Er: EioAsyncWritable> EioAsyncWritable for Result<V, E
                     writer.write_fixed(&1u8).await?;
                     writer.write_value(err).await
                 }
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address. No
+// alloc needed.
+impl EioAsyncReadable for IpAddr {
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(IpAddr::V4(reader.read_fixed().await?)),
+                1 => Ok(IpAddr::V6(reader.read_fixed().await?)),
+                _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "IpAddr",
+                })),
+            }
+        }
+    }
+}
+
+impl EioAsyncWritable for IpAddr {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            match self {
+                IpAddr::V4(addr) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_fixed(addr).await
+                }
+                IpAddr::V6(addr) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_fixed(addr).await
+                }
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = V4, 1 = V6), followed by the variant's fixed-size address. No
+// alloc needed.
+impl EioAsyncReadable for SocketAddr {
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(SocketAddr::V4(reader.read_fixed().await?)),
+                1 => Ok(SocketAddr::V6(reader.read_fixed().await?)),
+                _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "SocketAddr",
+                })),
+            }
+        }
+    }
+}
+
+impl EioAsyncWritable for SocketAddr {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            match self {
+                SocketAddr::V4(addr) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_fixed(addr).await
+                }
+                SocketAddr::V6(addr) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_fixed(addr).await
+                }
+            }
+        }
+    }
+}
+
+// Wire format: 1-byte tag (0 = Included, 1 = Excluded, 2 = Unbounded), followed by the bound
+// value for Included/Excluded. No alloc needed.
+impl<T: EioAsyncReadable> EioAsyncReadable for Bound<T> {
+    fn read_from<R: EioAsyncReader + ?Sized>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
+        async move {
+            let tag: u8 = reader.read_fixed().await?;
+            match tag {
+                0 => Ok(Bound::Included(reader.read_value().await?)),
+                1 => Ok(Bound::Excluded(reader.read_value().await?)),
+                2 => Ok(Bound::Unbounded),
+                _ => Err(EioReadableError::DecodeError(DecodeError::InvalidTag {
+                    raw: tag,
+                    type_name: "Bound",
+                })),
+            }
+        }
+    }
+}
+
+impl<T: EioAsyncWritable> EioAsyncWritable for Bound<T> {
+    fn write_to<W: EioAsyncWriter + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), W::Error>> {
+        async move {
+            match self {
+                Bound::Included(val) => {
+                    writer.write_fixed(&0u8).await?;
+                    writer.write_value(val).await
+                }
+                Bound::Excluded(val) => {
+                    writer.write_fixed(&1u8).await?;
+                    writer.write_value(val).await
+                }
+                Bound::Unbounded => writer.write_fixed(&2u8).await,
             }
         }
     }

@@ -1366,19 +1366,28 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         }
     };
 
-    let into_byte_array_body = match endian_attr {
-        AttributeType::LittleEndian => quote! {
-            let v: #repr_ty = #to_raw_expr;
-            <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).into_byte_array()
-        },
-        AttributeType::BigEndian => quote! {
-            let v: #repr_ty = #to_raw_expr;
-            <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).into_byte_array()
-        },
-        _ => quote! {
-            let v: #repr_ty = #to_raw_expr;
-            <#repr_ty as #bc::IntoByteArray>::into_byte_array(&v)
-        },
+    // For an empty enum, `to_raw_expr` (`match *self {}`) has type `!` — it already coerces to
+    // `Self::ByteArray` on its own. Binding it to `v` first and then converting `v` would leave
+    // the conversion as dead code after a diverging `let`, which rustc flags as an
+    // `unreachable_code` warning. So skip the intermediate binding entirely in that case; the
+    // endian attribute is moot too, since there's no value to convert either way.
+    let into_byte_array_body = if enum_data.variants.is_empty() {
+        to_raw_expr.clone()
+    } else {
+        match endian_attr {
+            AttributeType::LittleEndian => quote! {
+                let v: #repr_ty = #to_raw_expr;
+                <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).into_byte_array()
+            },
+            AttributeType::BigEndian => quote! {
+                let v: #repr_ty = #to_raw_expr;
+                <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).into_byte_array()
+            },
+            _ => quote! {
+                let v: #repr_ty = #to_raw_expr;
+                <#repr_ty as #bc::IntoByteArray>::into_byte_array(&v)
+            },
+        }
     };
 
     let try_from_byte_array_body = match endian_attr {
