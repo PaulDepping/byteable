@@ -61,7 +61,7 @@ impl<const N: usize> EioReadable for String<N> {
         bytes
             .resize_default(len)
             .expect("length was checked against capacity above");
-        reader.read_exact(&mut bytes)?;
+        reader.eio_read_exact(&mut bytes)?;
         Ok(String::from_utf8(bytes).map_err(|_| DecodeError::InvalidUtf8)?)
     }
 }

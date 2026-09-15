@@ -27,37 +27,37 @@ self-describing wire formats.
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.35"
+byteable = "0.36"
 
 # with async (tokio) support
-byteable = { version = "0.35", features = ["tokio"] }
+byteable = { version = "0.36", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.35", features = ["ordered-float"] }
+byteable = { version = "0.36", features = ["ordered-float"] }
 
 # with bitflags support
-byteable = { version = "0.35", features = ["bitflags"] }
+byteable = { version = "0.36", features = ["bitflags"] }
 
 # with heapless support (fixed-capacity collections, no `alloc` needed)
-byteable = { version = "0.35", features = ["heapless"] }
+byteable = { version = "0.36", features = ["heapless"] }
 
 # with arrayvec support (fixed-capacity collections, no `alloc` needed)
-byteable = { version = "0.35", features = ["arrayvec"] }
+byteable = { version = "0.36", features = ["arrayvec"] }
 
 # with tinyvec support (fixed-capacity, no unsafe, no `alloc` needed)
-byteable = { version = "0.35", features = ["tinyvec"] }
+byteable = { version = "0.36", features = ["tinyvec"] }
 
 # with defmt support (Format impls for this crate's own error/wrapper types)
-byteable = { version = "0.35", features = ["defmt"] }
+byteable = { version = "0.36", features = ["defmt"] }
 
 # with embedded-io support (no_std friendly, sync - combine with `alloc` for Vec/String support)
-byteable = { version = "0.35", features = ["embedded-io"] }
+byteable = { version = "0.36", features = ["embedded-io"] }
 
 # with embedded-io-async support (no_std friendly, async - combine with `alloc` for Vec/String support)
-byteable = { version = "0.35", features = ["embedded-io-async"] }
+byteable = { version = "0.36", features = ["embedded-io-async"] }
 
 # everything
-byteable = { version = "0.35", features = ["all"] }
+byteable = { version = "0.36", features = ["all"] }
 ```
 
 ## Quick Start

@@ -18,31 +18,38 @@ use core::ops::Bound;
 ///
 /// Deliberately mirrors `embedded_io::Read`'s method surface (not just the raw `read`
 /// primitive) so that any specialized override a concrete driver provides for `read_exact`
-/// (e.g. a DMA-driven bulk transfer) is what actually runs, not a generic loop of ours.
+/// (e.g. a DMA-driven bulk transfer) is what actually runs, not a generic loop of ours. Methods
+/// are prefixed `eio_` (rather than reusing `embedded_io::Read`'s bare `read`/`read_exact`
+/// names) because the blanket impl below means every `embedded_io::Read` type also implements
+/// this trait - unprefixed names would make plain method-call syntax ambiguous (`E0034`)
+/// whenever both traits are in scope, which is the common case for callers.
 pub trait EioReader {
     /// The backend's own error type.
     type Error;
 
     /// Read some bytes into `buf`, returning how many were read.
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
+    fn eio_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 
     /// Read exactly `buf.len()` bytes, blocking as needed.
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), EioReadExactError<Self::Error>>;
+    fn eio_read_exact(&mut self, buf: &mut [u8]) -> Result<(), EioReadExactError<Self::Error>>;
 }
 
 /// Minimal write primitive. Bridged to `embedded_io::Write` when the `embedded-io` feature is on.
+///
+/// See [`EioReader`] for why these methods are `eio_`-prefixed rather than reusing
+/// `embedded_io::Write`'s bare names.
 pub trait EioWriter {
     /// The backend's own error type.
     type Error;
 
     /// Write some bytes from `buf`, returning how many were written.
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
+    fn eio_write(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
 
     /// Write all of `buf`, blocking as needed.
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error>;
+    fn eio_write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error>;
 
     /// Flush any buffered output.
-    fn flush(&mut self) -> Result<(), Self::Error>;
+    fn eio_flush(&mut self) -> Result<(), Self::Error>;
 }
 
 /// Error returned by [`EioReader::read_exact`]. Mirrors `embedded_io::ReadExactError<E>`.
@@ -68,12 +75,12 @@ impl<T: ::embedded_io::Read + ?Sized> EioReader for T {
     type Error = T::Error;
 
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+    fn eio_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         ::embedded_io::Read::read(self, buf)
     }
 
     #[inline]
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), EioReadExactError<Self::Error>> {
+    fn eio_read_exact(&mut self, buf: &mut [u8]) -> Result<(), EioReadExactError<Self::Error>> {
         ::embedded_io::Read::read_exact(self, buf).map_err(|e| match e {
             ::embedded_io::ReadExactError::UnexpectedEof => EioReadExactError::UnexpectedEof,
             ::embedded_io::ReadExactError::Other(err) => EioReadExactError::Other(err),
@@ -85,17 +92,17 @@ impl<T: ::embedded_io::Write + ?Sized> EioWriter for T {
     type Error = T::Error;
 
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+    fn eio_write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         ::embedded_io::Write::write(self, buf)
     }
 
     #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+    fn eio_write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         ::embedded_io::Write::write_all(self, buf)
     }
 
     #[inline]
-    fn flush(&mut self) -> Result<(), Self::Error> {
+    fn eio_flush(&mut self) -> Result<(), Self::Error> {
         ::embedded_io::Write::flush(self)
     }
 }
@@ -153,7 +160,7 @@ impl<T: TryFromRawRepr> EioFixedReadable for T {
         reader: &mut R,
     ) -> Result<Self, EioReadableError<R::Error>> {
         let mut b = T::Raw::zeroed();
-        reader.read_exact(b.as_bytes_mut())?;
+        reader.eio_read_exact(b.as_bytes_mut())?;
         let r = T::try_from_raw(b)?;
         Ok(r)
     }
@@ -185,7 +192,7 @@ impl<T: RawRepr> EioFixedWritable for T {
     #[inline]
     fn write_fixed_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
         let raw = self.to_raw();
-        writer.write_all(raw.as_bytes())
+        writer.eio_write_all(raw.as_bytes())
     }
 }
 
@@ -461,6 +468,6 @@ impl EioWritable for str {
             .try_into()
             .expect("could not convert usize to u64");
         writer.write_fixed(&len)?;
-        writer.write_all(self.as_bytes())
+        writer.eio_write_all(self.as_bytes())
     }
 }

@@ -37,16 +37,20 @@ use core::ops::Bound;
 ///
 /// Deliberately mirrors [`crate::eio::EioReader`]'s method surface (not just the raw `read`
 /// primitive) so that any specialized override a concrete driver provides for `read_exact`
-/// (e.g. a DMA-driven bulk transfer) is what actually runs, not a generic loop of ours.
+/// (e.g. a DMA-driven bulk transfer) is what actually runs, not a generic loop of ours. Methods
+/// are prefixed `eio_` (rather than reusing `embedded_io_async::Read`'s bare `read`/`read_exact`
+/// names) because the blanket impl below means every `embedded_io_async::Read` type also
+/// implements this trait - unprefixed names would make plain method-call syntax ambiguous
+/// (`E0034`) whenever both traits are in scope, which is the common case for callers.
 pub trait EioAsyncReader {
     /// The backend's own error type.
     type Error;
 
     /// Read some bytes into `buf`, returning how many were read.
-    fn read(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>>;
+    fn eio_read(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>>;
 
     /// Read exactly `buf.len()` bytes, waiting as needed.
-    fn read_exact(
+    fn eio_read_exact(
         &mut self,
         buf: &mut [u8],
     ) -> impl Future<Output = Result<(), EioReadExactError<Self::Error>>>;
@@ -54,30 +58,33 @@ pub trait EioAsyncReader {
 
 /// Minimal async write primitive. Bridged to `embedded_io_async::Write` when the
 /// `embedded-io-async` feature is on.
+///
+/// See [`EioAsyncReader`] for why these methods are `eio_`-prefixed rather than reusing
+/// `embedded_io_async::Write`'s bare names.
 pub trait EioAsyncWriter {
     /// The backend's own error type.
     type Error;
 
     /// Write some bytes from `buf`, returning how many were written.
-    fn write(&mut self, buf: &[u8]) -> impl Future<Output = Result<usize, Self::Error>>;
+    fn eio_write(&mut self, buf: &[u8]) -> impl Future<Output = Result<usize, Self::Error>>;
 
     /// Write all of `buf`, waiting as needed.
-    fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
+    fn eio_write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Flush any buffered output.
-    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
+    fn eio_flush(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 impl<T: ::embedded_io_async::Read + ?Sized> EioAsyncReader for T {
     type Error = T::Error;
 
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> {
+    fn eio_read(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> {
         ::embedded_io_async::Read::read(self, buf)
     }
 
     #[inline]
-    fn read_exact(
+    fn eio_read_exact(
         &mut self,
         buf: &mut [u8],
     ) -> impl Future<Output = Result<(), EioReadExactError<Self::Error>>> {
@@ -98,17 +105,17 @@ impl<T: ::embedded_io_async::Write + ?Sized> EioAsyncWriter for T {
     type Error = T::Error;
 
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
+    fn eio_write(&mut self, buf: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
         ::embedded_io_async::Write::write(self, buf)
     }
 
     #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {
+    fn eio_write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {
         ::embedded_io_async::Write::write_all(self, buf)
     }
 
     #[inline]
-    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+    fn eio_flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
         ::embedded_io_async::Write::flush(self)
     }
 }
@@ -128,7 +135,7 @@ impl<T: TryFromRawRepr> EioAsyncFixedReadable for T {
     ) -> impl Future<Output = Result<Self, EioReadableError<R::Error>>> {
         async move {
             let mut b = T::Raw::zeroed();
-            reader.read_exact(b.as_bytes_mut()).await?;
+            reader.eio_read_exact(b.as_bytes_mut()).await?;
             let r = T::try_from_raw(b)?;
             Ok(r)
         }
@@ -169,7 +176,7 @@ impl<T: RawRepr> EioAsyncFixedWritable for T {
     ) -> impl Future<Output = Result<(), W::Error>> {
         async move {
             let raw = self.to_raw();
-            writer.write_all(raw.as_bytes()).await
+            writer.eio_write_all(raw.as_bytes()).await
         }
     }
 }
@@ -513,7 +520,7 @@ impl EioAsyncWritable for str {
                 .try_into()
                 .expect("could not convert usize to u64");
             writer.write_fixed(&len).await?;
-            writer.write_all(self.as_bytes()).await
+            writer.eio_write_all(self.as_bytes()).await
         }
     }
 }

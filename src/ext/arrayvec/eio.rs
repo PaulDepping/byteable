@@ -57,7 +57,7 @@ impl<const N: usize> EioReadable for ArrayString<N> {
         let len: u64 = reader.read_fixed()?;
         let len = checked_len(len, N, "arrayvec::ArrayString")?;
         let mut buf = [0u8; N];
-        reader.read_exact(&mut buf[..len])?;
+        reader.eio_read_exact(&mut buf[..len])?;
         let s = core::str::from_utf8(&buf[..len]).map_err(|_| DecodeError::InvalidUtf8)?;
         match ArrayString::from(s) {
             Ok(s) => Ok(s),
