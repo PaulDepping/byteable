@@ -10,7 +10,7 @@
 //!   support `Vec<T>`, `String`, and other variable-length collections.
 
 use byteable::io::{ReadValue, ReadableError, WriteValue};
-use byteable::{Byteable, FromByteArray, IntoByteArray};
+use byteable::{Byteable, FromByteArray, ToByteArray};
 use std::io::Cursor;
 
 // ── Fixed-size struct ─────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ fn main() -> Result<(), ReadableError> {
     println!("Point3D::BYTE_SIZE = {}", Point3D::BYTE_SIZE);
 
     // Convert directly to a fixed-size byte array and back — no I/O needed.
-    let bytes: [u8; Point3D::BYTE_SIZE] = origin.into_byte_array();
+    let bytes: [u8; Point3D::BYTE_SIZE] = origin.to_byte_array();
     println!("as bytes: {:02x?}", bytes);
     assert_eq!(origin, Point3D::from_byte_array(bytes));
 

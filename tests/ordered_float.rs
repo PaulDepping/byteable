@@ -1,7 +1,7 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{Byteable, FromByteArray, IntoByteArray, PlainOldData, TryFromByteArray};
+use byteable::{Byteable, FromByteArray, ToByteArray, PlainOldData, TryFromByteArray};
 use ordered_float::{NotNan, OrderedFloat};
 
 #[derive(Debug, Clone, Byteable, PartialEq, PartialOrd)]
@@ -28,7 +28,7 @@ pub enum Content {
 #[test]
 fn ordered_float_f32_roundtrip() {
     let val = OrderedFloat(1.5f32);
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = OrderedFloat::<f32>::from_byte_array(bytes);
     assert_eq!(val, restored);
 }
@@ -37,14 +37,14 @@ fn ordered_float_f32_roundtrip() {
 fn ordered_float_f32_nan_roundtrip() {
     // OrderedFloat supports NaN — it should survive a roundtrip.
     let val = OrderedFloat(f32::NAN);
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = OrderedFloat::<f32>::from_byte_array(bytes);
     assert!(restored.is_nan());
 }
 
 #[test]
 fn ordered_float_f32_byte_size() {
-    assert_eq!(<OrderedFloat::<f32> as IntoByteArray>::BYTE_SIZE, 4);
+    assert_eq!(<OrderedFloat::<f32> as ToByteArray>::BYTE_SIZE, 4);
 }
 
 // --- OrderedFloat<f64> ---
@@ -52,7 +52,7 @@ fn ordered_float_f32_byte_size() {
 #[test]
 fn ordered_float_f64_roundtrip() {
     let val = OrderedFloat(1234.5678f64);
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = OrderedFloat::<f64>::from_byte_array(bytes);
     assert_eq!(val, restored);
 }
@@ -60,14 +60,14 @@ fn ordered_float_f64_roundtrip() {
 #[test]
 fn ordered_float_f64_nan_roundtrip() {
     let val = OrderedFloat(f64::NAN);
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = OrderedFloat::<f64>::from_byte_array(bytes);
     assert!(restored.is_nan());
 }
 
 #[test]
 fn ordered_float_f64_byte_size() {
-    assert_eq!(<OrderedFloat::<f64> as IntoByteArray>::BYTE_SIZE, 8);
+    assert_eq!(<OrderedFloat::<f64> as ToByteArray>::BYTE_SIZE, 8);
 }
 
 // --- NotNan<f32> ---
@@ -75,7 +75,7 @@ fn ordered_float_f64_byte_size() {
 #[test]
 fn not_nan_f32_roundtrip() {
     let val = NotNan::new(1234.5678f32).unwrap();
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = NotNan::<f32>::try_from_byte_array(bytes).unwrap();
     assert_eq!(val, restored);
 }
@@ -97,7 +97,7 @@ fn not_nan_f32_byte_size() {
 #[test]
 fn not_nan_f64_roundtrip() {
     let val = NotNan::new(1234.5678f64).unwrap();
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = NotNan::<f64>::try_from_byte_array(bytes).unwrap();
     assert_eq!(val, restored);
 }
@@ -128,7 +128,7 @@ fn ordered_float_transmute_safe() {
 
 #[cfg(feature = "derive")]
 mod derive_tests {
-    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, ToByteArray, TryFromByteArray};
     use ordered_float::{NotNan, OrderedFloat};
 
     // OrderedFloat fields require explicit endianness annotation (the derive macro's
@@ -152,7 +152,7 @@ mod derive_tests {
             pressure: OrderedFloat(101325.0),
             help_me: NotNan::new(2.9).unwrap(),
         };
-        let bytes = reading.into_byte_array();
+        let bytes = reading.to_byte_array();
         let restored = SensorReading::try_from_byte_array(bytes).unwrap();
         assert_eq!(reading, restored);
     }
@@ -165,7 +165,7 @@ mod derive_tests {
             pressure: OrderedFloat(f64::NAN),
             help_me: NotNan::new(2.9).unwrap(),
         };
-        let bytes = reading.into_byte_array();
+        let bytes = reading.to_byte_array();
         let restored = SensorReading::try_from_byte_array(bytes).unwrap();
         assert!(restored.temperature.is_nan());
         assert!(restored.pressure.is_nan());

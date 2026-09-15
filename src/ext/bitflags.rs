@@ -1,5 +1,5 @@
 //! [`crate::impl_bitflags!`] — opt-in [`RawRepr`](crate::RawRepr),
-//! [`IntoByteArray`](crate::IntoByteArray), and endian-conversion impls for
+//! [`ToByteArray`](crate::ToByteArray), and endian-conversion impls for
 //! a type implementing [`bitflags::Flags`] (requires the `bitflags` feature).
 //!
 //! The wire format is identical to the underlying `Flags::Bits` integer (little-endian by
@@ -20,7 +20,7 @@
 //! does for named types such as `Ipv4Addr`.
 //!
 //! Once invoked for a type, that type gets fixed-size-path support
-//! (`IntoByteArray`/`FromByteArray`) and, transitively through the crate's existing blanket
+//! (`ToByteArray`/`FromByteArray`) and, transitively through the crate's existing blanket
 //! impls over `RawRepr`/`TryFromRawRepr`, `io_only` support on every enabled I/O pipeline
 //! (`std`, `tokio`, `embedded-io`, `embedded-io-async`) — no per-pipeline code needed.
 //!
@@ -35,8 +35,8 @@
 //! }
 //! byteable::impl_bitflags!(Perms);
 //!
-//! use byteable::{IntoByteArray, FromByteArray};
-//! let bytes = Perms::READ.into_byte_array();
+//! use byteable::{ToByteArray, FromByteArray};
+//! let bytes = Perms::READ.to_byte_array();
 //! assert_eq!(Perms::from_byte_array(bytes), Perms::READ);
 //! # }
 //! ```
@@ -52,7 +52,7 @@
 //! where you do want those attributes, additionally invoke [`crate::impl_bitflags_endian!`].
 
 /// Implements [`RawRepr`](crate::RawRepr), [`TryFromRawRepr`](crate::TryFromRawRepr),
-/// [`IntoByteArray`](crate::IntoByteArray), and [`FromByteArray`](crate::FromByteArray) for one
+/// [`ToByteArray`](crate::ToByteArray), and [`FromByteArray`](crate::FromByteArray) for one
 /// or more types implementing [`bitflags::Flags`], so they can be used as fixed-size fields
 /// and (via this crate's blanket impls) on every enabled I/O pipeline. Works for any `Bits`
 /// width, including `u8`/`i8`. See the [module docs](self) for why this is a macro rather
@@ -83,11 +83,11 @@ macro_rules! impl_bitflags {
                 }
             }
 
-            impl $crate::IntoByteArray for $ty {
-                type ByteArray = <<$ty as $crate::RawRepr>::Raw as $crate::IntoByteArray>::ByteArray;
+            impl $crate::ToByteArray for $ty {
+                type ByteArray = <<$ty as $crate::RawRepr>::Raw as $crate::ToByteArray>::ByteArray;
 
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    $crate::IntoByteArray::into_byte_array(&$crate::RawRepr::to_raw(self))
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    $crate::ToByteArray::to_byte_array(&$crate::RawRepr::to_raw(self))
                 }
             }
 

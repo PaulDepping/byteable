@@ -1,9 +1,9 @@
-//! Tests for `ByteRepr`/`IntoByteArray`/`TryFromByteArray` implementations on
+//! Tests for `ByteRepr`/`ToByteArray`/`TryFromByteArray` implementations on
 //! standard-library and primitive types: numeric primitives, arrays, endian
 //! wrappers, `PhantomData`, `u128`/`i128`, `NonZero*`, network types,
 //! `Duration`, `SystemTime`, range types, `bool`, and `char`.
 
-use byteable::{BigEndian, FromByteArray, IntoByteArray, LittleEndian, TryFromByteArray};
+use byteable::{BigEndian, FromByteArray, ToByteArray, LittleEndian, TryFromByteArray};
 use core::cmp::Ordering;
 use core::marker::PhantomData;
 use core::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
@@ -50,7 +50,7 @@ fn phantom_data_byte_size() {
 #[test]
 fn phantom_data_roundtrip() {
     let original: PhantomData<u64> = PhantomData;
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(bytes, [0u8; 0]);
     let _restored = PhantomData::<u64>::from_byte_array(bytes);
 }
@@ -66,20 +66,20 @@ fn u128_roundtrip() {
         0x0102030405060708090A0B0C0D0E0F10,
         u128::MAX / 2,
     ] {
-        let bytes = val.into_byte_array();
+        let bytes = val.to_byte_array();
         assert_eq!(u128::from_byte_array(bytes), val);
     }
 }
 
 #[test]
 fn u128_byte_layout_is_native_endian() {
-    assert_eq!(1u128.into_byte_array(), 1u128.to_ne_bytes());
+    assert_eq!(1u128.to_byte_array(), 1u128.to_ne_bytes());
 }
 
 #[test]
 fn i128_roundtrip() {
     for val in [0i128, 1, -1, i128::MAX, i128::MIN] {
-        let bytes = val.into_byte_array();
+        let bytes = val.to_byte_array();
         assert_eq!(i128::from_byte_array(bytes), val);
     }
 }
@@ -87,7 +87,7 @@ fn i128_roundtrip() {
 #[test]
 fn i128_large_negative() {
     let val: i128 = -1_000_000_000_000_000_000_000_000_000;
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     assert_eq!(i128::from_byte_array(bytes), val);
 }
 
@@ -96,28 +96,28 @@ fn i128_large_negative() {
 #[test]
 fn nonzero_u8_roundtrip() {
     let original = NonZeroU8::new(42).unwrap();
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(NonZeroU8::try_from_byte_array(bytes).unwrap(), original);
 }
 
 #[test]
 fn nonzero_u32_roundtrip() {
     let original = NonZeroU32::new(0xDEADBEEF).unwrap();
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(NonZeroU32::try_from_byte_array(bytes).unwrap(), original);
 }
 
 #[test]
 fn nonzero_u64_roundtrip() {
     let original = NonZeroU64::new(u64::MAX).unwrap();
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(NonZeroU64::try_from_byte_array(bytes).unwrap(), original);
 }
 
 #[test]
 fn nonzero_i32_roundtrip() {
     let original = NonZeroI32::new(-1).unwrap();
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(NonZeroI32::try_from_byte_array(bytes).unwrap(), original);
 }
 
@@ -132,28 +132,28 @@ fn nonzero_zero_is_err() {
 #[test]
 fn wrapping_u32_roundtrip() {
     let original = Wrapping(0xDEADBEEFu32);
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(Wrapping::<u32>::from_byte_array(bytes), original);
 }
 
 #[test]
 fn wrapping_i8_roundtrip() {
     let original = Wrapping(-1i8);
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(Wrapping::<i8>::from_byte_array(bytes), original);
 }
 
 #[test]
 fn saturating_u32_roundtrip() {
     let original = Saturating(0xDEADBEEFu32);
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(Saturating::<u32>::from_byte_array(bytes), original);
 }
 
 #[test]
 fn saturating_i8_roundtrip() {
     let original = Saturating(-1i8);
-    let bytes = original.into_byte_array();
+    let bytes = original.to_byte_array();
     assert_eq!(Saturating::<i8>::from_byte_array(bytes), original);
 }
 
@@ -168,16 +168,16 @@ fn wrapping_byte_size_matches_inner() {
 #[test]
 fn ordering_roundtrip() {
     for original in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
-        let bytes = original.into_byte_array();
+        let bytes = original.to_byte_array();
         assert_eq!(Ordering::try_from_byte_array(bytes).unwrap(), original);
     }
 }
 
 #[test]
 fn ordering_byte_layout() {
-    assert_eq!(Ordering::Less.into_byte_array(), [0]);
-    assert_eq!(Ordering::Equal.into_byte_array(), [1]);
-    assert_eq!(Ordering::Greater.into_byte_array(), [2]);
+    assert_eq!(Ordering::Less.to_byte_array(), [0]);
+    assert_eq!(Ordering::Equal.to_byte_array(), [1]);
+    assert_eq!(Ordering::Greater.to_byte_array(), [2]);
 }
 
 #[test]
@@ -191,21 +191,21 @@ fn ordering_invalid_byte_is_err() {
 fn ipv4_addr_roundtrip() {
     let original = Ipv4Addr::new(192, 168, 1, 100);
     assert_eq!(
-        Ipv4Addr::from_byte_array(original.into_byte_array()),
+        Ipv4Addr::from_byte_array(original.to_byte_array()),
         original
     );
 }
 
 #[test]
 fn ipv4_addr_byte_layout() {
-    assert_eq!(Ipv4Addr::new(10, 0, 0, 1).into_byte_array(), [10, 0, 0, 1]);
+    assert_eq!(Ipv4Addr::new(10, 0, 0, 1).to_byte_array(), [10, 0, 0, 1]);
 }
 
 #[test]
 fn ipv6_addr_roundtrip() {
     let original = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
     assert_eq!(
-        Ipv6Addr::from_byte_array(original.into_byte_array()),
+        Ipv6Addr::from_byte_array(original.to_byte_array()),
         original
     );
 }
@@ -213,7 +213,7 @@ fn ipv6_addr_roundtrip() {
 #[test]
 fn socket_addr_v4_roundtrip() {
     let original = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080);
-    let restored = SocketAddrV4::from_byte_array(original.into_byte_array());
+    let restored = SocketAddrV4::from_byte_array(original.to_byte_array());
     assert_eq!(original.ip(), restored.ip());
     assert_eq!(original.port(), restored.port());
 }
@@ -221,7 +221,7 @@ fn socket_addr_v4_roundtrip() {
 #[test]
 fn socket_addr_v6_roundtrip() {
     let original = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 443, 0, 0);
-    let restored = SocketAddrV6::from_byte_array(original.into_byte_array());
+    let restored = SocketAddrV6::from_byte_array(original.to_byte_array());
     assert_eq!(original.ip(), restored.ip());
     assert_eq!(original.port(), restored.port());
     assert_eq!(original.flowinfo(), restored.flowinfo());
@@ -242,7 +242,7 @@ fn duration_roundtrip() {
         Duration::from_secs(3600),
         Duration::new(1, 500_000_000),
     ] {
-        assert_eq!(Duration::from_byte_array(d.into_byte_array()), d);
+        assert_eq!(Duration::from_byte_array(d.to_byte_array()), d);
     }
 }
 
@@ -250,7 +250,7 @@ fn duration_roundtrip() {
 
 #[cfg(feature = "std")]
 mod system_time_tests {
-    use byteable::{FromByteArray, IntoByteArray};
+    use byteable::{FromByteArray, ToByteArray};
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -266,7 +266,7 @@ mod system_time_tests {
             SystemTime::UNIX_EPOCH - Duration::from_secs(86400),
             SystemTime::UNIX_EPOCH - Duration::from_millis(500), // nanos-carry path
         ] {
-            assert_eq!(SystemTime::from_byte_array(t.into_byte_array()), t);
+            assert_eq!(SystemTime::from_byte_array(t.to_byte_array()), t);
         }
     }
 }
@@ -276,17 +276,17 @@ mod system_time_tests {
 #[test]
 fn range_roundtrips() {
     let r: Range<u8> = 10..200;
-    assert_eq!(Range::<u8>::from_byte_array(r.clone().into_byte_array()), r);
+    assert_eq!(Range::<u8>::from_byte_array(r.clone().to_byte_array()), r);
 
     let r: Range<u32> = 0..0xDEAD_BEEF;
     assert_eq!(
-        Range::<u32>::from_byte_array(r.clone().into_byte_array()),
+        Range::<u32>::from_byte_array(r.clone().to_byte_array()),
         r
     );
 
     let r: RangeInclusive<u32> = 1..=0xFFFF_FFFF;
     assert_eq!(
-        RangeInclusive::<u32>::from_byte_array(r.clone().into_byte_array()),
+        RangeInclusive::<u32>::from_byte_array(r.clone().to_byte_array()),
         r
     );
 }
@@ -294,7 +294,7 @@ fn range_roundtrips() {
 #[test]
 fn range_from_roundtrip() {
     let r: RangeFrom<u32> = 42..;
-    let restored = RangeFrom::<u32>::from_byte_array(r.clone().into_byte_array());
+    let restored = RangeFrom::<u32>::from_byte_array(r.clone().to_byte_array());
     assert_eq!(r.start, restored.start);
 }
 
@@ -302,13 +302,13 @@ fn range_from_roundtrip() {
 fn range_to_roundtrips() {
     let r: RangeTo<u32> = ..999;
     assert_eq!(
-        RangeTo::<u32>::from_byte_array(r.into_byte_array()).end,
+        RangeTo::<u32>::from_byte_array(r.to_byte_array()).end,
         999
     );
 
     let r: RangeToInclusive<u32> = ..=1000;
     assert_eq!(
-        RangeToInclusive::<u32>::from_byte_array(r.into_byte_array()).end,
+        RangeToInclusive::<u32>::from_byte_array(r.to_byte_array()).end,
         1000
     );
 }
@@ -316,7 +316,7 @@ fn range_to_roundtrips() {
 #[test]
 fn range_full_is_zero_sized() {
     assert_eq!(RangeFull::BYTE_SIZE, 0);
-    let bytes = RangeFull.into_byte_array();
+    let bytes = RangeFull.to_byte_array();
     assert_eq!(bytes, [0u8; 0]);
     let _restored = RangeFull::from_byte_array(bytes);
 }
@@ -330,8 +330,8 @@ fn bool_byte_size() {
 
 #[test]
 fn bool_roundtrip() {
-    assert_eq!(true.into_byte_array(), [1]);
-    assert_eq!(false.into_byte_array(), [0]);
+    assert_eq!(true.to_byte_array(), [1]);
+    assert_eq!(false.to_byte_array(), [0]);
     assert!(bool::try_from_byte_array([1]).unwrap());
     assert!(!bool::try_from_byte_array([0]).unwrap());
 }
@@ -361,7 +361,7 @@ fn char_byte_size() {
 #[test]
 fn char_ascii_byte_layout() {
     // 'A' = U+0041, stored as little-endian u32
-    assert_eq!('A'.into_byte_array(), [0x41, 0x00, 0x00, 0x00]);
+    assert_eq!('A'.to_byte_array(), [0x41, 0x00, 0x00, 0x00]);
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn char_roundtrip() {
         '\u{10FFFF}',
     ];
     for c in chars {
-        let bytes = c.into_byte_array();
+        let bytes = c.to_byte_array();
         assert_eq!(char::try_from_byte_array(bytes).unwrap(), c);
     }
 }
@@ -404,11 +404,11 @@ fn char_roundtrip() {
 #[test]
 fn char_specific_byte_layouts() {
     // '🦀' = U+1F980 in little-endian u32
-    assert_eq!('🦀'.into_byte_array(), [0x80, 0xF9, 0x01, 0x00]);
+    assert_eq!('🦀'.to_byte_array(), [0x80, 0xF9, 0x01, 0x00]);
     // '€' = U+20AC
-    assert_eq!('€'.into_byte_array(), [0xAC, 0x20, 0x00, 0x00]);
+    assert_eq!('€'.to_byte_array(), [0xAC, 0x20, 0x00, 0x00]);
     // '\u{10FFFF}' = max valid codepoint
-    assert_eq!('\u{10FFFF}'.into_byte_array(), [0xFF, 0xFF, 0x10, 0x00]);
+    assert_eq!('\u{10FFFF}'.to_byte_array(), [0xFF, 0xFF, 0x10, 0x00]);
 }
 
 #[test]
@@ -436,7 +436,7 @@ fn char_error_implements_std_error() {
 
 #[cfg(feature = "derive")]
 mod derive_std_types {
-    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
     // ── bool in a derived struct ──────────────────────────────────────────
 
@@ -462,7 +462,7 @@ mod derive_std_types {
                 value,
                 ready,
             };
-            let bytes = p.into_byte_array();
+            let bytes = p.to_byte_array();
             assert_eq!(bytes[0], enabled as u8);
             assert_eq!(bytes[1], value);
             assert_eq!(bytes[2], ready as u8);
@@ -501,7 +501,7 @@ mod derive_std_types {
         for (id, symbol, count) in [(1u8, 'A', 0u16), (255, '🦀', 1000), (0, '€', 65535)] {
             let r = CharRecord { id, symbol, count };
             assert_eq!(
-                CharRecord::try_from_byte_array(r.into_byte_array()).unwrap(),
+                CharRecord::try_from_byte_array(r.to_byte_array()).unwrap(),
                 r
             );
         }
@@ -514,7 +514,7 @@ mod derive_std_types {
             symbol: 'A',
             count: 0x0102,
         };
-        let bytes = r.into_byte_array();
+        let bytes = r.to_byte_array();
         assert_eq!(bytes[0], 7);
         assert_eq!(&bytes[1..5], &[0x41, 0x00, 0x00, 0x00]); // 'A' LE u32
         assert_eq!(&bytes[5..7], &[0x02, 0x01]); // 0x0102 LE
@@ -552,7 +552,7 @@ mod derive_std_types {
             tag: 0xDEADBEEF,
         };
         assert_eq!(
-            Annotation::try_from_byte_array(a.into_byte_array()).unwrap(),
+            Annotation::try_from_byte_array(a.to_byte_array()).unwrap(),
             a
         );
     }
@@ -564,7 +564,7 @@ mod derive_std_types {
             label: 'Z',
             tag: 0x01020304,
         };
-        let bytes = a.into_byte_array();
+        let bytes = a.to_byte_array();
         assert_eq!(bytes[0], 0); // false
         assert_eq!(&bytes[1..5], &[0x5A, 0x00, 0x00, 0x00]); // 'Z' = U+005A LE
         assert_eq!(&bytes[5..9], &[0x01, 0x02, 0x03, 0x04]); // BE u32
@@ -606,7 +606,7 @@ mod derive_std_types {
             count: 5,
             enabled: false,
         };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         assert_eq!(bytes.len(), 7); // bool(1) + char(4) + u8(1) + bool(1)
         assert_eq!(MixedPrimitives::try_from_byte_array(bytes).unwrap(), s);
     }

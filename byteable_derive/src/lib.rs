@@ -109,7 +109,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// traits depending on whether `#[byteable(io_only)]` is present:
 ///
 /// - **Fixed-size** (default for structs): generates [`RawRepr`], [`FromRawRepr`] or
-///   [`TryFromRawRepr`], [`IntoByteArray`], and [`FromByteArray`] or [`TryFromByteArray`].
+///   [`TryFromRawRepr`], [`ToByteArray`], and [`FromByteArray`] or [`TryFromByteArray`].
 ///   A hidden `#[repr(C, packed)]` raw struct is created to hold the on-wire layout.
 ///
 /// - **I/O streaming** (`#[byteable(io_only)]` on structs, always for field enums):
@@ -125,13 +125,13 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///   any other trait with field requirements.
 ///
 /// - **Unit enums** (all variants are unit): generates [`TryFromRawRepr`],
-///   [`IntoByteArray`], and [`TryFromByteArray`] using an automatically-chosen
+///   [`ToByteArray`], and [`TryFromByteArray`] using an automatically-chosen
 ///   discriminant integer type (`u8` → `u16` → `u32` → `u64` based on variant count).
 ///
 /// [`RawRepr`]: byteable::RawRepr
 /// [`FromRawRepr`]: byteable::FromRawRepr
 /// [`TryFromRawRepr`]: byteable::TryFromRawRepr
-/// [`IntoByteArray`]: byteable::IntoByteArray
+/// [`ToByteArray`]: byteable::ToByteArray
 /// [`FromByteArray`]: byteable::FromByteArray
 /// [`TryFromByteArray`]: byteable::TryFromByteArray
 /// [`Readable`]: byteable::io::Readable
@@ -168,7 +168,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// ## Basic fixed-size struct
 ///
 /// ```rust
-/// use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+/// use byteable::{Byteable, ToByteArray, TryFromByteArray};
 ///
 /// #[derive(Byteable)]
 /// struct Point {
@@ -177,7 +177,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// }
 ///
 /// let p = Point { x: 1.0, y: 2.0 };
-/// let bytes = p.into_byte_array();
+/// let bytes = p.to_byte_array();
 /// let p2 = Point::try_from_byte_array(bytes).unwrap();
 /// assert_eq!(p.x, p2.x);
 /// ```
@@ -221,7 +221,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// ## Unit enum (auto-inferred repr)
 ///
 /// ```rust
-/// use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+/// use byteable::{Byteable, ToByteArray, TryFromByteArray};
 ///
 /// #[derive(Byteable, Debug, PartialEq)]
 /// enum Color {
@@ -232,7 +232,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///
 /// // Fits in u8 (3 variants), so wire size is 1 byte.
 /// assert_eq!(Color::BYTE_SIZE, 1);
-/// let bytes = Color::Green.into_byte_array();
+/// let bytes = Color::Green.to_byte_array();
 /// assert_eq!(Color::try_from_byte_array(bytes).unwrap(), Color::Green);
 /// ```
 ///
@@ -365,11 +365,11 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 }
             }
 
-            impl #bc::IntoByteArray for #raw_name
+            impl #bc::ToByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(*self) }
                 }
@@ -378,22 +378,22 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
             impl #bc::FromByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
-                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                fn from_byte_array(byte_array: <Self as #bc::ToByteArray>::ByteArray) -> Self {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(byte_array) }
 
                 }
             }
 
-            impl #bc::IntoByteArray for #name
+            impl #bc::ToByteArray for #name
             where
                 #name: #bc::RawRepr,
-                <#name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                <#name as #bc::RawRepr>::Raw: #bc::ToByteArray,
             {
-                type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
+                type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::ToByteArray>::ByteArray;
 
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    <Self as #bc::RawRepr>::to_raw(self).to_byte_array()
                 }
             }
 
@@ -621,11 +621,11 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
                 }
             }
 
-            impl #bc::IntoByteArray for #raw_name
+            impl #bc::ToByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(*self) }
                 }
@@ -634,21 +634,21 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
             impl #bc::FromByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
-                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                fn from_byte_array(byte_array: <Self as #bc::ToByteArray>::ByteArray) -> Self {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(byte_array) }
 
                 }
             }
 
-            impl #bc::IntoByteArray for #original_name
+            impl #bc::ToByteArray for #original_name
             where
                 #original_name: #bc::RawRepr,
-                <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                <#original_name as #bc::RawRepr>::Raw: #bc::ToByteArray,
             {
                 type ByteArray = [u8; ::core::mem::size_of::<<Self as #bc::RawRepr>::Raw>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    <Self as #bc::RawRepr>::to_raw(self).to_byte_array()
                 }
             }
 
@@ -772,11 +772,11 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         quote! {
             unsafe impl #bc::PlainOldData for #raw_name {}
 
-            impl #bc::IntoByteArray for #raw_name
+            impl #bc::ToByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(*self) }
                 }
@@ -785,7 +785,7 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
             impl #bc::FromByteArray for #raw_name
                 where #raw_name : #bc::PlainOldData
             {
-                fn from_byte_array(byte_array: <Self as #bc::IntoByteArray>::ByteArray) -> Self {
+                fn from_byte_array(byte_array: <Self as #bc::ToByteArray>::ByteArray) -> Self {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(byte_array) }
 
@@ -816,14 +816,14 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
 
-                impl #bc::IntoByteArray for #original_name
+                impl #bc::ToByteArray for #original_name
                 where
                     #original_name: #bc::RawRepr,
-                    <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                    <#original_name as #bc::RawRepr>::Raw: #bc::ToByteArray,
                 {
-                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
-                    fn into_byte_array(&self) -> Self::ByteArray {
-                        <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::ToByteArray>::ByteArray;
+                    fn to_byte_array(&self) -> Self::ByteArray {
+                        <Self as #bc::RawRepr>::to_raw(self).to_byte_array()
                     }
                 }
 
@@ -839,14 +839,14 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
                     }
                 }
 
-                impl #bc::IntoByteArray for #original_name
+                impl #bc::ToByteArray for #original_name
                 where
                     #original_name: #bc::RawRepr,
-                    <#original_name as #bc::RawRepr>::Raw: #bc::IntoByteArray,
+                    <#original_name as #bc::RawRepr>::Raw: #bc::ToByteArray,
                 {
-                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::IntoByteArray>::ByteArray;
-                    fn into_byte_array(&self) -> Self::ByteArray {
-                        <Self as #bc::RawRepr>::to_raw(self).into_byte_array()
+                    type ByteArray = <<Self as #bc::RawRepr>::Raw as #bc::ToByteArray>::ByteArray;
+                    fn to_byte_array(&self) -> Self::ByteArray {
+                        <Self as #bc::RawRepr>::to_raw(self).to_byte_array()
                     }
                 }
             }
@@ -1371,21 +1371,21 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     // the conversion as dead code after a diverging `let`, which rustc flags as an
     // `unreachable_code` warning. So skip the intermediate binding entirely in that case; the
     // endian attribute is moot too, since there's no value to convert either way.
-    let into_byte_array_body = if enum_data.variants.is_empty() {
+    let to_byte_array_body = if enum_data.variants.is_empty() {
         to_raw_expr.clone()
     } else {
         match endian_attr {
             AttributeType::LittleEndian => quote! {
                 let v: #repr_ty = #to_raw_expr;
-                <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).into_byte_array()
+                <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).to_byte_array()
             },
             AttributeType::BigEndian => quote! {
                 let v: #repr_ty = #to_raw_expr;
-                <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).into_byte_array()
+                <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).to_byte_array()
             },
             _ => quote! {
                 let v: #repr_ty = #to_raw_expr;
-                <#repr_ty as #bc::IntoByteArray>::into_byte_array(&v)
+                <#repr_ty as #bc::ToByteArray>::to_byte_array(&v)
             },
         }
     };
@@ -1424,10 +1424,10 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             }
         }
 
-        impl #bc::IntoByteArray for #enum_name {
+        impl #bc::ToByteArray for #enum_name {
             type ByteArray = [u8; ::core::mem::size_of::<#repr_ty>()];
-            fn into_byte_array(&self) -> Self::ByteArray {
-                #into_byte_array_body
+            fn to_byte_array(&self) -> Self::ByteArray {
+                #to_byte_array_body
             }
         }
 

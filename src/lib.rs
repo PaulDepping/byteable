@@ -3,8 +3,8 @@
 //! `byteable` provides two complementary paths for working with binary data:
 //!
 //! - **Fixed-size path** — For types whose wire size is known at compile time. Derive
-//!   [`Byteable`] and get zero-copy [`IntoByteArray::into_byte_array`] /
-//!   [`TryFromByteArray::try_from_byte_array`] with a compile-time [`IntoByteArray::BYTE_SIZE`]
+//!   [`Byteable`] and get zero-copy [`ToByteArray::to_byte_array`] /
+//!   [`TryFromByteArray::try_from_byte_array`] with a compile-time [`ToByteArray::BYTE_SIZE`]
 //!   constant. The derive macro generates a `#[repr(C, packed)]` raw struct and uses
 //!   `transmute`, so no heap allocation or per-field iteration is required.
 //!
@@ -19,7 +19,7 @@
 //! ## Fixed-size struct
 //!
 //! ```rust
-//! use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+//! use byteable::{Byteable, ToByteArray, TryFromByteArray};
 //!
 //! #[derive(Byteable)]
 //! struct Point3D {
@@ -29,7 +29,7 @@
 //! }
 //!
 //! let p = Point3D { x: 1.0, y: 2.0, z: 3.0 };
-//! let bytes: [u8; 12] = p.into_byte_array();
+//! let bytes: [u8; 12] = p.to_byte_array();
 //! let p2 = Point3D::try_from_byte_array(bytes).unwrap();
 //! assert_eq!(p.x, p2.x);
 //! ```

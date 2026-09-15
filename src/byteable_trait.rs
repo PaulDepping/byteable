@@ -7,7 +7,7 @@
 /// - It is `Copy` and `Sized`.
 ///
 /// These invariants are the precondition for the safe use of `transmute` in
-/// [`IntoByteArray`] and [`FromByteArray`], and for reinterpreting the type as a
+/// [`ToByteArray`] and [`FromByteArray`], and for reinterpreting the type as a
 /// `&[u8]` slice via [`as_bytes`](PlainOldData::as_bytes).
 ///
 /// Implemented for: `u8`, `i8`, `u16`, `u32`, `u64`, `u128`, `i16`, `i32`, `i64`, `i128`,
@@ -71,7 +71,7 @@ unsafe impl<T: PlainOldData, const N: usize> PlainOldData for [T; N] {}
 /// Marker trait for types that are fixed-size byte arrays.
 ///
 /// Currently only implemented for `[u8; N]`. It is used as the associated `ByteArray` type
-/// in [`IntoByteArray`] to represent the serialized form of a value.
+/// in [`ToByteArray`] to represent the serialized form of a value.
 ///
 /// # Safety
 ///
@@ -89,13 +89,13 @@ unsafe impl<const N: usize> ByteArray for [u8; N] {
 /// Implementing this trait (together with [`TryFromByteArray`] or [`FromByteArray`]) enables
 /// zero-copy, allocation-free serialization for types whose wire size is known at compile time.
 ///
-/// [`BYTE_SIZE`](IntoByteArray::BYTE_SIZE) is a compile-time constant equal to the number of
-/// bytes produced by [`into_byte_array`](IntoByteArray::into_byte_array).
+/// [`BYTE_SIZE`](ToByteArray::BYTE_SIZE) is a compile-time constant equal to the number of
+/// bytes produced by [`to_byte_array`](ToByteArray::to_byte_array).
 ///
 /// # Examples
 ///
 /// ```rust
-/// use byteable::{Byteable, IntoByteArray};
+/// use byteable::{Byteable, ToByteArray};
 ///
 /// #[derive(Byteable)]
 /// struct Pair {
@@ -105,9 +105,9 @@ unsafe impl<const N: usize> ByteArray for [u8; N] {
 ///
 /// let p = Pair { a: 1, b: 2 };
 /// assert_eq!(Pair::BYTE_SIZE, 4);
-/// let bytes: [u8; 4] = p.into_byte_array();
+/// let bytes: [u8; 4] = p.to_byte_array();
 /// ```
-pub trait IntoByteArray: Sized {
+pub trait ToByteArray: Sized {
     /// The fixed-size byte array type that this value serializes to (always `[u8; N]`).
     type ByteArray: ByteArray;
 
@@ -120,7 +120,7 @@ pub trait IntoByteArray: Sized {
     // many implementors (`&str`-backed types, anything embedded in a larger struct) can't be
     // consumed at all. `PlainOldData: Copy` types pay nothing extra for the borrow either way.
     #[allow(clippy::wrong_self_convention)]
-    fn into_byte_array(&self) -> Self::ByteArray;
+    fn to_byte_array(&self) -> Self::ByteArray;
 }
 
 /// Infallible conversion from a fixed-size byte array back into a value.
@@ -130,7 +130,7 @@ pub trait IntoByteArray: Sized {
 ///
 /// A blanket impl automatically provides [`TryFromByteArray`] for every type that
 /// implements `FromByteArray`.
-pub trait FromByteArray: IntoByteArray {
+pub trait FromByteArray: ToByteArray {
     /// Deserialize a value from a fixed-size byte array. Infallible.
     fn from_byte_array(byte_array: Self::ByteArray) -> Self;
 }
@@ -146,7 +146,7 @@ pub trait FromByteArray: IntoByteArray {
 /// # Errors
 ///
 /// Returns [`DecodeError`] if the byte array does not represent a valid value of `Self`.
-pub trait TryFromByteArray: IntoByteArray {
+pub trait TryFromByteArray: ToByteArray {
     /// Attempt to deserialize a value from a fixed-size byte array.
     ///
     /// # Errors
@@ -172,11 +172,11 @@ macro_rules! unsafe_impl_plain_old_data {
 macro_rules! impl_byte_array {
     ($($ty:ty),+) => {
         $(
-            impl IntoByteArray for $ty
+            impl ToByteArray for $ty
                 where $ty : PlainOldData
             {
                 type ByteArray = [u8; ::core::mem::size_of::<Self>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(*self) }
                 }
@@ -451,12 +451,12 @@ impl_endian_convert_float!(f32 => u32, f64 => u64);
 /// # Examples
 ///
 /// ```rust
-/// use byteable::{BigEndian, IntoByteArray};
+/// use byteable::{BigEndian, ToByteArray};
 ///
 /// let be = BigEndian::new(0x1234u16);
 /// assert_eq!(be.get(), 0x1234u16);
 /// // The internal bytes are stored in big-endian order:
-/// assert_eq!(be.into_byte_array(), [0x12, 0x34]);
+/// assert_eq!(be.to_byte_array(), [0x12, 0x34]);
 /// ```
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -473,12 +473,12 @@ pub struct BigEndian<T: EndianConvert>(T);
 /// # Examples
 ///
 /// ```rust
-/// use byteable::{LittleEndian, IntoByteArray};
+/// use byteable::{LittleEndian, ToByteArray};
 ///
 /// let le = LittleEndian::new(0x1234u16);
 /// assert_eq!(le.get(), 0x1234u16);
 /// // The internal bytes are stored in little-endian order:
-/// assert_eq!(le.into_byte_array(), [0x34, 0x12]);
+/// assert_eq!(le.to_byte_array(), [0x34, 0x12]);
 /// ```
 #[repr(transparent)]
 #[derive(Clone, Copy)]

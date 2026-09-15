@@ -64,7 +64,7 @@ mod fixed {
     }
 
     // `Reverse<T>` only gets `EioAsyncFixedReadable`/`EioAsyncFixedWritable` (via the blanket
-    // `RawRepr`/`TryFromRawRepr` chain), not the `IntoByteArray` fixed byte-array API directly.
+    // `RawRepr`/`TryFromRawRepr` chain), not the `ToByteArray` fixed byte-array API directly.
     #[tokio::test]
     async fn reverse_roundtrip_over_slice() {
         use core::cmp::Reverse;
