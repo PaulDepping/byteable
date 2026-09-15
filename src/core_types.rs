@@ -6,8 +6,8 @@
 //! [`PhantomData<T>`](core::marker::PhantomData) (0 bytes),
 //! [`NonZero<T>`](core::num::NonZero), network address types
 //! (`Ipv4Addr`, `Ipv6Addr`, `SocketAddrV4`, `SocketAddrV6`), all range variants, and
-//! [`Duration`](core::time::Duration) /
-//! [`SystemTime`](std::time::SystemTime) (`std` feature only).
+//! [`Duration`] /
+//! [`SystemTime`] (`std` feature only).
 //!
 //! ## `SystemTime` wire format
 //!

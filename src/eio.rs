@@ -45,6 +45,7 @@ pub trait EioWriter {
 
 /// Error returned by [`EioReader::read_exact`]. Mirrors `embedded_io::ReadExactError<E>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum EioReadExactError<E> {
     /// End-of-input was reached before `buf` was fully filled.
     UnexpectedEof,
@@ -102,6 +103,7 @@ impl<T: ::embedded_io::Write + ?Sized> EioWriter for T {
 /// Independent of [`crate::io::ReadableError`], which stays `std::io::Error`-based and
 /// untouched by this module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum EioReadableError<E> {
     /// The underlying reader returned an error.
     Io(E),
