@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 byteable = { path = "..", default-features = false, features = ["derive", "embedded-io", "embedded-io-async", "bitflags", "heapless", "arrayvec", "tinyvec", "defmt", "ordered-float"] }
 bitflags = { version = "2", default-features = false }
-heapless = { version = "0.8", default-features = false }
+heapless = { version = "0.9", default-features = false }
 arrayvec = { version = "0.7", default-features = false }
 tinyvec = { version = "1" }
 defmt = "1"

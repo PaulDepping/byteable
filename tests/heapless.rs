@@ -7,7 +7,9 @@
 mod std_pipeline {
     use byteable::DecodeError;
     use byteable::io::{ReadValue, WriteValue};
-    use heapless::{Deque, FnvIndexMap, FnvIndexSet, LinearMap, String, Vec};
+    use heapless::index_map::FnvIndexMap;
+    use heapless::index_set::FnvIndexSet;
+    use heapless::{Deque, LinearMap, String, Vec};
 
     fn roundtrip<
         T: byteable::io::Writable + byteable::io::Readable + PartialEq + core::fmt::Debug,

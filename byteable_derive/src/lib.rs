@@ -1345,17 +1345,38 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 quote! { #disc => Ok(#enum_name::#variant_name), }
             });
 
+    // `*self as #repr_ty` would require moving `Self` out of the `&self` reference (it's not
+    // necessarily `Copy`), which rustc rejects with E0507 — and does so unconditionally, not
+    // just for empty enums; there's no special-cased discriminant-read lowering for fieldless
+    // enum casts. Matching on `*self` instead never binds or moves anything (every variant is
+    // a unit variant), and works uniformly down to zero variants (`match *self {}` is accepted
+    // as exhaustive for an uninhabited enum, unlike `match self {}`, since a reference type is
+    // always considered inhabited by the exhaustiveness checker).
+    let to_raw_arms = enum_data
+        .variants
+        .iter()
+        .zip(&discriminants)
+        .map(|(variant, disc)| {
+            let variant_name = &variant.ident;
+            quote! { #enum_name::#variant_name => #disc, }
+        });
+    let to_raw_expr = quote! {
+        match *self {
+            #(#to_raw_arms)*
+        }
+    };
+
     let into_byte_array_body = match endian_attr {
         AttributeType::LittleEndian => quote! {
-            let v: #repr_ty = *self as _;
+            let v: #repr_ty = #to_raw_expr;
             <#repr_ty as #bc::HasEndianRepr>::to_little_endian(v).into_byte_array()
         },
         AttributeType::BigEndian => quote! {
-            let v: #repr_ty = *self as _;
+            let v: #repr_ty = #to_raw_expr;
             <#repr_ty as #bc::HasEndianRepr>::to_big_endian(v).into_byte_array()
         },
         _ => quote! {
-            let v: #repr_ty = *self as _;
+            let v: #repr_ty = #to_raw_expr;
             <#repr_ty as #bc::IntoByteArray>::into_byte_array(&v)
         },
     };
@@ -1381,7 +1402,7 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         impl #bc::RawRepr for #enum_name {
             type Raw = #repr_ty;
             fn to_raw(&self) -> #repr_ty {
-                *self as _
+                #to_raw_expr
             }
         }
 
