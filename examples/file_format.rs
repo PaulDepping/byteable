@@ -133,7 +133,7 @@ fn main() -> Result<(), ReadableError> {
 
     for record in &loaded {
         println!(
-            "[{}] {} {} — tags: {:?}",
+            "[{}] {} {} - tags: {:?}",
             record.timestamp,
             level_name(record.level),
             record.message,

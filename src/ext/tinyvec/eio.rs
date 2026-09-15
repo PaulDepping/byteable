@@ -2,7 +2,7 @@
 //! (`embedded-io` + `tinyvec` features).
 //!
 //! Wire format and capacity-checking behavior are identical to [`crate::ext::tinyvec::io`];
-//! see that module for the rationale. `tinyvec::ArrayVec` doesn't need the `alloc` feature —
+//! see that module for the rationale. `tinyvec::ArrayVec` doesn't need the `alloc` feature -
 //! it's array-backed with a compile-time capacity.
 
 use crate::{

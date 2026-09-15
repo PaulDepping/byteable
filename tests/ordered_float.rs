@@ -1,7 +1,7 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{Byteable, FromByteArray, ToByteArray, PlainOldData, TryFromByteArray};
+use byteable::{Byteable, FromByteArray, PlainOldData, ToByteArray, TryFromByteArray};
 use ordered_float::{NotNan, OrderedFloat};
 
 #[derive(Debug, Clone, Byteable, PartialEq, PartialOrd)]
@@ -35,7 +35,7 @@ fn ordered_float_f32_roundtrip() {
 
 #[test]
 fn ordered_float_f32_nan_roundtrip() {
-    // OrderedFloat supports NaN — it should survive a roundtrip.
+    // OrderedFloat supports NaN - it should survive a roundtrip.
     let val = OrderedFloat(f32::NAN);
     let bytes = val.to_byte_array();
     let restored = OrderedFloat::<f32>::from_byte_array(bytes);

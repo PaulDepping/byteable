@@ -14,6 +14,7 @@
 //! | `IpAddr` | 1-byte tag: `0` = `V4` followed by `Ipv4Addr`, `1` = `V6` followed by `Ipv6Addr` |
 //! | `SocketAddr` | 1-byte tag: `0` = `V4` followed by `SocketAddrV4`, `1` = `V6` followed by `SocketAddrV6` |
 //! | `Bound<T>` | 1-byte tag: `0` = `Included(T)`, `1` = `Excluded(T)`, `2` = `Unbounded` |
+//! | `(A, B, ...)` (arity 1-12) | each element serialized in order, no tag or length prefix |
 //! | `String` | `u64` byte length + UTF-8 bytes (no null terminator) |
 //! | `str` (write only) | same as `String` |
 //! | `PathBuf` | serialized as `String`; returns [`io::Error`] for non-UTF-8 paths |
@@ -157,8 +158,8 @@ where
 }
 
 // eio counterpart of the `Readable`/`Writable` impls above. `HashMap`/`HashSet` need `std`'s
-// `RandomState` hasher (OS randomness), so — unlike the `alloc`-backed collections in
-// `alloc_types_eio.rs` — these live here, gated on `std` (this module) rather than `alloc`.
+// `RandomState` hasher (OS randomness), so - unlike the `alloc`-backed collections in
+// `alloc_types_eio.rs` - these live here, gated on `std` (this module) rather than `alloc`.
 // Additionally gated on `embedded-io` here, matching `alloc_types_eio.rs`'s
 // `#[cfg(all(feature = "embedded-io", feature = "alloc"))]`: `eio`'s traits would compile and
 // resolve fine without it (see `eio.rs`'s module doc comment), but the convention in this
@@ -251,7 +252,7 @@ where
 // The four impls below use the deliberate `-> impl Future<Output = ...> { async move { ... } }`
 // style of `eio_async.rs` rather than `async fn`: it preserves the option of adding a `+ Send`
 // bound to the returned future later, which the bare `async fn` sugar cannot express. Hence the
-// per-impl `allow(clippy::manual_async_fn)` — scoped here rather than file-wide, since the rest
+// per-impl `allow(clippy::manual_async_fn)` - scoped here rather than file-wide, since the rest
 // of this module is synchronous.
 #[cfg(feature = "embedded-io-async")]
 #[allow(clippy::manual_async_fn)]
@@ -456,6 +457,43 @@ impl<T: Readable> Readable for Bound<T> {
         }
     }
 }
+
+// Wire format: no tag or length prefix - arity is fixed at compile time, so each element is
+// just serialized in order. Implemented for tuples of arity 1 through 12, mirroring the range
+// std itself implements `Debug`/`Default`/etc. for. The macro reuses each type parameter
+// identifier as the binding name when destructuring `self` in `Writable::write_to` (so `A`
+// names both the type and the bound field value) - hence `#[allow(non_snake_case)]`.
+macro_rules! impl_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: Readable),+> Readable for ($($T,)+) {
+            fn read_from(mut reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
+                Ok(($(reader.read_value::<$T>()?,)+))
+            }
+        }
+
+        impl<$($T: Writable),+> Writable for ($($T,)+) {
+            fn write_to(&self, mut writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
+                #[allow(non_snake_case)]
+                let ($($T,)+) = self;
+                $( writer.write_value($T)?; )+
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_tuple!(A);
+impl_tuple!(A, B);
+impl_tuple!(A, B, C);
+impl_tuple!(A, B, C, D);
+impl_tuple!(A, B, C, D, E);
+impl_tuple!(A, B, C, D, E, F);
+impl_tuple!(A, B, C, D, E, F, G);
+impl_tuple!(A, B, C, D, E, F, G, H);
+impl_tuple!(A, B, C, D, E, F, G, H, I);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 // Wire format: `u64` byte length (LE) + UTF-8 bytes. Rejects invalid UTF-8 with DecodeError.
 impl Readable for String {

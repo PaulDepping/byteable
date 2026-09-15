@@ -11,7 +11,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use cortex_m_rt::entry;
 use panic_halt as _;
 
-// Smoke-test convenience, not a general executor — sound only because every future polled here
+// Smoke-test convenience, not a general executor - sound only because every future polled here
 // (embedded_io_async's &[u8]/&mut [u8] impls) resolves on its first poll and never returns
 // Poll::Pending, so this waker is never actually asked to wake anything.
 fn block_on<F: Future>(fut: F) -> F::Output {
@@ -67,7 +67,7 @@ fn main() -> ! {
     // With both the sync (`eio`) and async (`eio_async`) traits imported in the same scope,
     // `&[u8]`/`&mut [u8]` implement both `EioRead*`/`EioWrite*` and `EioAsyncRead*`/
     // `EioAsyncWrite*` with identically-named methods, so plain method-call syntax
-    // (`r.read_fixed()`) is ambiguous (E0034) — UFCS picks the trait explicitly.
+    // (`r.read_fixed()`) is ambiguous (E0034) - UFCS picks the trait explicitly.
     {
         let mut w: &mut [u8] = &mut buf;
         EioWriteFixed::write_fixed(&mut w, &header).unwrap();
@@ -76,7 +76,7 @@ fn main() -> ! {
     let _restored: Header = EioReadFixed::read_fixed(&mut r).unwrap();
 
     // Dynamic (non-alloc) path over embedded-io, via Option<u32>'s hand-written EioReadable/
-    // EioWritable impls (Task 3) — no heap, no derive macro involved.
+    // EioWritable impls (Task 3) - no heap, no derive macro involved.
     let flag: Option<u32> = Some(7);
     {
         let mut w: &mut [u8] = &mut buf;
@@ -106,7 +106,7 @@ fn main() -> ! {
     let _restored_async: Header = block_on(EioAsyncReadFixed::read_fixed(&mut r)).unwrap();
 
     // Dynamic (non-alloc) path over embedded-io-async, via Option<u32>'s hand-written
-    // EioAsyncReadable/EioAsyncWritable impls — no heap, no derive macro involved.
+    // EioAsyncReadable/EioAsyncWritable impls - no heap, no derive macro involved.
     {
         let mut w: &mut [u8] = &mut buf;
         block_on(EioAsyncWriteValue::write_value(&mut w, &flag)).unwrap();
@@ -114,7 +114,7 @@ fn main() -> ! {
     let mut r: &[u8] = &buf;
     let _flag2_async: Option<u32> = block_on(EioAsyncReadValue::read_value(&mut r)).unwrap();
 
-    // Field enum over embedded-io-async — proves Task 7's derive retrofit compiles and links
+    // Field enum over embedded-io-async - proves Task 7's derive retrofit compiles and links
     // on a real no_std target with no heap and no std crate available at all.
     {
         let mut w: &mut [u8] = &mut buf;
@@ -124,7 +124,7 @@ fn main() -> ! {
     let _cmd2_async: TestEnum = block_on(EioAsyncReadValue::read_value(&mut r)).unwrap();
 
     // `impl_bitflags!`/`impl_bitflags_endian!`-generated impls, over both embedded-io and
-    // embedded-io-async, with no heap and no `std` — proves the bitflags integration compiles
+    // embedded-io-async, with no heap and no `std` - proves the bitflags integration compiles
     // and links on a real no_std target.
     let perms = Perms::READ | Perms::EXEC;
     {
@@ -142,7 +142,7 @@ fn main() -> ! {
     let _perms2_async: Perms = block_on(EioAsyncReadFixed::read_fixed(&mut r)).unwrap();
 
     // `heapless::Vec<T, N>`'s hand-written EioReadable/EioWritable and EioAsyncReadable/
-    // EioAsyncWritable impls, over both pipelines — no heap, no `alloc` feature at all, proving
+    // EioAsyncWritable impls, over both pipelines - no heap, no `alloc` feature at all, proving
     // heapless support works on a genuinely allocation-free no_std target.
     let mut hv: heapless::Vec<u32, 4> = heapless::Vec::new();
     hv.push(1).unwrap();
@@ -163,7 +163,7 @@ fn main() -> ! {
         block_on(EioAsyncReadValue::read_value(&mut r)).unwrap();
 
     // `arrayvec::ArrayVec<T, N>`'s hand-written EioReadable/EioWritable and EioAsyncReadable/
-    // EioAsyncWritable impls, over both pipelines — no heap, no `alloc` feature at all, proving
+    // EioAsyncWritable impls, over both pipelines - no heap, no `alloc` feature at all, proving
     // arrayvec support works on a genuinely allocation-free no_std target.
     let mut av: arrayvec::ArrayVec<u32, 4> = arrayvec::ArrayVec::new();
     av.push(1);
@@ -184,7 +184,7 @@ fn main() -> ! {
         block_on(EioAsyncReadValue::read_value(&mut r)).unwrap();
 
     // `tinyvec::ArrayVec<[T; N]>`'s hand-written EioReadable/EioWritable and EioAsyncReadable/
-    // EioAsyncWritable impls, over both pipelines — no heap, no `alloc` feature at all, proving
+    // EioAsyncWritable impls, over both pipelines - no heap, no `alloc` feature at all, proving
     // tinyvec support works on a genuinely allocation-free no_std target.
     let mut tv: tinyvec::ArrayVec<[u32; 4]> = tinyvec::ArrayVec::new();
     tv.push(1);
@@ -205,9 +205,9 @@ fn main() -> ! {
         block_on(EioAsyncReadValue::read_value(&mut r)).unwrap();
 
     // defmt::Format impls for byteable's own error/wrapper types, proven on a real no_std
-    // target. Not actually invoking `defmt::info!`/`.format()` here — that needs a
+    // target. Not actually invoking `defmt::info!`/`.format()` here - that needs a
     // `#[defmt::global_logger]` (e.g. `defmt-rtt`), which is a concern for the final firmware
-    // binary, not this compile-only smoke test — so this only proves the trait bound holds.
+    // binary, not this compile-only smoke test - so this only proves the trait bound holds.
     fn assert_defmt_format<T: defmt::Format>() {}
     assert_defmt_format::<byteable::DecodeError>();
     assert_defmt_format::<byteable::LittleEndian<u32>>();
@@ -216,7 +216,7 @@ fn main() -> ! {
     assert_defmt_format::<byteable::eio::EioReadExactError<()>>();
 
     // `OrderedFloat<f32>`'s blanket EioFixedReadable/EioFixedWritable and EioAsyncFixedReadable/
-    // EioAsyncFixedWritable impls (via RawRepr/TryFromRawRepr), over both pipelines — proving
+    // EioAsyncFixedWritable impls (via RawRepr/TryFromRawRepr), over both pipelines - proving
     // ordered-float actually works on a true no_std target now that its own `std` feature is no
     // longer pulled in unconditionally (it used to be: ordered-float's default features include
     // `std`, which does `extern crate std;` and fails to link on a target with no std at all).

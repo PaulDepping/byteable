@@ -19,7 +19,7 @@
 //! standard POSIX `timespec` convention.
 
 use crate::{
-    DecodeError, FromByteArray, FromRawRepr, ToByteArray, LittleEndian, PlainOldData, RawRepr,
+    DecodeError, FromByteArray, FromRawRepr, LittleEndian, PlainOldData, RawRepr, ToByteArray,
     TryFromByteArray, TryFromRawRepr, impl_byte_array,
 };
 use core::{
@@ -370,7 +370,7 @@ impl TryFromRawRepr for Ordering {
 
 impl_try_byte_array_via_raw!(Ordering);
 
-// `Wrapping<T>` / `Saturating<T>` serialize identically to `T` — same raw repr, no invalid
+// `Wrapping<T>` / `Saturating<T>` serialize identically to `T` - same raw repr, no invalid
 // states, so decoding is infallible (mirrors `TryFromRawRepr`'s trivial wrapping for `u8..i128`
 // themselves, not `NonZero<T>`'s validating one).
 macro_rules! impl_int_wrapper {
@@ -401,8 +401,8 @@ impl_int_wrapper!(Wrapping; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 impl_int_wrapper!(Saturating; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // `Reverse<T>` serializes identically to `T` (transparent passthrough, same as the
-// `Arc`/`Rc`/`Box` treatment in `std_types.rs`). Generic over any `T`, so — unlike
-// `Wrapping`/`Saturating` above — it cannot be given the `ToByteArray`/`FromByteArray` fixed
+// `Arc`/`Rc`/`Box` treatment in `std_types.rs`). Generic over any `T`, so - unlike
+// `Wrapping`/`Saturating` above - it cannot be given the `ToByteArray`/`FromByteArray` fixed
 // byte-array API (that requires a concrete `$ty:ty` per `impl_byte_array_via_raw!` invocation);
 // it still gets `Readable`/`Writable` (and the `tokio`/`eio`/`eio_async` counterparts) for free
 // via the blanket `RawRepr`/`TryFromRawRepr` → `Fixed*` → `*able` chains in each pipeline module.
@@ -558,7 +558,7 @@ impl_try_from_rawrepr!(SocketAddrV6);
 impl_byte_array_via_raw!(SocketAddrV6);
 
 macro_rules! impl_range_byteable {
-    // Single-byte index types (u8, i8) — no endianness annotation needed.
+    // Single-byte index types (u8, i8) - no endianness annotation needed.
     ($index_type:ty, $raw_name:ident) => {
         #[repr(C, packed)]
         #[derive(Clone, Copy)]
@@ -610,7 +610,7 @@ impl_range_byteable!(i64, RangeI64);
 impl_range_byteable!(i128, RangeI128);
 
 macro_rules! impl_range_inclusive_byteable {
-    // Single-byte index types (u8, i8) — no endianness annotation needed.
+    // Single-byte index types (u8, i8) - no endianness annotation needed.
     ($index_type:ty, $raw_name:ident) => {
         impl RawRepr for RangeInclusive<$index_type> {
             type Raw = $raw_name;
@@ -649,7 +649,7 @@ impl_range_inclusive_byteable!(i32, RangeI32);
 impl_range_inclusive_byteable!(i64, RangeI64);
 impl_range_inclusive_byteable!(i128, RangeI128);
 
-// RangeFrom<T>, RangeTo<T>, RangeToInclusive<T> — single public field.
+// RangeFrom<T>, RangeTo<T>, RangeToInclusive<T> - single public field.
 macro_rules! impl_range_single_byteable {
     ($std_type:ty, $field:ident, $index_type:ty, $raw_name:ident) => {
         #[repr(transparent)]

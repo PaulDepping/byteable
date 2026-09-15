@@ -3,7 +3,7 @@
 //!
 //! Wire formats and capacity-checking behavior are identical to [`crate::ext::heapless::io`];
 //! see that module for the rationale. Unlike the `alloc`-backed collections in
-//! `alloc_types_eio.rs`, none of these types need the `alloc` feature — every collection here
+//! `alloc_types_eio.rs`, none of these types need the `alloc` feature - every collection here
 //! is stack-allocated with a compile-time capacity.
 
 use crate::{

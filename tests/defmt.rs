@@ -3,7 +3,7 @@
 //! Actually invoking `defmt::Format::format` requires a `#[defmt::global_logger]` (normally
 //! provided by something like `defmt-rtt` on a real embedded target), which this host-side
 //! test binary has none of. So these tests assert the trait bound compiles instead of
-//! capturing formatted output — the standard way third-party crates test defmt integration
+//! capturing formatted output - the standard way third-party crates test defmt integration
 //! outside of an actual embedded runtime.
 #![cfg(feature = "defmt")]
 

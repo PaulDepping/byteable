@@ -360,6 +360,18 @@ mod collections {
         assert_eq!(roundtrip(&excluded).await, excluded);
         assert_eq!(roundtrip(&unbounded).await, unbounded);
     }
+
+    #[tokio::test]
+    async fn tuple_roundtrip() {
+        let pair: (u32, String) = (42, "hello".to_string());
+        assert_eq!(roundtrip(&pair).await, pair);
+
+        let triple: (u8, IpAddr, bool) = (7, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), true);
+        assert_eq!(roundtrip(&triple).await, triple);
+
+        let single: (u32,) = (0xDEAD_BEEF,);
+        assert_eq!(roundtrip(&single).await, single);
+    }
 }
 
 mod io_only_derive {

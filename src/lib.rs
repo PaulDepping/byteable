@@ -2,13 +2,13 @@
 //!
 //! `byteable` provides two complementary paths for working with binary data:
 //!
-//! - **Fixed-size path** — For types whose wire size is known at compile time. Derive
+//! - **Fixed-size path** - For types whose wire size is known at compile time. Derive
 //!   [`Byteable`] and get zero-copy [`ToByteArray::to_byte_array`] /
 //!   [`TryFromByteArray::try_from_byte_array`] with a compile-time [`ToByteArray::BYTE_SIZE`]
 //!   constant. The derive macro generates a `#[repr(C, packed)]` raw struct and uses
 //!   `transmute`, so no heap allocation or per-field iteration is required.
 //!
-//! - **Dynamic path** — For types that contain variable-length data (strings, vecs, maps). Add
+//! - **Dynamic path** - For types that contain variable-length data (strings, vecs, maps). Add
 //!   `#[byteable(io_only)]` to derive [`io::Readable`] / [`io::Writable`] instead, which stream data
 //!   through any [`std::io::Read`] / [`std::io::Write`], or their
 //!   `embedded-io`/`embedded-io-async`/tokio counterparts, depending on which features are

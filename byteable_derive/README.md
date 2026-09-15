@@ -123,4 +123,4 @@ enum Shape {
 
 ## License
 
-MIT — see [LICENSE](../LICENSE).
+MIT - see [LICENSE](../LICENSE).

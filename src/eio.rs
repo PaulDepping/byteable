@@ -1,11 +1,11 @@
-//! `embedded-io` (sync) support — the `no_std`-friendly counterpart to [`crate::io`].
+//! `embedded-io` (sync) support - the `no_std`-friendly counterpart to [`crate::io`].
 //!
 //! Mirrors `io.rs`'s shape, but is generic over the [`EioReader`]/[`EioWriter`] marker traits
 //! defined here rather than bound directly to `embedded_io::Read`/`Write`. Gated on the
 //! `embedded-io` feature (`src/lib.rs`), same as `io.rs` is gated on `std`. The derive macro
 //! only ever emits references to this module's traits when `byteable_derive`'s own mirrored
 //! `embedded-io` feature is active (see `dynamic_pipeline_impls` in `byteable_derive/src/lib.rs`),
-//! which is forwarded 1:1 from this crate's own `embedded-io` feature — so generated code and
+//! which is forwarded 1:1 from this crate's own `embedded-io` feature - so generated code and
 //! this module's availability always agree; there's no case where generated code needs to
 //! name-resolve these traits while this module is absent.
 
@@ -399,6 +399,43 @@ impl<T: EioWritable> EioWritable for Bound<T> {
         }
     }
 }
+
+// Wire format: no tag or length prefix - arity is fixed at compile time, so each element is
+// just serialized in order. Implemented for tuples of arity 1 through 12; see `std_types.rs`
+// for why the macro reuses each type parameter identifier as a binding name. No alloc needed.
+macro_rules! impl_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: EioReadable),+> EioReadable for ($($T,)+) {
+            fn read_from<R: EioReader + ?Sized>(
+                reader: &mut R,
+            ) -> Result<Self, EioReadableError<R::Error>> {
+                Ok(($(reader.read_value::<$T>()?,)+))
+            }
+        }
+
+        impl<$($T: EioWritable),+> EioWritable for ($($T,)+) {
+            fn write_to<W: EioWriter + ?Sized>(&self, writer: &mut W) -> Result<(), W::Error> {
+                #[allow(non_snake_case)]
+                let ($($T,)+) = self;
+                $( writer.write_value($T)?; )+
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_tuple!(A);
+impl_tuple!(A, B);
+impl_tuple!(A, B, C);
+impl_tuple!(A, B, C, D);
+impl_tuple!(A, B, C, D, E);
+impl_tuple!(A, B, C, D, E, F);
+impl_tuple!(A, B, C, D, E, F, G);
+impl_tuple!(A, B, C, D, E, F, G, H);
+impl_tuple!(A, B, C, D, E, F, G, H, I);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 // Wire format: `u64` element count (LE) + elements in order. Write-only (borrowed): never
 // allocates, so this is available without the `alloc` feature.

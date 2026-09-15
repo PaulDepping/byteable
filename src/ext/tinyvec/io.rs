@@ -3,7 +3,7 @@
 //! Wire formats and capacity-checking behavior mirror `ext/heapless/io.rs`/
 //! `ext/arrayvec/io.rs`; see the former for the rationale. Generic over `tinyvec::Array`
 //! rather than a bare const generic, so this covers any `Array` implementor (not just
-//! `[T; N]`) — `A::Item: Default` comes for free since `Array` itself requires it.
+//! `[T; N]`) - `A::Item: Default` comes for free since `Array` itself requires it.
 
 use crate::{
     DecodeError,

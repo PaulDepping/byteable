@@ -1,10 +1,10 @@
-//! [`crate::impl_bitflags!`] — opt-in [`RawRepr`](crate::RawRepr),
+//! [`crate::impl_bitflags!`] - opt-in [`RawRepr`](crate::RawRepr),
 //! [`ToByteArray`](crate::ToByteArray), and endian-conversion impls for
 //! a type implementing [`bitflags::Flags`] (requires the `bitflags` feature).
 //!
 //! The wire format is identical to the underlying `Flags::Bits` integer (little-endian by
 //! default, same as a bare integer field). Decoding uses `Flags::from_bits_retain`, so bits
-//! with no matching flag are preserved rather than rejected — matching `bitflags`'s own
+//! with no matching flag are preserved rather than rejected - matching `bitflags`'s own
 //! philosophy, and staying forward-compatible with wire data written by a version of the
 //! flags type that defines more bits than the reader knows about. Decoding is therefore
 //! infallible.
@@ -22,7 +22,7 @@
 //! Once invoked for a type, that type gets fixed-size-path support
 //! (`ToByteArray`/`FromByteArray`) and, transitively through the crate's existing blanket
 //! impls over `RawRepr`/`TryFromRawRepr`, `io_only` support on every enabled I/O pipeline
-//! (`std`, `tokio`, `embedded-io`, `embedded-io-async`) — no per-pipeline code needed.
+//! (`std`, `tokio`, `embedded-io`, `embedded-io-async`) - no per-pipeline code needed.
 //!
 //! ```
 //! # #[cfg(feature = "bitflags")] {
@@ -46,8 +46,8 @@
 //! [`crate::impl_bitflags!`] alone is enough for every field usage except one: explicit
 //! `#[byteable(little_endian)]` / `#[byteable(big_endian)]` field attributes, which need
 //! [`HasEndianRepr`](crate::HasEndianRepr). That trait is only implemented for multi-byte
-//! integers in this crate — a bare `u8` field can't use those attributes either, since a
-//! single byte has no byte order — so a flags type backed by `u8`/`i8` inherits that same
+//! integers in this crate - a bare `u8` field can't use those attributes either, since a
+//! single byte has no byte order - so a flags type backed by `u8`/`i8` inherits that same
 //! restriction. For a flags type backed by a multi-byte integer (`u16`/`u32`/`u64`/`u128`)
 //! where you do want those attributes, additionally invoke [`crate::impl_bitflags_endian!`].
 
@@ -105,7 +105,7 @@ macro_rules! impl_bitflags {
 /// [`FromEndianRepr`](crate::FromEndianRepr) for one or more types implementing
 /// [`bitflags::Flags`], enabling `#[byteable(little_endian)]` / `#[byteable(big_endian)]` on
 /// fields of that type. Only compiles for flags backed by a multi-byte integer (`u16` and
-/// wider) — see the [module docs](self). Requires [`crate::impl_bitflags!`] to also be invoked for
+/// wider) - see the [module docs](self). Requires [`crate::impl_bitflags!`] to also be invoked for
 /// the same type.
 #[macro_export]
 macro_rules! impl_bitflags_endian {

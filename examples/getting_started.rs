@@ -53,7 +53,7 @@ fn main() -> Result<(), ReadableError> {
     // Byte size is a compile-time constant: 3 × 4 bytes = 12.
     println!("Point3D::BYTE_SIZE = {}", Point3D::BYTE_SIZE);
 
-    // Convert directly to a fixed-size byte array and back — no I/O needed.
+    // Convert directly to a fixed-size byte array and back - no I/O needed.
     let bytes: [u8; Point3D::BYTE_SIZE] = origin.to_byte_array();
     println!("as bytes: {:02x?}", bytes);
     assert_eq!(origin, Point3D::from_byte_array(bytes));
