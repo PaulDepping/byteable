@@ -1,4 +1,4 @@
-//! [`RawRepr`], [`IntoByteArray`], and [`FromByteArray`] implementations for primitive and
+//! [`RawRepr`], [`ToByteArray`], and [`FromByteArray`] implementations for primitive and
 //! standard-library types that have a fixed, well-defined byte representation.
 //!
 //! Covered types: `u8`/`i8` (identity repr), multi-byte integers and floats (little-endian
@@ -19,7 +19,7 @@
 //! standard POSIX `timespec` convention.
 
 use crate::{
-    DecodeError, FromByteArray, FromRawRepr, IntoByteArray, LittleEndian, PlainOldData, RawRepr,
+    DecodeError, FromByteArray, FromRawRepr, ToByteArray, LittleEndian, PlainOldData, RawRepr,
     TryFromByteArray, TryFromRawRepr, impl_byte_array,
 };
 use core::{
@@ -57,10 +57,10 @@ macro_rules! rawrepr_self {
                 }
             }
 
-            impl IntoByteArray for $type {
+            impl ToByteArray for $type {
                 type ByteArray = [u8; ::core::mem::size_of::<$type>()];
 
-                fn into_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray {
                     #[allow(unnecessary_transmutes)]
                     unsafe { ::core::mem::transmute(*self) }
                 }
@@ -103,14 +103,14 @@ impl TryFromRawRepr for bool {
     }
 }
 
-impl IntoByteArray for bool
+impl ToByteArray for bool
 where
     bool: RawRepr,
-    <bool as RawRepr>::Raw: IntoByteArray,
+    <bool as RawRepr>::Raw: ToByteArray,
 {
     type ByteArray = [u8; ::core::mem::size_of::<<bool as RawRepr>::Raw>()];
-    fn into_byte_array(&self) -> Self::ByteArray {
-        <Self as RawRepr>::to_raw(self).into_byte_array()
+    fn to_byte_array(&self) -> Self::ByteArray {
+        <Self as RawRepr>::to_raw(self).to_byte_array()
     }
 }
 
@@ -140,14 +140,14 @@ impl TryFromRawRepr for char {
     }
 }
 
-impl IntoByteArray for char
+impl ToByteArray for char
 where
     char: RawRepr,
-    <char as RawRepr>::Raw: IntoByteArray,
+    <char as RawRepr>::Raw: ToByteArray,
 {
     type ByteArray = [u8; ::core::mem::size_of::<<Self as RawRepr>::Raw>()];
-    fn into_byte_array(&self) -> Self::ByteArray {
-        <Self as RawRepr>::to_raw(self).into_byte_array()
+    fn to_byte_array(&self) -> Self::ByteArray {
+        <Self as RawRepr>::to_raw(self).to_byte_array()
     }
 }
 
@@ -193,14 +193,14 @@ macro_rules! raw_repr_multibyte {
 
             impl_try_from_rawrepr!($type);
 
-            impl IntoByteArray for $type
+            impl ToByteArray for $type
             where
                 $type: RawRepr,
-                <$type as RawRepr>::Raw: IntoByteArray,
+                <$type as RawRepr>::Raw: ToByteArray,
             {
                 type ByteArray = [u8; ::core::mem::size_of::<<Self as RawRepr>::Raw>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    <Self as RawRepr>::to_raw(self).into_byte_array()
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    <Self as RawRepr>::to_raw(self).to_byte_array()
                 }
             }
 
@@ -223,13 +223,13 @@ raw_repr_multibyte!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 macro_rules! impl_byte_array_via_raw {
     ($($ty:ty),+) => {
         $(
-            impl IntoByteArray for $ty
+            impl ToByteArray for $ty
                 where $ty : RawRepr,
-                      <$ty as RawRepr>::Raw : IntoByteArray
+                      <$ty as RawRepr>::Raw : ToByteArray
             {
                 type ByteArray = [u8; ::core::mem::size_of::<<$ty as RawRepr>::Raw>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    <Self as RawRepr>::to_raw(self).into_byte_array()
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    <Self as RawRepr>::to_raw(self).to_byte_array()
                 }
             }
 
@@ -249,13 +249,13 @@ macro_rules! impl_byte_array_via_raw {
 macro_rules! impl_try_byte_array_via_raw {
     ($($ty:ty),+) => {
         $(
-            impl IntoByteArray for $ty
+            impl ToByteArray for $ty
                 where $ty : RawRepr,
-                      <$ty as RawRepr>::Raw : IntoByteArray
+                      <$ty as RawRepr>::Raw : ToByteArray
             {
                 type ByteArray = [u8; ::core::mem::size_of::<<$ty as RawRepr>::Raw>()];
-                fn into_byte_array(&self) -> Self::ByteArray {
-                    <Self as RawRepr>::to_raw(self).into_byte_array()
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    <Self as RawRepr>::to_raw(self).to_byte_array()
                 }
             }
 
@@ -303,10 +303,10 @@ impl<T> TryFromRawRepr for PhantomData<T> {
     }
 }
 
-impl<T> IntoByteArray for PhantomData<T> {
+impl<T> ToByteArray for PhantomData<T> {
     type ByteArray = [u8; 0];
 
-    fn into_byte_array(&self) -> Self::ByteArray {
+    fn to_byte_array(&self) -> Self::ByteArray {
         []
     }
 }
@@ -402,7 +402,7 @@ impl_int_wrapper!(Saturating; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // `Reverse<T>` serializes identically to `T` (transparent passthrough, same as the
 // `Arc`/`Rc`/`Box` treatment in `std_types.rs`). Generic over any `T`, so — unlike
-// `Wrapping`/`Saturating` above — it cannot be given the `IntoByteArray`/`FromByteArray` fixed
+// `Wrapping`/`Saturating` above — it cannot be given the `ToByteArray`/`FromByteArray` fixed
 // byte-array API (that requires a concrete `$ty:ty` per `impl_byte_array_via_raw!` invocation);
 // it still gets `Readable`/`Writable` (and the `tokio`/`eio`/`eio_async` counterparts) for free
 // via the blanket `RawRepr`/`TryFromRawRepr` → `Fixed*` → `*able` chains in each pipeline module.

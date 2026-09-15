@@ -1,4 +1,4 @@
-//! [`RawRepr`], [`IntoByteArray`], and endian-conversion impls for
+//! [`RawRepr`], [`ToByteArray`], and endian-conversion impls for
 //! [`ordered_float::OrderedFloat<T>`] and [`ordered_float::NotNan<T>`]
 //! (requires the `ordered-float` feature).
 //!
@@ -17,7 +17,7 @@
 
 use crate::{
     BigEndian, DecodeError, EndianConvert, FromByteArray, FromEndianRepr, FromRawRepr,
-    HasEndianRepr, IntoByteArray, LittleEndian, PlainOldData, RawRepr, TryFromByteArray,
+    HasEndianRepr, ToByteArray, LittleEndian, PlainOldData, RawRepr, TryFromByteArray,
     TryFromEndianRepr, TryFromRawRepr,
     core_types::{impl_byte_array_via_raw, impl_try_byte_array_via_raw},
 };

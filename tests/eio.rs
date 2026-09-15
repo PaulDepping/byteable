@@ -64,7 +64,7 @@ mod fixed {
     }
 
     // `Reverse<T>` only gets `EioFixedReadable`/`EioFixedWritable` (via the blanket
-    // `RawRepr`/`TryFromRawRepr` chain), not the `IntoByteArray` fixed byte-array API directly.
+    // `RawRepr`/`TryFromRawRepr` chain), not the `ToByteArray` fixed byte-array API directly.
     #[test]
     fn reverse_roundtrip_over_slice() {
         use core::cmp::Reverse;

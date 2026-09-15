@@ -5,7 +5,7 @@
 //! discriminants, and invalid-discriminant error reporting.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, DecodeError, IntoByteArray, PlainOldData, RawRepr, TryFromByteArray};
+use byteable::{Byteable, DecodeError, ToByteArray, PlainOldData, RawRepr, TryFromByteArray};
 
 // ── u8 repr ───────────────────────────────────────────────────────────────────
 
@@ -55,9 +55,9 @@ enum Command {
 
 #[test]
 fn u16_le_enum_byte_layout() {
-    assert_eq!(Command::Start.into_byte_array(), [0x00, 0x10]);
-    assert_eq!(Command::Stop.into_byte_array(), [0x00, 0x20]);
-    assert_eq!(Command::Pause.into_byte_array(), [0x00, 0x30]);
+    assert_eq!(Command::Start.to_byte_array(), [0x00, 0x10]);
+    assert_eq!(Command::Stop.to_byte_array(), [0x00, 0x20]);
+    assert_eq!(Command::Pause.to_byte_array(), [0x00, 0x30]);
 }
 
 #[test]
@@ -92,9 +92,9 @@ enum CommandBE {
 
 #[test]
 fn u16_be_enum_byte_layout() {
-    assert_eq!(CommandBE::Start.into_byte_array(), [0x10, 0x00]);
-    assert_eq!(CommandBE::Stop.into_byte_array(), [0x20, 0x00]);
-    assert_eq!(CommandBE::Pause.into_byte_array(), [0x30, 0x00]);
+    assert_eq!(CommandBE::Start.to_byte_array(), [0x10, 0x00]);
+    assert_eq!(CommandBE::Stop.to_byte_array(), [0x20, 0x00]);
+    assert_eq!(CommandBE::Pause.to_byte_array(), [0x30, 0x00]);
 }
 
 #[test]
@@ -138,7 +138,7 @@ enum ProtocolBE {
 
 #[test]
 fn u32_enum_roundtrip() {
-    let bytes = NetworkProtocol::Tcp.into_byte_array();
+    let bytes = NetworkProtocol::Tcp.to_byte_array();
     assert_eq!(bytes, 6u32.to_le_bytes());
     assert_eq!(
         NetworkProtocol::try_from_byte_array(bytes).unwrap(),
@@ -148,8 +148,8 @@ fn u32_enum_roundtrip() {
 
 #[test]
 fn u32_le_enum_byte_layout() {
-    assert_eq!(ProtocolLE::Tcp.into_byte_array(), [0x78, 0x56, 0x34, 0x12]);
-    assert_eq!(ProtocolLE::Udp.into_byte_array(), [0x00, 0xEF, 0xCD, 0xAB]);
+    assert_eq!(ProtocolLE::Tcp.to_byte_array(), [0x78, 0x56, 0x34, 0x12]);
+    assert_eq!(ProtocolLE::Udp.to_byte_array(), [0x00, 0xEF, 0xCD, 0xAB]);
     assert_eq!(
         ProtocolLE::try_from_byte_array([0x78, 0x56, 0x34, 0x12]).unwrap(),
         ProtocolLE::Tcp
@@ -158,8 +158,8 @@ fn u32_le_enum_byte_layout() {
 
 #[test]
 fn u32_be_enum_byte_layout() {
-    assert_eq!(ProtocolBE::Tcp.into_byte_array(), [0x12, 0x34, 0x56, 0x78]);
-    assert_eq!(ProtocolBE::Udp.into_byte_array(), [0xAB, 0xCD, 0xEF, 0x00]);
+    assert_eq!(ProtocolBE::Tcp.to_byte_array(), [0x12, 0x34, 0x56, 0x78]);
+    assert_eq!(ProtocolBE::Udp.to_byte_array(), [0xAB, 0xCD, 0xEF, 0x00]);
     assert_eq!(
         ProtocolBE::try_from_byte_array([0x12, 0x34, 0x56, 0x78]).unwrap(),
         ProtocolBE::Tcp
@@ -208,7 +208,7 @@ enum LargeBE {
 
 #[test]
 fn u64_enum_roundtrip() {
-    let bytes = LargeValue::Huge.into_byte_array();
+    let bytes = LargeValue::Huge.to_byte_array();
     assert_eq!(bytes, 1_000_000_000_000u64.to_le_bytes());
     assert_eq!(
         LargeValue::try_from_byte_array(bytes).unwrap(),
@@ -219,11 +219,11 @@ fn u64_enum_roundtrip() {
 #[test]
 fn u64_le_enum_byte_layout() {
     assert_eq!(
-        LargeLE::Small.into_byte_array(),
+        LargeLE::Small.to_byte_array(),
         [0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]
     );
     assert_eq!(
-        LargeLE::Large.into_byte_array(),
+        LargeLE::Large.to_byte_array(),
         [0x11, 0x00, 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA]
     );
     assert_eq!(
@@ -235,11 +235,11 @@ fn u64_le_enum_byte_layout() {
 #[test]
 fn u64_be_enum_byte_layout() {
     assert_eq!(
-        LargeBE::Small.into_byte_array(),
+        LargeBE::Small.to_byte_array(),
         [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
     );
     assert_eq!(
-        LargeBE::Large.into_byte_array(),
+        LargeBE::Large.to_byte_array(),
         [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11]
     );
     assert_eq!(
@@ -273,10 +273,10 @@ enum Temperature {
 
 #[test]
 fn i8_enum_roundtrip() {
-    assert_eq!(Temperature::Cold.into_byte_array(), [(-10i8) as u8]);
-    assert_eq!(Temperature::Cool.into_byte_array(), [0]);
-    assert_eq!(Temperature::Warm.into_byte_array(), [10]);
-    assert_eq!(Temperature::Hot.into_byte_array(), [30]);
+    assert_eq!(Temperature::Cold.to_byte_array(), [(-10i8) as u8]);
+    assert_eq!(Temperature::Cool.to_byte_array(), [0]);
+    assert_eq!(Temperature::Warm.to_byte_array(), [10]);
+    assert_eq!(Temperature::Hot.to_byte_array(), [30]);
     assert_eq!(
         Temperature::try_from_byte_array([(-10i8) as u8]).unwrap(),
         Temperature::Cold
@@ -318,10 +318,10 @@ enum SignedBE {
 #[test]
 fn i16_le_enum_byte_layout() {
     assert_eq!(
-        SignedLE::Negative.into_byte_array(),
+        SignedLE::Negative.to_byte_array(),
         (-1000i16).to_le_bytes()
     );
-    assert_eq!(SignedLE::Positive.into_byte_array(), 1000i16.to_le_bytes());
+    assert_eq!(SignedLE::Positive.to_byte_array(), 1000i16.to_le_bytes());
     assert_eq!(
         SignedLE::try_from_byte_array((-1000i16).to_le_bytes()).unwrap(),
         SignedLE::Negative
@@ -331,10 +331,10 @@ fn i16_le_enum_byte_layout() {
 #[test]
 fn i16_be_enum_byte_layout() {
     assert_eq!(
-        SignedBE::Negative.into_byte_array(),
+        SignedBE::Negative.to_byte_array(),
         (-1000i16).to_be_bytes()
     );
-    assert_eq!(SignedBE::Positive.into_byte_array(), 1000i16.to_be_bytes());
+    assert_eq!(SignedBE::Positive.to_byte_array(), 1000i16.to_be_bytes());
     assert_eq!(
         SignedBE::try_from_byte_array((-1000i16).to_be_bytes()).unwrap(),
         SignedBE::Negative
@@ -364,12 +364,12 @@ enum SignedI32BE {
 #[test]
 fn i32_le_enum_roundtrip() {
     assert_eq!(
-        SignedI32LE::Min.into_byte_array(),
+        SignedI32LE::Min.to_byte_array(),
         (-2_000_000i32).to_le_bytes()
     );
-    assert_eq!(SignedI32LE::Zero.into_byte_array(), 0i32.to_le_bytes());
+    assert_eq!(SignedI32LE::Zero.to_byte_array(), 0i32.to_le_bytes());
     assert_eq!(
-        SignedI32LE::Max.into_byte_array(),
+        SignedI32LE::Max.to_byte_array(),
         2_000_000i32.to_le_bytes()
     );
     assert_eq!(
@@ -393,7 +393,7 @@ fn i32_le_enum_invalid_discriminant() {
 #[test]
 fn i32_be_enum_roundtrip() {
     assert_eq!(
-        SignedI32BE::Negative.into_byte_array(),
+        SignedI32BE::Negative.to_byte_array(),
         (-2_000_000i32).to_be_bytes()
     );
     assert_eq!(
@@ -431,7 +431,7 @@ enum SignedI64BE {
 #[test]
 fn i64_le_enum_roundtrip() {
     assert_eq!(
-        SignedI64LE::LargeNeg.into_byte_array(),
+        SignedI64LE::LargeNeg.to_byte_array(),
         (-9_000_000_000_000i64).to_le_bytes()
     );
     assert_eq!(
@@ -455,7 +455,7 @@ fn i64_le_enum_invalid_discriminant() {
 #[test]
 fn i64_be_enum_roundtrip() {
     assert_eq!(
-        SignedI64BE::LargeNeg.into_byte_array(),
+        SignedI64BE::LargeNeg.to_byte_array(),
         (-9_000_000_000_000i64).to_be_bytes()
     );
     assert_eq!(
@@ -483,10 +483,10 @@ enum SparseEnum {
 
 #[test]
 fn sparse_enum_valid_discriminants() {
-    assert_eq!(SparseEnum::First.into_byte_array(), [1]);
-    assert_eq!(SparseEnum::Second.into_byte_array(), [5]);
-    assert_eq!(SparseEnum::Third.into_byte_array(), [10]);
-    assert_eq!(SparseEnum::Fourth.into_byte_array(), [100]);
+    assert_eq!(SparseEnum::First.to_byte_array(), [1]);
+    assert_eq!(SparseEnum::Second.to_byte_array(), [5]);
+    assert_eq!(SparseEnum::Third.to_byte_array(), [10]);
+    assert_eq!(SparseEnum::Fourth.to_byte_array(), [100]);
     assert_eq!(
         SparseEnum::try_from_byte_array([1]).unwrap(),
         SparseEnum::First
@@ -513,8 +513,8 @@ fn endianness_irrelevant_for_u8() {
         A = 1,
         B = 2,
     }
-    assert_eq!(ByteEnum::A.into_byte_array(), [1]);
-    assert_eq!(ByteEnum::B.into_byte_array(), [2]);
+    assert_eq!(ByteEnum::A.to_byte_array(), [1]);
+    assert_eq!(ByteEnum::B.to_byte_array(), [2]);
 }
 
 // ── Auto-repr and auto-discriminant inference ─────────────────────────────────
@@ -529,9 +529,9 @@ enum AutoReprEnum {
 #[test]
 fn auto_repr_and_discriminants() {
     // ≤256 variants → u8; discriminants assigned 0, 1, 2
-    assert_eq!(AutoReprEnum::A.into_byte_array(), [0u8]);
-    assert_eq!(AutoReprEnum::B.into_byte_array(), [1u8]);
-    assert_eq!(AutoReprEnum::C.into_byte_array(), [2u8]);
+    assert_eq!(AutoReprEnum::A.to_byte_array(), [0u8]);
+    assert_eq!(AutoReprEnum::B.to_byte_array(), [1u8]);
+    assert_eq!(AutoReprEnum::C.to_byte_array(), [2u8]);
     assert_eq!(
         AutoReprEnum::try_from_byte_array([0u8]),
         Ok(AutoReprEnum::A)
@@ -553,9 +553,9 @@ enum AutoDiscEnum {
 
 #[test]
 fn auto_discriminants_explicit_repr() {
-    assert_eq!(AutoDiscEnum::X.into_byte_array(), [0u8]);
-    assert_eq!(AutoDiscEnum::Y.into_byte_array(), [1u8]);
-    assert_eq!(AutoDiscEnum::Z.into_byte_array(), [2u8]);
+    assert_eq!(AutoDiscEnum::X.to_byte_array(), [0u8]);
+    assert_eq!(AutoDiscEnum::Y.to_byte_array(), [1u8]);
+    assert_eq!(AutoDiscEnum::Z.to_byte_array(), [2u8]);
     assert_eq!(
         AutoDiscEnum::try_from_byte_array([2u8]),
         Ok(AutoDiscEnum::Z)
@@ -573,10 +573,10 @@ enum MixedDiscEnum {
 
 #[test]
 fn mixed_explicit_and_auto_discriminants() {
-    assert_eq!(MixedDiscEnum::First.into_byte_array(), [10u8]);
-    assert_eq!(MixedDiscEnum::Second.into_byte_array(), [11u8]);
-    assert_eq!(MixedDiscEnum::Third.into_byte_array(), [20u8]);
-    assert_eq!(MixedDiscEnum::Fourth.into_byte_array(), [21u8]);
+    assert_eq!(MixedDiscEnum::First.to_byte_array(), [10u8]);
+    assert_eq!(MixedDiscEnum::Second.to_byte_array(), [11u8]);
+    assert_eq!(MixedDiscEnum::Third.to_byte_array(), [20u8]);
+    assert_eq!(MixedDiscEnum::Fourth.to_byte_array(), [21u8]);
     assert_eq!(
         MixedDiscEnum::try_from_byte_array([10u8]),
         Ok(MixedDiscEnum::First)
@@ -591,7 +591,7 @@ fn mixed_explicit_and_auto_discriminants() {
 // ── u128 / i128 repr ──────────────────────────────────────────────────────────
 
 mod u128_enums {
-    use byteable::{Byteable, DecodeError, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, DecodeError, ToByteArray, TryFromByteArray};
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
     #[repr(u128)]
@@ -605,7 +605,7 @@ mod u128_enums {
     #[test]
     fn u128_enum_roundtrip() {
         for v in [LargeU128::Zero, LargeU128::Mid, LargeU128::Max] {
-            let bytes = v.into_byte_array();
+            let bytes = v.to_byte_array();
             assert_eq!(LargeU128::try_from_byte_array(bytes).unwrap(), v);
         }
     }
@@ -617,8 +617,8 @@ mod u128_enums {
 
     #[test]
     fn u128_enum_byte_layout() {
-        assert_eq!(LargeU128::Zero.into_byte_array(), 0u128.to_le_bytes());
-        assert_eq!(LargeU128::Max.into_byte_array(), u128::MAX.to_le_bytes());
+        assert_eq!(LargeU128::Zero.to_byte_array(), 0u128.to_le_bytes());
+        assert_eq!(LargeU128::Max.to_byte_array(), u128::MAX.to_le_bytes());
     }
 
     #[test]
@@ -645,7 +645,7 @@ mod u128_enums {
     #[test]
     fn i128_enum_roundtrip() {
         for v in [SignedI128::MinVal, SignedI128::Zero, SignedI128::MaxVal] {
-            let bytes = v.into_byte_array();
+            let bytes = v.to_byte_array();
             assert_eq!(SignedI128::try_from_byte_array(bytes).unwrap(), v);
         }
     }
@@ -658,12 +658,12 @@ mod u128_enums {
     #[test]
     fn i128_enum_byte_layout() {
         assert_eq!(
-            SignedI128::MinVal.into_byte_array(),
+            SignedI128::MinVal.to_byte_array(),
             i128::MIN.to_le_bytes()
         );
-        assert_eq!(SignedI128::Zero.into_byte_array(), 0i128.to_le_bytes());
+        assert_eq!(SignedI128::Zero.to_byte_array(), 0i128.to_le_bytes());
         assert_eq!(
-            SignedI128::MaxVal.into_byte_array(),
+            SignedI128::MaxVal.to_byte_array(),
             i128::MAX.to_le_bytes()
         );
     }
@@ -691,11 +691,11 @@ mod u128_enums {
     #[test]
     fn u128_big_endian_enum() {
         assert_eq!(
-            BigEndianU128::Low.into_byte_array(),
+            BigEndianU128::Low.to_byte_array(),
             0x0001u128.to_be_bytes()
         );
         assert_eq!(
-            BigEndianU128::High.into_byte_array(),
+            BigEndianU128::High.to_byte_array(),
             0xFFFFu128.to_be_bytes()
         );
         assert_eq!(
@@ -708,7 +708,7 @@ mod u128_enums {
 // ── non-`Copy` and empty enums ──────────────────────────────────────────────────
 //
 // Every enum above derives `Clone, Copy`, which masked a bug: the unit-enum codegen used
-// to build `to_raw`/`into_byte_array` from `*self as _`, which only compiles when `Self`
+// to build `to_raw`/`to_byte_array` from `*self as _`, which only compiles when `Self`
 // is `Copy` (an enum-to-integer cast still needs to move the operand out of the `&self`
 // reference otherwise) — and, separately, never compiles for an empty enum regardless of
 // `Copy`, since there's no value to move at all.

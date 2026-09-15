@@ -17,7 +17,7 @@
 //! ```
 
 use byteable::io::{ReadValue, ReadableError, WriteValue};
-use byteable::{Byteable, IntoByteArray};
+use byteable::{Byteable, ToByteArray};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;

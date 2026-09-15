@@ -22,9 +22,9 @@ The exact traits depend on the type and attributes used:
 
 | Type / attribute | Generated traits |
 |-----------------|-----------------|
-| Struct (default) | `RawRepr`, `FromRawRepr`/`TryFromRawRepr`, `IntoByteArray`, `FromByteArray`/`TryFromByteArray` |
+| Struct (default) | `RawRepr`, `FromRawRepr`/`TryFromRawRepr`, `ToByteArray`, `FromByteArray`/`TryFromByteArray` |
 | Struct `#[byteable(io_only)]` | `Readable`, `Writable` |
-| Unit enum | `TryFromRawRepr`, `IntoByteArray`, `TryFromByteArray` |
+| Unit enum | `TryFromRawRepr`, `ToByteArray`, `TryFromByteArray` |
 | Field enum | `Readable`, `Writable` |
 
 ## Attributes
@@ -50,7 +50,7 @@ The exact traits depend on the type and attributes used:
 ### Fixed-size struct
 
 ```rust
-use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
 #[derive(Byteable)]
 struct Point {
@@ -59,7 +59,7 @@ struct Point {
 }
 
 let p = Point { x: 1.0, y: 2.0 };
-let bytes: [u8; 8] = p.into_byte_array();
+let bytes: [u8; 8] = p.to_byte_array();
 let p2 = Point::try_from_byte_array(bytes).unwrap();
 assert_eq!(p.x, p2.x);
 ```
@@ -97,14 +97,14 @@ struct Message {
 ### Unit enum
 
 ```rust
-use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
 #[derive(Byteable, Debug, PartialEq)]
 enum Color { Red, Green, Blue }
 
 // Auto-selected repr: u8 (3 variants fits in 1 byte)
 assert_eq!(Color::BYTE_SIZE, 1);
-let bytes = Color::Green.into_byte_array();
+let bytes = Color::Green.to_byte_array();
 assert_eq!(Color::try_from_byte_array(bytes).unwrap(), Color::Green);
 ```
 

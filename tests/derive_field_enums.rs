@@ -1,7 +1,7 @@
 //! Integration tests for enums with fields derived via `#[derive(Byteable)]`.
 //!
 //! Field enums implement `Readable` + `Writable` (stream-based I/O) rather than
-//! `IntoByteArray`/`FromByteArray`, because variant sizes differ.
+//! `ToByteArray`/`FromByteArray`, because variant sizes differ.
 #![cfg(all(feature = "std", feature = "derive"))]
 use byteable::Byteable;
 use byteable::io::{ReadValue, ReadableError, WriteValue};

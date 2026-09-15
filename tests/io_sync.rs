@@ -39,7 +39,7 @@ mod fixed_io {
     }
 
     // `Reverse<T>` only gets `FixedReadable`/`FixedWritable` (via the blanket `RawRepr`/
-    // `TryFromRawRepr` chain), not the `IntoByteArray` fixed byte-array API directly — see
+    // `TryFromRawRepr` chain), not the `ToByteArray` fixed byte-array API directly — see
     // `core_types.rs` — so it's exercised here rather than in `tests/type_impls.rs`.
     #[test]
     fn reverse_roundtrip() {

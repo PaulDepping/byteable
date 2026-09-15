@@ -4,7 +4,7 @@
 //! for fallible conversion from raw representation.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, IntoByteArray, RawRepr, TryFromByteArray, TryFromRawRepr};
+use byteable::{Byteable, ToByteArray, RawRepr, TryFromByteArray, TryFromRawRepr};
 
 /// A simple enum representing status codes
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -67,10 +67,10 @@ fn test_enum_invalid_discriminant_via_raw() {
 #[test]
 fn test_enum_byte_conversion() {
     // Test that enum converts to expected byte representation
-    assert_eq!(Status::Idle.into_byte_array(), [0]);
-    assert_eq!(Status::Running.into_byte_array(), [1]);
-    assert_eq!(Status::Completed.into_byte_array(), [2]);
-    assert_eq!(Status::Failed.into_byte_array(), [3]);
+    assert_eq!(Status::Idle.to_byte_array(), [0]);
+    assert_eq!(Status::Running.to_byte_array(), [1]);
+    assert_eq!(Status::Completed.to_byte_array(), [2]);
+    assert_eq!(Status::Failed.to_byte_array(), [3]);
 
     // Test that valid bytes convert back correctly
     assert_eq!(Status::try_from_byte_array([0]).unwrap(), Status::Idle);
@@ -93,7 +93,7 @@ fn test_message_with_valid_status() {
     };
 
     // Convert to bytes
-    let bytes = msg.into_byte_array();
+    let bytes = msg.to_byte_array();
 
     // Expected: 1 byte for status (Running = 1) + 8 bytes for u64 message (little-endian)
     assert_eq!(bytes.len(), 9);
@@ -120,7 +120,7 @@ fn test_message_with_all_status_variants() {
             message: message_val,
         };
 
-        let bytes = msg.into_byte_array();
+        let bytes = msg.to_byte_array();
         let restored = Message::try_from_byte_array(bytes).unwrap();
         assert_eq!(restored, msg);
     }
@@ -146,7 +146,7 @@ fn test_message_byte_layout() {
         message: 0x0102030405060708,
     };
 
-    let bytes = msg.into_byte_array();
+    let bytes = msg.to_byte_array();
 
     // First byte should be the status discriminant
     assert_eq!(bytes[0], 2); // Status::Completed = 2
@@ -185,7 +185,7 @@ fn test_message_roundtrip_all_variants() {
     ];
 
     for msg in &messages {
-        let bytes = msg.into_byte_array();
+        let bytes = msg.to_byte_array();
         let restored = Message::try_from_byte_array(bytes).unwrap();
         assert_eq!(&restored, msg);
     }
@@ -218,7 +218,7 @@ fn test_message_invalid_discriminants() {
 // =============================================================================
 
 mod two_try_transparent_tests {
-    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
     #[repr(u8)]
@@ -252,7 +252,7 @@ mod two_try_transparent_tests {
             code: CodeB::Beta,
             value: 99,
         };
-        let bytes = d.into_byte_array();
+        let bytes = d.to_byte_array();
         // layout: 1 (StatusA) + 2 (CodeB LE) + 1 (u8) = 4 bytes
         assert_eq!(bytes.len(), 4);
         let restored = Dual::try_from_byte_array(bytes).unwrap();
@@ -273,7 +273,7 @@ mod two_try_transparent_tests {
                 code,
                 value,
             };
-            let bytes = d.into_byte_array();
+            let bytes = d.to_byte_array();
             let restored = Dual::try_from_byte_array(bytes).unwrap();
             assert_eq!(restored, d);
         }
@@ -302,7 +302,7 @@ mod two_try_transparent_tests {
             code: CodeB::Alpha,
             value: 42,
         };
-        let bytes = d.into_byte_array();
+        let bytes = d.to_byte_array();
         assert_eq!(bytes[0], 1); // StatusA::Err
         assert_eq!(bytes[1], 0x00); // CodeB::Alpha = 0x0100 LE low byte
         assert_eq!(bytes[2], 0x01); // CodeB::Alpha = 0x0100 LE high byte
@@ -311,7 +311,7 @@ mod two_try_transparent_tests {
 }
 
 mod command_packet_tests {
-    use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+    use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
     /// Test enum with u16 representation
     #[derive(Byteable, Debug, Clone, Copy, PartialEq)]
@@ -339,7 +339,7 @@ mod command_packet_tests {
             payload: 0xABCD1234,
         };
 
-        let bytes = packet.into_byte_array();
+        let bytes = packet.to_byte_array();
 
         // Expected: 2 bytes for Command (u16, little-endian) + 4 bytes for u32 payload
         assert_eq!(bytes.len(), 6);
@@ -381,7 +381,7 @@ mod command_packet_tests {
         ];
 
         for packet in &packets {
-            let bytes = packet.into_byte_array();
+            let bytes = packet.to_byte_array();
             let restored = CommandPacket::try_from_byte_array(bytes).unwrap();
             assert_eq!(&restored, packet);
         }

@@ -6,7 +6,7 @@
 // ── Named structs with field endianness ───────────────────────────────────────
 
 mod named_structs {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     struct TestStruct {
@@ -34,20 +34,20 @@ mod named_structs {
 
     #[test]
     fn u8_field_layout() {
-        let bytes = make_test().into_byte_array();
+        let bytes = make_test().to_byte_array();
         assert_eq!(bytes[0], 42);
     }
 
     #[test]
     fn le_u16_field_layout() {
-        let bytes = make_test().into_byte_array();
+        let bytes = make_test().to_byte_array();
         assert_eq!(bytes[1], 0x34);
         assert_eq!(bytes[2], 0x12);
     }
 
     #[test]
     fn be_u64_field_layout() {
-        let bytes = make_test().into_byte_array();
+        let bytes = make_test().to_byte_array();
         assert_eq!(
             &bytes[3..11],
             &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
@@ -56,7 +56,7 @@ mod named_structs {
 
     #[test]
     fn le_f64_field_layout() {
-        let bytes = make_test().into_byte_array();
+        let bytes = make_test().to_byte_array();
         let d_bytes: [u8; 8] = bytes[11..19].try_into().unwrap();
         assert_eq!(f64::from_le_bytes(d_bytes), 1234.5678);
     }
@@ -64,7 +64,7 @@ mod named_structs {
     #[test]
     fn roundtrip() {
         let original = make_test();
-        let bytes = original.into_byte_array();
+        let bytes = original.to_byte_array();
         let restored = TestStruct::from_byte_array(bytes);
         assert_eq!(original.a, restored.a);
         assert_eq!(original.b, restored.b);
@@ -76,7 +76,7 @@ mod named_structs {
 // ── Tuple structs ─────────────────────────────────────────────────────────────
 
 mod tuple_structs {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
     struct SimpleTuple(u8, u16, u32);
@@ -97,7 +97,7 @@ mod tuple_structs {
     fn simple_tuple_roundtrip() {
         let tuple = SimpleTuple(42, 0x1234, 0x12345678);
         // u8(1) + u16(2) + u32(4) = 7 bytes
-        let bytes = tuple.into_byte_array();
+        let bytes = tuple.to_byte_array();
         assert_eq!(bytes.len(), 7);
         assert_eq!(SimpleTuple::from_byte_array(bytes), tuple);
     }
@@ -105,7 +105,7 @@ mod tuple_structs {
     #[test]
     fn endian_tuple_byte_layout() {
         let tuple = EndianTuple(42, 0x1234, 0x12345678, 0x0102030405060708);
-        let bytes = tuple.into_byte_array();
+        let bytes = tuple.to_byte_array();
         // u8(1) + u16(2) + u32(4) + u64(8) = 15 bytes
         assert_eq!(bytes.len(), 15);
         assert_eq!(bytes[0], 42);
@@ -125,7 +125,7 @@ mod tuple_structs {
     fn nested_tuple_transparent_field() {
         let inner = InnerTuple(10, 0x1234);
         let outer = OuterTuple(inner, 42, 0x12345678);
-        let bytes = outer.into_byte_array();
+        let bytes = outer.to_byte_array();
         // InnerTuple(3) + u8(1) + u32(4) = 8 bytes
         assert_eq!(bytes.len(), 8);
         // transparent InnerTuple at bytes 0-2
@@ -141,7 +141,7 @@ mod tuple_structs {
     #[test]
     fn array_tuple_byte_layout() {
         let tuple = ArrayTuple(42, [0xDE, 0xAD, 0xBE, 0xEF], 0x1234);
-        let bytes = tuple.into_byte_array();
+        let bytes = tuple.to_byte_array();
         // u8(1) + [u8;4](4) + u16(2) = 7 bytes
         assert_eq!(bytes.len(), 7);
         assert_eq!(bytes[0], 42);
@@ -154,7 +154,7 @@ mod tuple_structs {
     fn multiple_roundtrips() {
         let original = EndianTuple(100, 0xABCD, 0xDEADBEEF, 0x0123456789ABCDEF);
         for _ in 0..5 {
-            let bytes = original.into_byte_array();
+            let bytes = original.to_byte_array();
             assert_eq!(EndianTuple::from_byte_array(bytes), original);
         }
     }
@@ -169,14 +169,14 @@ mod tuple_structs {
 // ── Unit structs ─────────────────────────────────────────────────────────────
 
 mod unit_structs {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[test]
     fn byteable_derive() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
         struct Marker;
 
-        let bytes = Marker.into_byte_array();
+        let bytes = Marker.to_byte_array();
         assert_eq!(bytes, [0u8; 0]);
         assert_eq!(Marker::from_byte_array([]), Marker);
     }
@@ -188,8 +188,8 @@ mod unit_structs {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
         struct TypeB;
 
-        assert!(TypeA.into_byte_array().is_empty());
-        assert!(TypeB.into_byte_array().is_empty());
+        assert!(TypeA.to_byte_array().is_empty());
+        assert!(TypeB.to_byte_array().is_empty());
         assert_eq!(TypeA::from_byte_array([]), TypeA);
         assert_eq!(TypeB::from_byte_array([]), TypeB);
     }
@@ -199,8 +199,8 @@ mod unit_structs {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Byteable)]
         struct Token;
 
-        fn serialize<T: IntoByteArray>(value: T) -> T::ByteArray {
-            value.into_byte_array()
+        fn serialize<T: ToByteArray>(value: T) -> T::ByteArray {
+            value.to_byte_array()
         }
         fn deserialize<T: FromByteArray>(bytes: T::ByteArray) -> T {
             T::from_byte_array(bytes)
@@ -220,7 +220,7 @@ mod unit_structs {
 
         assert_eq!(size_of::<Empty>(), 0);
         assert_eq!(
-            size_of::<<Empty as byteable::IntoByteArray>::ByteArray>(),
+            size_of::<<Empty as byteable::ToByteArray>::ByteArray>(),
             0
         );
     }
@@ -229,7 +229,7 @@ mod unit_structs {
 // ── Visibility modifiers ──────────────────────────────────────────────────────
 
 mod visibility {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     struct PrivateStruct {
@@ -276,7 +276,7 @@ mod visibility {
     #[test]
     fn private_struct() {
         let s = PrivateStruct { a: 42, b: 0x1234 };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = PrivateStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
         assert_eq!(s.b, restored.b);
@@ -288,7 +288,7 @@ mod visibility {
             a: 100,
             b: 0x12345678,
         };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = PublicStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
         assert_eq!(s.b, restored.b);
@@ -300,7 +300,7 @@ mod visibility {
             a: 200,
             b: 0x0102030405060708,
         };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = CrateStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
         assert_eq!(s.b, restored.b);
@@ -309,7 +309,7 @@ mod visibility {
     #[test]
     fn super_struct() {
         let s = inner::SuperStruct { a: 50, b: 0xABCD };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = inner::SuperStruct::from_byte_array(bytes);
         assert_eq!(s.a, restored.a);
         assert_eq!(s.b, restored.b);
@@ -318,7 +318,7 @@ mod visibility {
     #[test]
     fn public_tuple_struct() {
         let s = PublicTupleStruct(10, 0x5678, 0xDEADBEEF);
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = PublicTupleStruct::from_byte_array(bytes);
         assert_eq!(s.0, restored.0);
         assert_eq!(s.1, restored.1);
@@ -328,7 +328,7 @@ mod visibility {
     #[test]
     fn private_tuple_struct() {
         let s = PrivateTupleStruct(255, 0xFFFF);
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         let restored = PrivateTupleStruct::from_byte_array(bytes);
         assert_eq!(s.0, restored.0);
         assert_eq!(s.1, restored.1);
@@ -340,7 +340,7 @@ mod visibility {
             a: 42,
             b: 0x01020304,
         };
-        let bytes = s.into_byte_array();
+        let bytes = s.to_byte_array();
         assert_eq!(bytes[0], 42);
         // big-endian u32
         assert_eq!(&bytes[1..5], &[0x01, 0x02, 0x03, 0x04]);
@@ -350,7 +350,7 @@ mod visibility {
 // ── Transparent field attribute ───────────────────────────────────────────────
 
 mod transparent {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     struct MemberStruct {
@@ -380,7 +380,7 @@ mod transparent {
     #[test]
     fn member_struct_byte_layout() {
         let m = MemberStruct { a: 10, b: 0x1234 };
-        let bytes = m.into_byte_array();
+        let bytes = m.to_byte_array();
         assert_eq!(bytes[0], 10);
         assert_eq!(bytes[1], 0x34); // LE low byte
         assert_eq!(bytes[2], 0x12);
@@ -402,8 +402,8 @@ mod transparent {
             c: 0,
             d: 0.0,
         };
-        let bytes = outer.into_byte_array();
-        let member_bytes = member.into_byte_array();
+        let bytes = outer.to_byte_array();
+        let member_bytes = member.to_byte_array();
         assert_eq!(&bytes[0..3], member_bytes.as_ref());
     }
 
@@ -416,7 +416,7 @@ mod transparent {
             c: 0x0102030405060708,
             d: 1234.5678,
         };
-        let bytes = outer.into_byte_array();
+        let bytes = outer.to_byte_array();
         assert_eq!(bytes[3], 42); // a at byte 3
         assert_eq!(&bytes[4..6], &[0x78, 0x56]); // LE u16
         assert_eq!(
@@ -436,7 +436,7 @@ mod transparent {
             c: 0x0102030405060708,
             d: 1234.5678,
         };
-        let bytes = original.into_byte_array();
+        let bytes = original.to_byte_array();
         let restored = TestStruct::from_byte_array(bytes);
         assert_eq!(original.member.a, restored.member.a);
         assert_eq!(original.member.b, restored.member.b);
@@ -450,7 +450,7 @@ mod transparent {
 // ── Compile-time safety validation (PlainOldData) ────────────────────────────
 
 mod safety {
-    use byteable::{Byteable, FromByteArray, IntoByteArray};
+    use byteable::{Byteable, FromByteArray, ToByteArray};
 
     #[derive(Clone, Copy, Byteable)]
     pub struct SafePacket {
@@ -487,7 +487,7 @@ mod safety {
             checksum: 0x12345678,
             data: [1, 2, 3, 4],
         };
-        let bytes = packet.into_byte_array();
+        let bytes = packet.to_byte_array();
         let restored = SafePacket::from_byte_array(bytes);
         assert_eq!(packet.id, restored.id);
         assert_eq!(packet.length, restored.length);
@@ -502,7 +502,7 @@ mod safety {
             top_left: Point { x: 0, y: 0 },
             bottom_right: Point { x: 100, y: 200 },
         };
-        let bytes = shape.into_byte_array();
+        let bytes = shape.to_byte_array();
         let restored = Shape::from_byte_array(bytes);
         assert_eq!(shape.id, restored.id);
         assert_eq!(shape.top_left.x, restored.top_left.x);

@@ -11,7 +11,7 @@ Byte-level serialization and deserialization for Rust types.
 `byteable` gives you two paths for working with binary data:
 
 - **Fixed-size path** — For types whose byte representation is known at compile time. Derive
-  `Byteable` and get zero-copy `into_byte_array()` / `from_byte_array()` with a compile-time
+  `Byteable` and get zero-copy `to_byte_array()` / `from_byte_array()` with a compile-time
   `BYTE_SIZE` constant. Under the hood this uses `#[repr(C, packed)]` raw structs and
   `transmute`, so no allocation or iteration is involved.
 
@@ -65,7 +65,7 @@ byteable = { version = "0.34", features = ["all"] }
 ### Fixed-size struct (zero-copy)
 
 ```rust
-use byteable::{Byteable, IntoByteArray, TryFromByteArray};
+use byteable::{Byteable, ToByteArray, TryFromByteArray};
 
 #[derive(Byteable)]
 struct Point3D {
@@ -77,7 +77,7 @@ struct Point3D {
 let p = Point3D { x: 1.0, y: 2.0, z: 3.0 };
 
 // Serialize to a fixed-size byte array — no allocation
-let bytes: [u8; 12] = p.into_byte_array();
+let bytes: [u8; 12] = p.to_byte_array();
 
 // Deserialize back
 let p2 = Point3D::try_from_byte_array(bytes).unwrap();
@@ -203,7 +203,7 @@ trait would conflict with this crate's other impls. Decoding preserves unknown b
 (`from_bits_retain`) rather than rejecting them.
 
 ```rust
-use byteable::{Byteable, IntoByteArray, FromByteArray};
+use byteable::{Byteable, ToByteArray, FromByteArray};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,11 +379,11 @@ impls for all of them automatically.
 
 | Trait | Role |
 |-------|------|
-| [`IntoByteArray`] | Serialize to a `[u8; N]`; provides the compile-time `BYTE_SIZE` constant |
+| [`ToByteArray`] | Serialize to a `[u8; N]`; provides the compile-time `BYTE_SIZE` constant |
 | [`FromByteArray`] | Infallible deserialization from a `[u8; N]` |
 | [`TryFromByteArray`] | Fallible deserialization from a `[u8; N]` (returns [`DecodeError`]) |
 
-[`IntoByteArray`]: https://docs.rs/byteable/latest/byteable/trait.IntoByteArray.html
+[`ToByteArray`]: https://docs.rs/byteable/latest/byteable/trait.ToByteArray.html
 [`FromByteArray`]: https://docs.rs/byteable/latest/byteable/trait.FromByteArray.html
 [`TryFromByteArray`]: https://docs.rs/byteable/latest/byteable/trait.TryFromByteArray.html
 
@@ -535,7 +535,7 @@ These traits underpin per-field endian control in the derive macro and the
 | Trait | Role |
 |-------|------|
 | [`PlainOldData`] | Unsafe marker: no padding, all bit patterns valid — enables `transmute`-based I/O |
-| [`ByteArray`] | Unsafe marker for `[u8; N]` used as the `IntoByteArray::ByteArray` associated type |
+| [`ByteArray`] | Unsafe marker for `[u8; N]` used as the `ToByteArray::ByteArray` associated type |
 
 [`PlainOldData`]: https://docs.rs/byteable/latest/byteable/trait.PlainOldData.html
 [`ByteArray`]: https://docs.rs/byteable/latest/byteable/trait.ByteArray.html

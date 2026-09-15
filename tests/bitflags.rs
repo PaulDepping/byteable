@@ -2,7 +2,7 @@
 #![cfg(feature = "bitflags")]
 
 use bitflags::bitflags;
-use byteable::{Byteable, FromByteArray, IntoByteArray};
+use byteable::{Byteable, FromByteArray, ToByteArray};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,7 @@ byteable::impl_bitflags_endian!(WideFlags);
 #[test]
 fn u8_backed_flags_roundtrip() {
     let val = Perms::READ | Perms::EXEC;
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = Perms::from_byte_array(bytes);
     assert_eq!(val, restored);
 }
@@ -35,7 +35,7 @@ fn u8_backed_flags_roundtrip() {
 #[test]
 fn u32_backed_flags_roundtrip_is_little_endian() {
     let val = WideFlags::B;
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     assert_eq!(bytes, [0x02, 0x00, 0x00, 0x00]);
     let restored = WideFlags::from_byte_array(bytes);
     assert_eq!(val, restored);
@@ -63,7 +63,7 @@ fn derived_struct_with_bitflags_field_roundtrip() {
         owner: WideFlags::A,
         group: Perms::WRITE,
     };
-    let bytes = val.into_byte_array();
+    let bytes = val.to_byte_array();
     let restored = FilePerms::from_byte_array(bytes);
     assert_eq!(val, restored);
 }
