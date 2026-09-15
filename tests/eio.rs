@@ -62,6 +62,23 @@ mod fixed {
         let err = r.read_fixed::<u32>().unwrap_err();
         assert!(matches!(err, EioReadableError::UnexpectedEof));
     }
+
+    // `Reverse<T>` only gets `EioFixedReadable`/`EioFixedWritable` (via the blanket
+    // `RawRepr`/`TryFromRawRepr` chain), not the `IntoByteArray` fixed byte-array API directly.
+    #[test]
+    fn reverse_roundtrip_over_slice() {
+        use core::cmp::Reverse;
+
+        let original = Reverse(0xDEADBEEFu32);
+        let mut buf = [0u8; 4];
+        {
+            let mut w: &mut [u8] = &mut buf;
+            w.write_fixed(&original).unwrap();
+        }
+        let mut r: &[u8] = &buf;
+        let restored: Reverse<u32> = r.read_fixed().unwrap();
+        assert_eq!(restored, original);
+    }
 }
 
 mod dynamic_over_fixed {
@@ -90,6 +107,8 @@ mod dynamic_over_fixed {
 
 mod option_result {
     use byteable::eio::{EioReadValue, EioWriteValue};
+    use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+    use core::ops::Bound;
 
     #[test]
     fn option_some_roundtrip() {
@@ -128,6 +147,63 @@ mod option_result {
         let mut r: &[u8] = &buf;
         let restored: Result<u8, u8> = r.read_value().unwrap();
         assert_eq!(restored, val);
+    }
+
+    #[test]
+    fn ip_addr_roundtrip() {
+        for val in [
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+        ] {
+            let mut buf = [0u8; 17];
+            {
+                let mut w: &mut [u8] = &mut buf;
+                w.write_value(&val).unwrap();
+            }
+            let mut r: &[u8] = &buf;
+            let restored: IpAddr = r.read_value().unwrap();
+            assert_eq!(restored, val);
+        }
+    }
+
+    #[test]
+    fn socket_addr_roundtrip() {
+        for val in [
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 0, 1), 8080)),
+            SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+                443,
+                0,
+                0,
+            )),
+        ] {
+            let mut buf = [0u8; 27];
+            {
+                let mut w: &mut [u8] = &mut buf;
+                w.write_value(&val).unwrap();
+            }
+            let mut r: &[u8] = &buf;
+            let restored: SocketAddr = r.read_value().unwrap();
+            assert_eq!(restored, val);
+        }
+    }
+
+    #[test]
+    fn bound_roundtrip() {
+        for val in [
+            Bound::Included(7u32),
+            Bound::Excluded(9u32),
+            Bound::Unbounded,
+        ] {
+            let mut buf = [0u8; 5];
+            {
+                let mut w: &mut [u8] = &mut buf;
+                w.write_value(&val).unwrap();
+            }
+            let mut r: &[u8] = &buf;
+            let restored: Bound<u32> = r.read_value().unwrap();
+            assert_eq!(restored, val);
+        }
     }
 }
 

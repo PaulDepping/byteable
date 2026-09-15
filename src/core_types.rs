@@ -4,7 +4,9 @@
 //! Covered types: `u8`/`i8` (identity repr), multi-byte integers and floats (little-endian
 //! by default), `bool` (1 byte, 0 or 1), `char` (4-byte little-endian Unicode scalar),
 //! [`PhantomData<T>`](core::marker::PhantomData) (0 bytes),
-//! [`NonZero<T>`](core::num::NonZero), network address types
+//! [`NonZero<T>`](core::num::NonZero), [`Wrapping<T>`](core::num::Wrapping) /
+//! [`Saturating<T>`](core::num::Saturating) (same as `T`), [`Ordering`](core::cmp::Ordering)
+//! (1 byte, 0/1/2), [`Reverse<T>`](core::cmp::Reverse) (same as `T`), network address types
 //! (`Ipv4Addr`, `Ipv6Addr`, `SocketAddrV4`, `SocketAddrV6`), all range variants, and
 //! [`Duration`] /
 //! [`SystemTime`] (`std` feature only).
@@ -21,10 +23,11 @@ use crate::{
     TryFromByteArray, TryFromRawRepr, impl_byte_array,
 };
 use core::{
+    cmp::{Ordering, Reverse},
     marker::PhantomData,
     net::Ipv4Addr,
     net::{Ipv6Addr, SocketAddrV4, SocketAddrV6},
-    num::NonZero,
+    num::{NonZero, Saturating, Wrapping},
     ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
     time::Duration,
 };
@@ -337,6 +340,91 @@ macro_rules! impl_nonzero {
 }
 
 impl_nonzero!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+
+// Wire format: 1 byte (0 = Less, 1 = Equal, 2 = Greater).
+impl RawRepr for Ordering {
+    type Raw = u8;
+
+    fn to_raw(&self) -> Self::Raw {
+        match self {
+            Ordering::Less => 0,
+            Ordering::Equal => 1,
+            Ordering::Greater => 2,
+        }
+    }
+}
+
+impl TryFromRawRepr for Ordering {
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+        match raw {
+            0 => Ok(Ordering::Less),
+            1 => Ok(Ordering::Equal),
+            2 => Ok(Ordering::Greater),
+            _ => Err(DecodeError::InvalidDiscriminant {
+                raw: raw as u64,
+                type_name: "Ordering",
+            }),
+        }
+    }
+}
+
+impl_try_byte_array_via_raw!(Ordering);
+
+// `Wrapping<T>` / `Saturating<T>` serialize identically to `T` — same raw repr, no invalid
+// states, so decoding is infallible (mirrors `TryFromRawRepr`'s trivial wrapping for `u8..i128`
+// themselves, not `NonZero<T>`'s validating one).
+macro_rules! impl_int_wrapper {
+    ($wrapper:ident; $($type:ty),+) => {
+        $(
+            impl RawRepr for $wrapper<$type> {
+                type Raw = <$type as RawRepr>::Raw;
+
+                fn to_raw(&self) -> Self::Raw {
+                    self.0.to_raw()
+                }
+            }
+
+            impl FromRawRepr for $wrapper<$type> {
+                fn from_raw(raw: Self::Raw) -> Self {
+                    $wrapper(<$type>::from_raw(raw))
+                }
+            }
+
+            impl_try_from_rawrepr!($wrapper<$type>);
+
+            impl_byte_array_via_raw!($wrapper<$type>);
+        )+
+    };
+}
+
+impl_int_wrapper!(Wrapping; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+impl_int_wrapper!(Saturating; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+
+// `Reverse<T>` serializes identically to `T` (transparent passthrough, same as the
+// `Arc`/`Rc`/`Box` treatment in `std_types.rs`). Generic over any `T`, so — unlike
+// `Wrapping`/`Saturating` above — it cannot be given the `IntoByteArray`/`FromByteArray` fixed
+// byte-array API (that requires a concrete `$ty:ty` per `impl_byte_array_via_raw!` invocation);
+// it still gets `Readable`/`Writable` (and the `tokio`/`eio`/`eio_async` counterparts) for free
+// via the blanket `RawRepr`/`TryFromRawRepr` → `Fixed*` → `*able` chains in each pipeline module.
+impl<T: RawRepr> RawRepr for Reverse<T> {
+    type Raw = T::Raw;
+
+    fn to_raw(&self) -> Self::Raw {
+        self.0.to_raw()
+    }
+}
+
+impl<T: FromRawRepr> FromRawRepr for Reverse<T> {
+    fn from_raw(raw: Self::Raw) -> Self {
+        Reverse(T::from_raw(raw))
+    }
+}
+
+impl<T: TryFromRawRepr> TryFromRawRepr for Reverse<T> {
+    fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
+        Ok(Reverse(T::try_from_raw(raw)?))
+    }
+}
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]

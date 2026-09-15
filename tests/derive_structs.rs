@@ -22,7 +22,7 @@ mod named_structs {
             a: 42,
             b: 0x1234,
             c: 0x0102030405060708,
-            d: 3.14159,
+            d: 1234.5678,
         }
     }
 
@@ -58,7 +58,7 @@ mod named_structs {
     fn le_f64_field_layout() {
         let bytes = make_test().into_byte_array();
         let d_bytes: [u8; 8] = bytes[11..19].try_into().unwrap();
-        assert_eq!(f64::from_le_bytes(d_bytes), 3.14159);
+        assert_eq!(f64::from_le_bytes(d_bytes), 1234.5678);
     }
 
     #[test]
@@ -414,7 +414,7 @@ mod transparent {
             a: 42,
             b: 0x5678,
             c: 0x0102030405060708,
-            d: 3.14159,
+            d: 1234.5678,
         };
         let bytes = outer.into_byte_array();
         assert_eq!(bytes[3], 42); // a at byte 3
@@ -424,7 +424,7 @@ mod transparent {
             &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
         ); // BE u64
         let d_bytes: [u8; 8] = bytes[14..22].try_into().unwrap();
-        assert_eq!(f64::from_le_bytes(d_bytes), 3.14159);
+        assert_eq!(f64::from_le_bytes(d_bytes), 1234.5678);
     }
 
     #[test]
@@ -434,7 +434,7 @@ mod transparent {
             a: 42,
             b: 0x5678,
             c: 0x0102030405060708,
-            d: 3.14159,
+            d: 1234.5678,
         };
         let bytes = original.into_byte_array();
         let restored = TestStruct::from_byte_array(bytes);

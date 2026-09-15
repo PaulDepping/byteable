@@ -51,7 +51,7 @@ fn ordered_float_f32_byte_size() {
 
 #[test]
 fn ordered_float_f64_roundtrip() {
-    let val = OrderedFloat(2.718281828f64);
+    let val = OrderedFloat(1234.5678f64);
     let bytes = val.into_byte_array();
     let restored = OrderedFloat::<f64>::from_byte_array(bytes);
     assert_eq!(val, restored);
@@ -74,7 +74,7 @@ fn ordered_float_f64_byte_size() {
 
 #[test]
 fn not_nan_f32_roundtrip() {
-    let val = NotNan::new(3.14f32).unwrap();
+    let val = NotNan::new(1234.5678f32).unwrap();
     let bytes = val.into_byte_array();
     let restored = NotNan::<f32>::try_from_byte_array(bytes).unwrap();
     assert_eq!(val, restored);
@@ -96,7 +96,7 @@ fn not_nan_f32_byte_size() {
 
 #[test]
 fn not_nan_f64_roundtrip() {
-    let val = NotNan::new(2.718281828f64).unwrap();
+    let val = NotNan::new(1234.5678f64).unwrap();
     let bytes = val.into_byte_array();
     let restored = NotNan::<f64>::try_from_byte_array(bytes).unwrap();
     assert_eq!(val, restored);

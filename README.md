@@ -344,8 +344,12 @@ this crate's; enable their `defmt` feature directly alongside this one if you ne
 | `bool` | 1 byte: `0` = false, `1` = true |
 | `char` | 4 bytes little-endian `u32` (Unicode scalar value) |
 | `NonZero<T>` | same as `T`; decoding rejects zero |
+| `Wrapping<T>` / `Saturating<T>` | same as `T` |
+| `Ordering` | 1 byte: `0` = Less, `1` = Equal, `2` = Greater |
+| `Reverse<T>` | same as `T` |
 | `Option<T>` | 1-byte tag (`0` = None, `1` = Some) + optional value |
 | `Result<V, E>` | 1-byte tag (`0` = Ok, `1` = Err) + payload |
+| `Bound<T>` | 1-byte tag (`0` = Included, `1` = Excluded, `2` = Unbounded) + value for Included/Excluded |
 | `String` / `str` | `u64` byte length + UTF-8 bytes |
 | `Vec<T>` and other sequences | `u64` element count + elements |
 | `HashMap<K,V>` / `BTreeMap<K,V>` | `u64` entry count + alternating key/value pairs |
@@ -357,6 +361,8 @@ this crate's; enable their `defmt` feature directly alongside this one if you ne
 | `Ipv6Addr` | 16 bytes (network octet order) |
 | `SocketAddrV4` | `Ipv4Addr` + `u16` port (LE) |
 | `SocketAddrV6` | `Ipv6Addr` + `u16` port (LE) + `u32` flowinfo (LE) + `u32` scope_id (LE) |
+| `IpAddr` | 1-byte tag (`0` = V4, `1` = V6) + `Ipv4Addr` or `Ipv6Addr` |
+| `SocketAddr` | 1-byte tag (`0` = V4, `1` = V6) + `SocketAddrV4` or `SocketAddrV6` |
 | `Arc<T>` / `Rc<T>` / `Box<T>` | transparent passthrough to inner type |
 | `[T; N]` | N consecutive encodings of `T` |
 | `Range<T>` / `RangeInclusive<T>` | start + end |
