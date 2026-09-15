@@ -211,7 +211,7 @@ impl EioAsyncReadable for String {
             let len: u64 = reader.read_fixed().await?;
             let len: usize = len.try_into().expect("could not convert u64 to usize");
             let mut bytes = alloc::vec![0u8; len];
-            reader.read_exact(&mut bytes).await?;
+            reader.eio_read_exact(&mut bytes).await?;
             String::from_utf8(bytes)
                 .map_err(|_| EioReadableError::DecodeError(DecodeError::InvalidUtf8))
         }
