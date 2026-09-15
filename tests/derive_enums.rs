@@ -704,3 +704,44 @@ mod u128_enums {
         );
     }
 }
+
+// ── non-`Copy` and empty enums ──────────────────────────────────────────────────
+//
+// Every enum above derives `Clone, Copy`, which masked a bug: the unit-enum codegen used
+// to build `to_raw`/`into_byte_array` from `*self as _`, which only compiles when `Self`
+// is `Copy` (an enum-to-integer cast still needs to move the operand out of the `&self`
+// reference otherwise) — and, separately, never compiles for an empty enum regardless of
+// `Copy`, since there's no value to move at all.
+
+#[derive(Byteable, Debug, PartialEq)]
+enum NonCopyStatus {
+    Idle,
+    Running,
+    Done,
+}
+
+#[test]
+fn non_copy_unit_enum_roundtrip() {
+    for (variant, byte) in [
+        (NonCopyStatus::Idle, 0u8),
+        (NonCopyStatus::Running, 1),
+        (NonCopyStatus::Done, 2),
+    ] {
+        assert_eq!(variant.to_raw(), byte);
+        assert_eq!(NonCopyStatus::try_from_byte_array([byte]).unwrap(), variant);
+    }
+}
+
+#[derive(Debug, Byteable)]
+enum EmptyEnum {}
+
+#[test]
+fn empty_enum_byte_size() {
+    assert_eq!(EmptyEnum::BYTE_SIZE, 1);
+}
+
+#[test]
+fn empty_enum_every_discriminant_is_invalid() {
+    let err = EmptyEnum::try_from_byte_array([0]).unwrap_err();
+    assert!(matches!(err, DecodeError::InvalidDiscriminant { .. }));
+}
