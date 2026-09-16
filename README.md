@@ -195,6 +195,70 @@ struct NetworkHeader {
 }
 ```
 
+### Controlling wire layout: `order`, `tag`, `discriminant`
+
+Three attributes let you pin the exact wire layout independently of how a type is declared in
+Rust source - useful when the wire format is a fixed protocol spec and declaration order/Rust's
+own discriminants aren't allowed to drift with refactors.
+
+**`#[byteable(order = N)]`** (struct fields) pins a field's wire position to `N`, independently
+of its declaration order in the struct. It must annotate either every field or none, and the
+`N` values must form a dense `0..field_count` permutation - it only changes which byte range
+each field occupies, adding zero bytes to the wire format.
+
+```rust
+use byteable::Byteable;
+
+#[derive(Byteable)]
+struct Header {
+    #[byteable(order = 1)]
+    flags: u8,
+    #[byteable(order = 0)]   // encoded first on the wire, despite being declared second
+    version: u8,
+}
+```
+
+**`#[byteable(tag = N)]`** (enum variants) pins a variant's wire discriminant to the integer
+literal `N` (which may be negative), independently of declaration order and of Rust's own
+`= N` discriminant syntax. Variants without an explicit `tag` count up from the previous
+resolved value (or `0` for the first variant).
+
+**Important: Rust's real `enum Foo { A = 1 }` discriminant syntax is never read for
+wire-encoding purposes**, for any enum, unit-only or field-carrying. It still compiles and
+still affects `as` casts and `std::mem::discriminant` as normal Rust - it's simply invisible to
+`byteable`'s wire format. If you need a specific wire value, use `#[byteable(tag = N)]`.
+
+**`#[byteable(discriminant = uN/iN)]`** (enums) overrides the *wire width* of the enum's
+discriminant - `u8`/`u16`/`u32`/`u64`/`u128`/`i8`/`i16`/`i32`/`i64`/`i128` - independently of
+any `#[repr(...)]` on the enum. `#[repr(uN/iN)]` still works as a legacy width source (via the
+same mechanism as before this attribute existed), but `#[byteable(discriminant = ..)]` is the
+modern, `#[repr]`-independent way to say it and takes priority when both are present. Without
+either, the width is auto-selected as the smallest of `u8`/`u16`/`u32`/`u64` that fits the
+variant count.
+
+```rust
+use byteable::Byteable;
+
+#[derive(Byteable, Debug, PartialEq)]
+#[byteable(discriminant = u8)]
+enum Message {
+    #[byteable(tag = 0x01)]
+    Ping,
+    #[byteable(tag = 0x02)]
+    Pong,
+    #[byteable(tag = 0xFF)]
+    Error,
+}
+```
+
+A `u128`-specific quirk: `tag` is parsed as `i128`, so no positive literal can express a value
+in the upper half of `u128`'s range (`2^127` to `u128::MAX`). Under
+`#[byteable(discriminant = u128)]`, a *negative* `tag` is the documented way to reach that
+range via two's-complement wraparound - e.g. `tag = -1` means `u128::MAX`, `tag = -10` means
+`u128::MAX - 9`. This is the one wire width where a negative `tag` is accepted; every other
+unsigned width (`u8`/`u16`/`u32`/`u64`) rejects a negative `tag` as a compile error since it
+can never round-trip there.
+
 ### bitflags support
 
 Unlike `ordered-float`, `bitflags` types don't get support automatically - each type generated

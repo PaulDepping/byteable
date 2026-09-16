@@ -569,3 +569,101 @@ mod safety {
     #[test]
     fn compile_fail_examples_documented_above() {}
 }
+
+// ── `#[byteable(order = N)]` field reordering ───────────────────────────────────
+
+mod field_order {
+    use byteable::{Byteable, FromByteArray, ToByteArray};
+
+    #[derive(Clone, Copy, Byteable)]
+    struct Declared {
+        a: u8,
+        b: u16,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Byteable)]
+    struct Reordered {
+        #[byteable(order = 1)]
+        a: u8,
+        #[byteable(order = 0)]
+        b: u16,
+    }
+
+    #[test]
+    fn order_controls_wire_layout_independent_of_declaration_order() {
+        let declared = Declared { a: 42, b: 0x1234 };
+        // b is declared second but ordered first (wire position 0), a is ordered
+        // second (wire position 1) - so the wire bytes are [b_le_bytes, a_byte],
+        // NOT declaration order.
+        let reordered = Reordered { a: 42, b: 0x1234 };
+
+        let declared_bytes = declared.to_byte_array();
+        assert_eq!(declared_bytes, [42, 0x34, 0x12]); // a, then b (LE)
+
+        let reordered_bytes = reordered.to_byte_array();
+        assert_eq!(reordered_bytes, [0x34, 0x12, 42]); // b (LE), then a
+
+        // Decode direction: from_raw_expr must read each field back out of its own
+        // wire position, not its declaration position.
+        assert_eq!(Reordered::from_byte_array(reordered_bytes), reordered);
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Byteable)]
+    struct ReorderedTuple(#[byteable(order = 1)] u8, #[byteable(order = 0)] u16);
+
+    #[test]
+    fn order_controls_wire_layout_for_tuple_structs() {
+        let value = ReorderedTuple(42, 0x1234);
+        let bytes = value.to_byte_array();
+        assert_eq!(bytes, [0x34, 0x12, 42]); // .1 (LE) then .0
+
+        // Decode direction: tuple structs reconstruct positionally in declaration
+        // order via Self(#(#from_raw_exprs),*), so this also exercises that each
+        // from_raw_expr reads its own correct wire-position slot out of the raw
+        // struct via `raw_idx`.
+        assert_eq!(ReorderedTuple::from_byte_array(bytes), value);
+    }
+
+    // io_only path: same `order` attribute, but wired through the dynamic
+    // Readable/Writable pipeline instead of the fixed-size raw-struct transmute.
+    #[cfg(feature = "std")]
+    mod io_only {
+        use super::*;
+        use byteable::io::{ReadValue, WriteValue};
+
+        #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
+        #[byteable(io_only)]
+        struct ReorderedIo {
+            #[byteable(order = 1)]
+            a: u8,
+            #[byteable(order = 0)]
+            b: u16,
+        }
+
+        #[test]
+        fn order_controls_wire_layout_for_io_only_structs() {
+            let value = ReorderedIo { a: 42, b: 0x1234 };
+            let mut buf = Vec::new();
+            buf.write_value(&value).unwrap();
+            assert_eq!(buf, vec![0x34, 0x12, 42]); // b (LE) then a, same as the fixed-size case
+
+            let restored: ReorderedIo = std::io::Cursor::new(&buf).read_value().unwrap();
+            assert_eq!(restored, value);
+        }
+
+        #[derive(Clone, Copy, Byteable, Debug, PartialEq)]
+        #[byteable(io_only)]
+        struct ReorderedIoTuple(#[byteable(order = 1)] u8, #[byteable(order = 0)] u16);
+
+        #[test]
+        fn order_controls_wire_layout_for_io_only_tuple_structs() {
+            let value = ReorderedIoTuple(42, 0x1234);
+            let mut buf = Vec::new();
+            buf.write_value(&value).unwrap();
+            assert_eq!(buf, vec![0x34, 0x12, 42]);
+
+            let restored: ReorderedIoTuple = std::io::Cursor::new(&buf).read_value().unwrap();
+            assert_eq!(restored, value);
+        }
+    }
+}

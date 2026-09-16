@@ -231,8 +231,10 @@ mod two_try_transparent_tests {
     #[repr(u16)]
     #[byteable(little_endian)]
     enum CodeB {
-        Alpha = 0x0100,
-        Beta = 0x0200,
+        #[byteable(tag = 0x0100)]
+        Alpha,
+        #[byteable(tag = 0x0200)]
+        Beta,
     }
 
     /// Struct with two try_transparent fields (StatusA u8 + CodeB u16) and a plain u8.
@@ -318,9 +320,12 @@ mod command_packet_tests {
     #[repr(u16)]
     #[byteable(little_endian)]
     enum Command {
-        Start = 0x1000,
-        Stop = 0x2000,
-        Pause = 0x3000,
+        #[byteable(tag = 0x1000)]
+        Start,
+        #[byteable(tag = 0x2000)]
+        Stop,
+        #[byteable(tag = 0x3000)]
+        Pause,
     }
 
     /// Test struct with try_transparent on u16 enum

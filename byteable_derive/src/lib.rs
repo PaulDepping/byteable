@@ -3,6 +3,8 @@ use proc_macro2::Span;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Ident, Meta, Type, parse_macro_input};
 
+mod attrs;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttributeType {
     LittleEndian,
@@ -13,29 +15,51 @@ enum AttributeType {
 }
 
 fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
+    let mut found: Option<AttributeType> = None;
     for attr in attrs {
-        if attr.path().is_ident("byteable") {
-            if let Meta::List(meta_list) = &attr.meta {
-                let tokens = meta_list.tokens.to_string();
-                return match tokens.as_str() {
-                    "little_endian" => AttributeType::LittleEndian,
-                    "big_endian" => AttributeType::BigEndian,
-                    "transparent" => AttributeType::None,
-                    "try_transparent" => AttributeType::TryTransparent,
-                    "io_only" => AttributeType::IoOnly,
-                    other => panic!(
-                        "Unknown byteable attribute: {other}. \
-                         Valid attributes are: little_endian, big_endian, try_transparent, io_only."
-                    ),
-                };
-            }
-            panic!(
-                "Unknown byteable attribute. \
-                 Valid attributes are: little_endian, big_endian, try_transparent, io_only."
-            );
+        if !attr.path().is_ident("byteable") {
+            continue;
         }
+        attr.parse_nested_meta(|meta| {
+            let kind = if meta.path.is_ident("little_endian") {
+                Some(AttributeType::LittleEndian)
+            } else if meta.path.is_ident("big_endian") {
+                Some(AttributeType::BigEndian)
+            } else if meta.path.is_ident("transparent") {
+                Some(AttributeType::None)
+            } else if meta.path.is_ident("try_transparent") {
+                Some(AttributeType::TryTransparent)
+            } else if meta.path.is_ident("io_only") {
+                Some(AttributeType::IoOnly)
+            } else if meta.path.is_ident("order") {
+                // Consumed by `attrs::parse_field_order`; just skip the `= <int>` here.
+                let _ = meta.value()?.parse::<syn::LitInt>()?;
+                None
+            } else if meta.path.is_ident("discriminant") {
+                // Consumed by `attrs::parse_discriminant_override`; just skip the `= <ident>`
+                // here.
+                let _ = meta.value()?.parse::<syn::Ident>()?;
+                None
+            } else {
+                return Err(meta.error(
+                    "Unknown byteable attribute. Valid attributes are: little_endian, \
+                     big_endian, try_transparent, io_only, order, discriminant.",
+                ));
+            };
+            if let Some(kind) = kind {
+                if found.is_some() {
+                    return Err(meta.error(
+                        "at most one of little_endian/big_endian/transparent/try_transparent/\
+                         io_only may be specified",
+                    ));
+                }
+                found = Some(kind);
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| panic!("{e}"));
     }
-    AttributeType::None
+    found.unwrap_or(AttributeType::None)
 }
 
 /// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from the four
@@ -128,6 +152,21 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 ///   [`ToByteArray`], and [`TryFromByteArray`] using an automatically-chosen
 ///   discriminant integer type (`u8` → `u16` → `u32` → `u64` based on variant count).
 ///
+/// ## Enum wire discriminants: `tag`/counting only, never Rust's real `= N`
+///
+/// For every enum (unit-only or field-carrying), the value written on the wire for a
+/// variant's discriminant comes *purely* from `#[byteable(tag = N)]` and declaration-order
+/// counting (see the "Variant-level attributes" table below) - Rust's own `enum Foo { A = 1
+/// }` discriminant syntax is **never read** for wire-encoding purposes, even though it still
+/// compiles and affects `as` casts/`std::mem::discriminant` as normal Rust. If you need a
+/// specific wire value, use `#[byteable(tag = N)]`, not `= N`.
+///
+/// The discriminant's *wire width* (how many bytes it takes up) is chosen independently: by
+/// `#[byteable(discriminant = uN/iN)]` when present, else by a legacy `#[repr(uN/iN)]` on the
+/// enum (still honored purely as a width source via `extract_repr_type`, not as a source of
+/// discriminant values), else auto-selected as the smallest of `u8`/`u16`/`u32`/`u64` that
+/// fits the variant count.
+///
 /// [`RawRepr`]: byteable::RawRepr
 /// [`FromRawRepr`]: byteable::FromRawRepr
 /// [`TryFromRawRepr`]: byteable::TryFromRawRepr
@@ -152,6 +191,7 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
 /// | `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
 /// | `#[byteable(io_only)]` | Generate `Readable`/`Writable`/`EioReadable`/`EioWritable`/`AsyncReadable`/`AsyncWritable`/`EioAsyncReadable`/`EioAsyncWritable` (per enabled feature) instead of fixed-size traits |
+/// | `#[byteable(discriminant = uN/iN)]` (enums only) | Overrides the wire width of the enum's discriminant with `uN`/`iN` (`u8`/`u16`/`u32`/`u64`/`u128`/`i8`/`i16`/`i32`/`i64`/`i128`), independently of any `#[repr(...)]` on the enum. See "Variant-level attributes" below and the note on `u128` there. |
 ///
 /// # Field-level attributes
 ///
@@ -162,6 +202,23 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 /// | `#[byteable(little_endian)]` | This field uses little-endian (overrides struct-level) |
 /// | `#[byteable(big_endian)]` | This field uses big-endian (overrides struct-level) |
 /// | `#[byteable(try_transparent)]` | Field decode may fail; the struct impl becomes `TryFromRawRepr` |
+/// | `#[byteable(order = N)]` (struct fields only) | Pins this field's *wire position* to `N`, independently of its declaration order in the struct. Adds zero bytes to the wire format - it only changes which byte range a given field occupies. Must annotate either every field of the struct or none; the `N` values across all fields must form a dense `0..field_count` permutation. |
+///
+/// # Variant-level attributes
+///
+/// Place these on individual enum variants:
+///
+/// | Attribute | Effect |
+/// |-----------|--------|
+/// | `#[byteable(tag = N)]` | Pins this variant's *wire discriminant* to the integer literal `N`, independently of its declaration position and of any real Rust `= N` discriminant (which is never read - see above). `N` may be a negative literal (e.g. `tag = -1`); variants without an explicit `tag` count up from the previous resolved value (or from `0` for the first variant). |
+///
+/// A `u128`-specific quirk worth knowing: `tag` is parsed as `i128`, so no positive literal
+/// can express a value in the upper half of `u128`'s range (`2^127` to `u128::MAX`). Under
+/// `#[byteable(discriminant = u128)]`, a *negative* `tag` is the documented escape hatch for
+/// that range, reached via two's-complement wraparound - e.g. `tag = -1` means `u128::MAX`,
+/// `tag = -10` means `u128::MAX - 9`. This is the one wire width where a negative `tag` is
+/// accepted rather than rejected as "doesn't fit"; every other unsigned width
+/// (`u8`/`u16`/`u32`/`u64`) rejects a negative `tag` as a compile error.
 ///
 /// # Examples
 ///
@@ -417,6 +474,9 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         syn::Fields::Unit => unreachable!(),
     };
 
+    let orders: Vec<Option<u64>> = fields.iter().map(|f| attrs::parse_field_order(&f.attrs)).collect();
+    let wire_order = attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| panic!("{e}"));
+
     let awaited_sync = quote! {};
     let awaited_async = quote! { .await };
 
@@ -433,6 +493,10 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
             };
             (field_access, field)
         })
+        .collect();
+    let field_accesses: Vec<_> = wire_order
+        .iter()
+        .map(|&decl_idx| field_accesses[decl_idx].clone())
         .collect();
     let write_stmts: Vec<_> = field_accesses
         .iter()
@@ -455,20 +519,23 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         let idents: Vec<_> = (0..fields.len())
             .map(|i| syn::Ident::new(&format!("__field_{i}"), name.span()))
             .collect();
-        let bindings = fields
+        let wire_fields: Vec<_> = wire_order.iter().map(|&i| &fields[i]).collect();
+        let wire_idents: Vec<_> = wire_order.iter().map(|&i| &idents[i]).collect();
+        let bindings = wire_fields
             .iter()
-            .zip(&idents)
+            .zip(&wire_idents)
             .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc, &awaited_sync))
             .collect();
-        let bindings_async = fields
+        let bindings_async = wire_fields
             .iter()
-            .zip(&idents)
+            .zip(&wire_idents)
             .map(|(f, id)| gen_field_read(id, &f.ty, &f.attrs, &bc, &awaited_async))
             .collect();
         (bindings, bindings_async, quote! { Ok(Self(#(#idents),*)) })
     } else {
         let field_idents: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
-        let bindings = fields
+        let wire_fields: Vec<_> = wire_order.iter().map(|&i| &fields[i]).collect();
+        let bindings = wire_fields
             .iter()
             .map(|f| {
                 gen_field_read(
@@ -480,7 +547,7 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
                 )
             })
             .collect();
-        let bindings_async = fields
+        let bindings_async = wire_fields
             .iter()
             .map(|f| {
                 gen_field_read(
@@ -672,6 +739,13 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         Fields::Unit => unreachable!(),
     };
 
+    let orders: Vec<Option<u64>> = fields.iter().map(|f| attrs::parse_field_order(&f.attrs)).collect();
+    let wire_order = attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| panic!("{e}"));
+    let mut wire_position_of = vec![0usize; wire_order.len()];
+    for (wire_pos, &decl_idx) in wire_order.iter().enumerate() {
+        wire_position_of[decl_idx] = wire_pos;
+    }
+
     struct FieldInfo {
         raw_field_def: proc_macro2::TokenStream,
         to_raw_expr: proc_macro2::TokenStream,
@@ -690,30 +764,36 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         }
 
         let field_info = if is_tuple {
-            let idx = syn::Index::from(i);
+            // `self` is the *original* struct (declaration-order indexed); `value` is
+            // the hidden raw struct (wire-order indexed). These differ once a field
+            // has been reordered via `#[byteable(order = N)]`, so they need separate
+            // indices: `self_idx` for reading the source field out of `self`, `raw_idx`
+            // for reading/writing that field's slot in the raw struct.
+            let self_idx = syn::Index::from(i);
+            let raw_idx = syn::Index::from(wire_position_of[i]);
             match attr {
                 AttributeType::LittleEndian => FieldInfo {
                     raw_field_def: quote! { #vis <#field_type as #bc::HasEndianRepr>::LE },
-                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_little_endian(self.#idx) },
-                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_little_endian(value.#idx) },
+                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_little_endian(self.#self_idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_little_endian(value.#raw_idx) },
                 },
                 AttributeType::BigEndian => FieldInfo {
                     raw_field_def: quote! { #vis <#field_type as #bc::HasEndianRepr>::BE },
-                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_big_endian(self.#idx) },
-                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_big_endian(value.#idx) },
+                    to_raw_expr: quote! { <#field_type as #bc::HasEndianRepr>::to_big_endian(self.#self_idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromEndianRepr>::from_big_endian(value.#raw_idx) },
                 },
                 AttributeType::TryTransparent => FieldInfo {
                     raw_field_def: quote! { #vis <#field_type as #bc::RawRepr>::Raw },
-                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#idx) },
-                    from_raw_expr: quote! { <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#idx)? },
+                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#self_idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#raw_idx)? },
                 },
                 AttributeType::IoOnly => panic!(
                     "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
                 ),
                 AttributeType::None => FieldInfo {
                     raw_field_def: quote! { #vis <#field_type as #bc::RawRepr>::Raw },
-                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#idx) },
-                    from_raw_expr: quote! { <#field_type as #bc::FromRawRepr>::from_raw(value.#idx) },
+                    to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#self_idx) },
+                    from_raw_expr: quote! { <#field_type as #bc::FromRawRepr>::from_raw(value.#raw_idx) },
                 },
             }
         } else {
@@ -747,8 +827,10 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         field_infos.push(field_info);
     }
 
+    let wire_field_infos: Vec<&FieldInfo> = wire_order.iter().map(|&decl_idx| &field_infos[decl_idx]).collect();
+
     let raw_struct_def = {
-        let field_defs = field_infos.iter().map(|v| &v.raw_field_def);
+        let field_defs = wire_field_infos.iter().map(|v| &v.raw_field_def);
         if is_tuple {
             quote! {
                 #[derive(Clone, Copy)]
@@ -804,7 +886,7 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
     };
 
     let raw_repr = {
-        let to_raw_exprs = field_infos.iter().map(|v| &v.to_raw_expr);
+        let to_raw_exprs = wire_field_infos.iter().map(|v| &v.to_raw_expr);
         if is_tuple {
             quote! {
                 impl #bc::RawRepr for #original_name {
@@ -975,23 +1057,26 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
 
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    // Determine repr type - use explicit #[repr(...)] if present, otherwise auto-select.
-    let repr_ty = extract_repr_type(&input.attrs).unwrap_or_else(|| {
-        let n = enum_data.variants.len();
-        let ty_str = if n <= 256 {
-            "u8"
-        } else if n <= 65_536 {
-            "u16"
-        } else if n as u64 <= u32::MAX as u64 + 1 {
-            "u32"
-        } else {
-            "u64"
-        };
-        Ident::new(ty_str, name.span())
-    });
+    // Determine repr type - use an explicit #[byteable(discriminant = ..)] override if
+    // present, else an explicit #[repr(...)], otherwise auto-select.
+    let repr_ty = attrs::parse_discriminant_override(&input.attrs)
+        .or_else(|| extract_repr_type(&input.attrs))
+        .unwrap_or_else(|| {
+            let n = enum_data.variants.len();
+            let ty_str = if n <= 256 {
+                "u8"
+            } else if n <= 65_536 {
+                "u16"
+            } else if n as u64 <= u32::MAX as u64 + 1 {
+                "u32"
+            } else {
+                "u64"
+            };
+            Ident::new(ty_str, name.span())
+        });
 
     let endian_attr = parse_byteable_attr(&input.attrs);
-    let discriminants = compute_discriminants(&enum_data.variants);
+    let discriminants = resolve_enum_discriminants(&enum_data.variants, &repr_ty);
 
     let awaited_sync = quote! {};
     let awaited_async = quote! { .await };
@@ -1245,69 +1330,61 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     dynamic_pipeline_impls(&name, std_impl, eio_impl, async_impl, eio_async_impl).into()
 }
 
-fn try_eval_int_expr(expr: &syn::Expr) -> Option<u128> {
-    match expr {
-        syn::Expr::Lit(el) => {
-            if let syn::Lit::Int(li) = &el.lit {
-                // base10_parse handles decimal literals and strips type suffixes
-                if let Ok(v) = li.base10_parse::<u128>() {
-                    return Some(v);
-                }
-                // For non-decimal (hex/bin/oct), parse from the token string
-                let s = li.to_string();
-                let (prefix, rest) =
-                    if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                        (16u32, r)
-                    } else if let Some(r) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-                        (2, r)
-                    } else if let Some(r) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
-                        (8, r)
-                    } else {
-                        return None;
-                    };
-                // Strip type suffix and digit separators
-                let digits: String = rest
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                    .filter(|c| *c != '_' && !c.is_alphabetic())
-                    .collect();
-                u128::from_str_radix(&digits, prefix).ok()
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+/// Reinterprets a resolved `i128` tag value as the bit pattern it would have if cast to
+/// `repr_ty` (e.g. `-10i128` reinterpreted as `u8` is `246`), and returns that value as a bare
+/// integer literal token stream, of the correct sign for `repr_ty`.
+///
+/// This has to work both as a plain expression (the write path: `let disc_val: #repr_ty =
+/// #disc_tokens;`) and as a match pattern (the read path: `#disc_tokens => Ok(...)`). The
+/// obvious approach - emit the raw tag literal plus a `#lit as #repr_ty` cast - only works as an
+/// expression: ordinary match patterns don't accept arbitrary expressions, only literals/consts,
+/// and while an inline `const { .. }` block is stable as an *expression* since Rust 1.79, using
+/// one as a match *pattern* is still gated behind the unstable `inline_const_pat` feature
+/// (confirmed here: rustc 1.97 stable rejects it with "const blocks cannot be used as
+/// patterns"). So instead the cast is performed here, at macro-expansion time, using real
+/// same-width integer types to get the exact two's-complement truncation `as` would produce,
+/// and the *result* is emitted as a plain literal - which is valid as both an expression and a
+/// pattern, and needs no cast at the use site.
+fn reinterpret_tag_for_repr(value: i128, repr_ty: &syn::Ident) -> proc_macro2::TokenStream {
+    let repr_str = repr_ty.to_string();
+    let reinterpreted = attrs::reinterpret_i128_for_repr(value, &repr_str);
+    let lit = if repr_str.starts_with('u') {
+        proc_macro2::Literal::u128_unsuffixed(reinterpreted as u128)
+    } else {
+        proc_macro2::Literal::i128_unsuffixed(reinterpreted)
+    };
+    quote! { #lit }
 }
 
-/// Computes discriminant token streams for every variant, auto-assigning values where absent.
-///
-/// Follows Rust's own rule: starts at `0`, increments by one after each variant. If a variant
-/// has an explicit discriminant, that value is used and the counter resets to `explicit + 1`.
-/// When the explicit value cannot be statically evaluated (e.g. a named constant), the counter
-/// falls back to incrementing from the previous known position.
-fn compute_discriminants(
+/// Computes discriminant token streams for every variant, purely from `#[byteable(tag = N)]`
+/// attributes (via `attrs::resolve_variant_tags`) - Rust's own real `= N` discriminant syntax
+/// is never read. An unannotated variant continues from the previous *resolved* tag value + 1,
+/// starting at 0, mirroring Rust's own auto-increment rule but over signed `i128`. Collisions
+/// between resolved values are a hard compile-time error (`panic!`), as is any resolved value
+/// that doesn't fit losslessly in `repr_ty` (`attrs::validate_tags_fit_width`) - e.g.
+/// `#[byteable(tag = 999)]` on a `u8`-width enum. Each resolved value is
+/// converted to a bare literal of the wire (`repr_ty`) type via `reinterpret_tag_for_repr`, so
+/// the same token stream can be used as either an expression or a match pattern.
+fn resolve_enum_discriminants(
     variants: &syn::punctuated::Punctuated<syn::Variant, syn::Token![,]>,
+    repr_ty: &syn::Ident,
 ) -> Vec<proc_macro2::TokenStream> {
-    let mut next: u128 = 0;
-    variants
+    let variant_tags: Vec<Option<i128>> = variants
         .iter()
-        .map(|v| {
-            if let Some((_, expr)) = &v.discriminant {
-                // Try to evaluate to keep the counter accurate
-                if let Some(val) = try_eval_int_expr(expr) {
-                    next = val + 1;
-                } else {
-                    next += 1;
-                }
-                quote! { #expr }
-            } else {
-                let val = next;
-                next += 1;
-                let lit = proc_macro2::Literal::u128_unsuffixed(val);
-                quote! { #lit }
-            }
-        })
+        .map(|v| attrs::parse_variant_tag(&v.attrs))
+        .collect();
+    let resolved = match attrs::resolve_variant_tags(&variant_tags) {
+        Ok(resolved) => resolved,
+        Err(e) => panic!("{e}"),
+    };
+
+    if let Err(e) = attrs::validate_tags_fit_width(&resolved, &repr_ty.to_string()) {
+        panic!("{e}");
+    }
+
+    resolved
+        .into_iter()
+        .map(|value| reinterpret_tag_for_repr(value, repr_ty))
         .collect()
 }
 
@@ -1318,22 +1395,24 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     };
     let enum_name = &input.ident;
 
-    let repr_ty = extract_repr_type(&input.attrs).unwrap_or_else(|| {
-        let n = enum_data.variants.len();
-        let ty_str = if n <= 256 {
-            "u8"
-        } else if n <= 65_536 {
-            "u16"
-        } else if n as u64 <= u32::MAX as u64 + 1 {
-            "u32"
-        } else {
-            "u64"
-        };
-        Ident::new(ty_str, enum_name.span())
-    });
+    let repr_ty = attrs::parse_discriminant_override(&input.attrs)
+        .or_else(|| extract_repr_type(&input.attrs))
+        .unwrap_or_else(|| {
+            let n = enum_data.variants.len();
+            let ty_str = if n <= 256 {
+                "u8"
+            } else if n <= 65_536 {
+                "u16"
+            } else if n as u64 <= u32::MAX as u64 + 1 {
+                "u32"
+            } else {
+                "u64"
+            };
+            Ident::new(ty_str, enum_name.span())
+        });
 
     let endian_attr = parse_byteable_attr(&input.attrs);
-    let discriminants = compute_discriminants(&enum_data.variants);
+    let discriminants = resolve_enum_discriminants(&enum_data.variants, &repr_ty);
 
     let from_discriminant_arms =
         enum_data
@@ -1439,4 +1518,32 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
 
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    #[test]
+    fn parse_byteable_attr_ignores_order_token() {
+        let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(order = 0, big_endian)])];
+        assert_eq!(parse_byteable_attr(&attrs), AttributeType::BigEndian);
+    }
+
+    #[test]
+    fn parse_byteable_attr_scans_every_attribute_instance() {
+        let attrs: Vec<syn::Attribute> = vec![
+            parse_quote!(#[byteable(order = 2)]),
+            parse_quote!(#[byteable(big_endian)]),
+        ];
+        assert_eq!(parse_byteable_attr(&attrs), AttributeType::BigEndian);
+    }
+
+    #[test]
+    fn parse_byteable_attr_still_rejects_unknown_tokens() {
+        let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(not_a_real_attribute)])];
+        let result = std::panic::catch_unwind(|| parse_byteable_attr(&attrs));
+        assert!(result.is_err());
+    }
 }

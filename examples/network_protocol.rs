@@ -20,23 +20,29 @@ use byteable::io::{ReadValue, ReadableError, WriteValue};
 use std::io::Cursor;
 
 /// Messages exchanged between client and broker.
+///
+/// Each variant's wire discriminant is pinned with `#[byteable(tag = ..)]` rather than a real
+/// Rust `= N` discriminant - byteable never reads Rust's own discriminant syntax for
+/// wire-encoding purposes, so pinning it any other way would silently drift. The enum-level
+/// `#[byteable(discriminant = u8)]` fixes the wire width at one byte, independently of (and
+/// without needing) a `#[repr(u8)]`.
 #[derive(Debug, PartialEq, Byteable)]
-#[repr(u8)]
+#[byteable(discriminant = u8)]
 enum Message {
-    Ping = 0x01,
-    Pong = 0x02,
-    Subscribe {
-        topic: String,
-    } = 0x10,
-    Publish {
-        topic: String,
-        payload: Vec<u8>,
-    } = 0x11,
+    #[byteable(tag = 0x01)]
+    Ping,
+    #[byteable(tag = 0x02)]
+    Pong,
+    #[byteable(tag = 0x10)]
+    Subscribe { topic: String },
+    #[byteable(tag = 0x11)]
+    Publish { topic: String, payload: Vec<u8> },
+    #[byteable(tag = 0xFF)]
     Error {
         #[byteable(big_endian)]
         code: u16,
         description: String,
-    } = 0xFF,
+    },
 }
 
 fn main() -> Result<(), ReadableError> {

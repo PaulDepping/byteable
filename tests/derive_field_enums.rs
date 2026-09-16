@@ -120,9 +120,12 @@ fn mixed_variants_roundtrip() {
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u16)]
 enum Request {
-    Ping = 0x0001,
-    GetValue { key: u8 } = 0x0002,
-    SetValue { key: u8, val: u8 } = 0x0003,
+    #[byteable(tag = 0x0001)]
+    Ping,
+    #[byteable(tag = 0x0002)]
+    GetValue { key: u8 },
+    #[byteable(tag = 0x0003)]
+    SetValue { key: u8, val: u8 },
 }
 
 #[test]
@@ -147,8 +150,10 @@ fn little_endian_field_variant_roundtrip() {
 #[repr(u16)]
 #[byteable(big_endian)]
 enum Response {
-    Ok = 0x0001,
-    Error { code: u8 } = 0x0002,
+    #[byteable(tag = 0x0001)]
+    Ok,
+    #[byteable(tag = 0x0002)]
+    Error { code: u8 },
 }
 
 #[test]
@@ -328,9 +333,12 @@ fn auto_repr_roundtrip() {
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum PartialDiscriminants {
-    First,                     // auto: 0
-    Explicit = 10,             // explicit: 10
-    AfterExplicit { val: u8 }, // auto: 11
+    First, // implicit: 0
+    #[byteable(tag = 10)]
+    Explicit,
+    AfterExplicit {
+        val: u8,
+    }, // implicit, continues from Explicit's tag=10 -> 11
 }
 
 #[test]
@@ -367,8 +375,11 @@ fn partial_discriminants_roundtrip() {
 #[derive(Byteable, Debug, PartialEq)]
 #[repr(u8)]
 enum HexDiscriminants {
-    Base = 0x10,    // explicit hex: 16
-    Next { x: u8 }, // auto: 17
+    #[byteable(tag = 0x10)]
+    Base,
+    Next {
+        x: u8,
+    }, // implicit, continues from Base's tag=0x10 -> 17
 }
 
 #[test]
