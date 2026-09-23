@@ -19,16 +19,17 @@
 //! standard POSIX `timespec` convention.
 
 use crate::{
-    DecodeError, FromByteArray, FromRawRepr, LittleEndian, PlainOldData, RawRepr, ToByteArray,
-    TryFromByteArray, TryFromRawRepr, impl_byte_array,
+    Constraint, DecodeError, Endianness, FingerprintBuilder, FingerprintTag, FromByteArray,
+    FromRawRepr, LittleEndian, PlainOldData, RawRepr, Signedness, ToByteArray, TryFromByteArray,
+    TryFromRawRepr, WireFingerprint, impl_byte_array,
 };
 use core::{
     cmp::{Ordering, Reverse},
     marker::PhantomData,
     net::Ipv4Addr,
-    net::{Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     num::{NonZero, Saturating, Wrapping},
-    ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
+    ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
     time::Duration,
 };
 #[cfg(feature = "std")]
@@ -72,18 +73,32 @@ macro_rules! rawrepr_self {
                     unsafe { ::core::mem::transmute(byte_array) }
                 }
             }
-
-
-            // impl TryFromRawRepr for $type {
-            //     fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
-            //         Ok(raw)
-            //     }
-            // }
         )+
     };
 }
 
 rawrepr_self!(u8, i8);
+
+// `u8`/`i8` are never wrapped in `BigEndian`/`LittleEndian` (a single byte has no order to
+// assert), so their fingerprint has no `.endianness()` call - unlike the multi-byte
+// int/float macro below, which folds `.endianness(Endianness::Little)` in on purpose. See
+// `impl_fingerprint_int_endian!`'s doc comment for why.
+macro_rules! impl_fingerprint_int_no_endian {
+    ($signedness:expr, $($type:ty),+ $(,)?) => {
+        $(
+            impl WireFingerprint for $type {
+                const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+                    .tag(FingerprintTag::FixedInt)
+                    .width(<$type as ToByteArray>::BYTE_SIZE as u8)
+                    .signedness($signedness)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_int_no_endian!(Signedness::Unsigned, u8);
+impl_fingerprint_int_no_endian!(Signedness::Signed, i8);
 
 impl RawRepr for bool {
     type Raw = u8;
@@ -125,6 +140,10 @@ where
     }
 }
 
+impl WireFingerprint for bool {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new().tag(FingerprintTag::Bool).finish();
+}
+
 impl RawRepr for char {
     type Raw = LittleEndian<u32>;
 
@@ -160,6 +179,15 @@ where
         let raw = <<Self as RawRepr>::Raw as FromByteArray>::from_byte_array(byte_array);
         Self::try_from_raw(raw)
     }
+}
+
+impl WireFingerprint for char {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::FixedInt)
+        .width(4)
+        .signedness(Signedness::Unsigned)
+        .constraint(Constraint::UnicodeScalar)
+        .finish();
 }
 
 macro_rules! impl_try_from_rawrepr {
@@ -219,6 +247,52 @@ macro_rules! raw_repr_multibyte {
 }
 
 raw_repr_multibyte!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
+
+// All ten of these types implement `EndianConvert` (`src/byteable_trait.rs`) and therefore
+// have `BigEndian<T>`/`LittleEndian<T>` wrappers - and, per `RawRepr` above, an unattributed
+// field of one of these types has `RawRepr::Raw = LittleEndian<Self>`, i.e. it is *always*
+// wire-identical to an explicit `#[byteable(little_endian)]` field of the same type. So the
+// plain type's own fingerprint must fold in `.endianness(Endianness::Little)` - not leave
+// endianness unstated - so that `LittleEndian<T>::WIRE_FINGERPRINT` (defined in
+// `src/byteable_trait.rs` as a direct delegation to `T::WIRE_FINGERPRINT`) is correct by
+// construction, and so `BigEndian<T>`, which states `Endianness::Big`, actually comes out
+// different. `u8`/`i8` above are the only fixed-width integers excluded from this - they
+// have no endian wrapper to stay consistent with.
+macro_rules! impl_fingerprint_int_endian {
+    ($signedness:expr, $($type:ty),+ $(,)?) => {
+        $(
+            impl WireFingerprint for $type {
+                const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+                    .tag(FingerprintTag::FixedInt)
+                    .width(<$type as ToByteArray>::BYTE_SIZE as u8)
+                    .signedness($signedness)
+                    .endianness(Endianness::Little)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_int_endian!(Signedness::Unsigned, u16, u32, u64, u128);
+impl_fingerprint_int_endian!(Signedness::Signed, i16, i32, i64, i128);
+
+// See `impl_fingerprint_int_endian!` above - floats are wrapped in `BigEndian`/`LittleEndian`
+// the same way multi-byte integers are, for the same reason.
+macro_rules! impl_fingerprint_float_endian {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl WireFingerprint for $type {
+                const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+                    .tag(FingerprintTag::Float)
+                    .width(<$type as ToByteArray>::BYTE_SIZE as u8)
+                    .endianness(Endianness::Little)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_float_endian!(f32, f64);
 
 macro_rules! impl_byte_array_via_raw {
     ($($ty:ty),+) => {
@@ -317,6 +391,12 @@ impl<T> FromByteArray for PhantomData<T> {
     }
 }
 
+impl<T> WireFingerprint for PhantomData<T> {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::Struct)
+        .finish();
+}
+
 macro_rules! impl_nonzero {
     ($($type:ty),+) => {
         $(
@@ -340,6 +420,21 @@ macro_rules! impl_nonzero {
 }
 
 impl_nonzero!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+
+macro_rules! impl_fingerprint_nonzero {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl WireFingerprint for core::num::NonZero<$type> {
+                const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+                    .nested::<$type>()
+                    .constraint(Constraint::NonZero)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_nonzero!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // Wire format: 1 byte (0 = Less, 1 = Equal, 2 = Greater).
 impl RawRepr for Ordering {
@@ -369,6 +464,33 @@ impl TryFromRawRepr for Ordering {
 }
 
 impl_try_byte_array_via_raw!(Ordering);
+
+impl WireFingerprint for Ordering {
+    const WIRE_FINGERPRINT: u64 = {
+        // 3 unit variants, tags 0/1/2 - each variant's own hash computed independently, then
+        // combined order-independently via fold_unordered, matching what the derive macro's
+        // codegen produces for a real 3-unit-variant enum.
+        let less = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0)
+            .finish();
+        let equal = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1)
+            .finish();
+        let greater = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(2)
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1)
+            .signedness(Signedness::Unsigned) // matches a `u8`-discriminant derived enum
+            .endianness(Endianness::Little) // matches an unattributed derived enum's default
+            .variants(&[less, equal, greater])
+            .finish()
+    };
+}
 
 // `Wrapping<T>` / `Saturating<T>` serialize identically to `T` - same raw repr, no invalid
 // states, so decoding is infallible (mirrors `TryFromRawRepr`'s trivial wrapping for `u8..i128`
@@ -400,6 +522,19 @@ macro_rules! impl_int_wrapper {
 impl_int_wrapper!(Wrapping; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 impl_int_wrapper!(Saturating; u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
+// Transparent passthroughs, exactly like `Reverse<T>` below: `Wrapping<T>`/`Saturating<T>`
+// put the identical bytes on the wire as a bare `T`, so they must fingerprint identically
+// too. Stated generically rather than per-int-type (unlike the `RawRepr` impls above, which
+// the macro has to spell out concretely) - a `WireFingerprint` for a `T` that has no wire
+// impls at all is inert, so there is nothing to be gained from narrowing it.
+impl<T: WireFingerprint> WireFingerprint for Wrapping<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for Saturating<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
 // `Reverse<T>` serializes identically to `T` (transparent passthrough, same as the
 // `Arc`/`Rc`/`Box` treatment in `std_types.rs`). Generic over any `T`, so - unlike
 // `Wrapping`/`Saturating` above - it cannot be given the `ToByteArray`/`FromByteArray` fixed
@@ -424,6 +559,10 @@ impl<T: TryFromRawRepr> TryFromRawRepr for Reverse<T> {
     fn try_from_raw(raw: Self::Raw) -> Result<Self, DecodeError> {
         Ok(Reverse(T::try_from_raw(raw)?))
     }
+}
+
+impl<T: WireFingerprint> WireFingerprint for Reverse<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
 }
 
 #[repr(C, packed)]
@@ -455,6 +594,14 @@ impl_try_from_rawrepr!(Ipv4Addr);
 
 impl_byte_array_via_raw!(Ipv4Addr);
 
+impl WireFingerprint for Ipv4Addr {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::FixedInt)
+        .width(<Ipv4Addr as ToByteArray>::BYTE_SIZE as u8) // = 4
+        .signedness(Signedness::Unsigned)
+        .finish();
+}
+
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 #[doc(hidden)]
@@ -483,6 +630,14 @@ impl FromRawRepr for Ipv6Addr {
 impl_try_from_rawrepr!(Ipv6Addr);
 
 impl_byte_array_via_raw!(Ipv6Addr);
+
+impl WireFingerprint for Ipv6Addr {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::FixedInt)
+        .width(<Ipv6Addr as ToByteArray>::BYTE_SIZE as u8) // = 16
+        .signedness(Signedness::Unsigned)
+        .finish();
+}
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -515,6 +670,11 @@ impl FromRawRepr for SocketAddrV4 {
 impl_try_from_rawrepr!(SocketAddrV4);
 
 impl_byte_array_via_raw!(SocketAddrV4);
+
+impl WireFingerprint for SocketAddrV4 {
+    const WIRE_FINGERPRINT: u64 =
+        <(Ipv4Addr, LittleEndian<u16>) as WireFingerprint>::WIRE_FINGERPRINT;
+}
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -556,6 +716,15 @@ impl FromRawRepr for SocketAddrV6 {
 impl_try_from_rawrepr!(SocketAddrV6);
 
 impl_byte_array_via_raw!(SocketAddrV6);
+
+impl WireFingerprint for SocketAddrV6 {
+    const WIRE_FINGERPRINT: u64 = <(
+        Ipv6Addr,
+        LittleEndian<u16>,
+        LittleEndian<u32>,
+        LittleEndian<u32>,
+    ) as WireFingerprint>::WIRE_FINGERPRINT;
+}
 
 macro_rules! impl_range_byteable {
     // Single-byte index types (u8, i8) - no endianness annotation needed.
@@ -748,6 +917,32 @@ impl TryFromRawRepr for RangeFull {
 
 impl_byte_array_via_raw!(RangeFull);
 
+impl WireFingerprint for RangeFull {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::Struct)
+        .finish();
+}
+
+impl<T: WireFingerprint> WireFingerprint for Range<T> {
+    const WIRE_FINGERPRINT: u64 = <(T, T) as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for RangeInclusive<T> {
+    const WIRE_FINGERPRINT: u64 = <(T, T) as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for RangeFrom<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for RangeTo<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for RangeToInclusive<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 #[doc(hidden)]
@@ -778,6 +973,10 @@ impl FromRawRepr for Duration {
 
 impl_try_from_rawrepr!(Duration);
 impl_byte_array_via_raw!(Duration);
+
+impl WireFingerprint for Duration {
+    const WIRE_FINGERPRINT: u64 = <(u64, u32) as WireFingerprint>::WIRE_FINGERPRINT;
+}
 
 #[cfg(feature = "std")]
 #[repr(C, packed)]
@@ -848,3 +1047,264 @@ impl FromRawRepr for SystemTime {
 impl_try_from_rawrepr!(SystemTime);
 #[cfg(feature = "std")]
 impl_byte_array_via_raw!(SystemTime);
+
+#[cfg(feature = "std")]
+impl WireFingerprint for SystemTime {
+    const WIRE_FINGERPRINT: u64 = <(i64, u32) as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+// ---------------------------------------------------------------------------------------
+// Fingerprints for dynamic-path core types
+// ---------------------------------------------------------------------------------------
+//
+// The `Readable`/`Writable` impls for the types below are *not* in this module - they live
+// once per I/O pipeline (`std_types.rs` for `std`, `eio.rs` for `embedded-io`,
+// `std_types_async.rs` for `tokio`, `eio_async.rs` for `embedded-io-async`), because they
+// stream rather than transmute. Their *fingerprints* are pipeline-independent pure consts,
+// and none of these types needs `std` or even `alloc` to exist, so they are stated here,
+// unconditionally, exactly once.
+//
+// This module must stay unconditional (not gated behind `std`): `SocketAddrV4`,
+// `SocketAddrV6`, `Range`, `RangeInclusive` and `Duration` above all define their fingerprints
+// in terms of a *tuple* fingerprint, and this module (`core_types.rs`) is always compiled.
+// Gating a tuple fingerprint behind `std` would break every `no_std` build that uses one of
+// those types. Anything genuinely needing the heap (`Vec`, `String`, `BTreeMap`, ...) is
+// fingerprinted in `alloc_types.rs` instead, and the `std`-only leftovers (`HashMap`,
+// `PathBuf`, `CString`, `Arc`, ...) stay in `std_types.rs`.
+
+// Wire format: no tag or length prefix - arity is fixed at compile time, so each element is
+// just serialized in order, making a tuple wire-identical to a struct of the same fields.
+// Arity 1 through 12, matching the `Readable`/`Writable` tuple impls in every pipeline.
+macro_rules! impl_fingerprint_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: WireFingerprint),+> WireFingerprint for ($($T,)+) {
+            const WIRE_FINGERPRINT: u64 = {
+                let b = FingerprintBuilder::new().tag(FingerprintTag::Struct);
+                $( let b = b.nested::<$T>(); )+
+                b.finish()
+            };
+        }
+    };
+}
+
+impl_fingerprint_tuple!(A);
+impl_fingerprint_tuple!(A, B);
+impl_fingerprint_tuple!(A, B, C);
+impl_fingerprint_tuple!(A, B, C, D);
+impl_fingerprint_tuple!(A, B, C, D, E);
+impl_fingerprint_tuple!(A, B, C, D, E, F);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G, H);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G, H, I);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_fingerprint_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+// `u64` byte length prefix + UTF-8 bytes. `String` (in `alloc_types.rs`) delegates here.
+impl WireFingerprint for str {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .tag(FingerprintTag::Sequence)
+        .width(8) // u64 length prefix
+        .constraint(Constraint::Utf8)
+        .nested::<u8>()
+        .finish();
+}
+
+impl<T: WireFingerprint> WireFingerprint for Option<T> {
+    const WIRE_FINGERPRINT: u64 = {
+        // Matches exactly what the derive macro produces for a real 2-variant enum: each
+        // variant's own hash (tag value + its own fields) computed independently, then
+        // combined order-independently via fold_unordered - not a sequential FNV chain. Uses
+        // the same primitive a real derived enum uses, rather than hand-simulating what that
+        // codegen would produce.
+        let none = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0) // None's tag value
+            .finish();
+        let some = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1) // Some's tag value
+            .nested::<T>()
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1) // 1-byte tag per the wire format table
+            .signedness(Signedness::Unsigned)
+            .endianness(Endianness::Little) // matches an unattributed derived enum's default
+            .variants(&[none, some])
+            .finish()
+    };
+}
+
+impl<V: WireFingerprint, E: WireFingerprint> WireFingerprint for Result<V, E> {
+    const WIRE_FINGERPRINT: u64 = {
+        let ok = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0) // Ok's tag value
+            .nested::<V>()
+            .finish();
+        let err = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1) // Err's tag value
+            .nested::<E>()
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1)
+            .signedness(Signedness::Unsigned)
+            .endianness(Endianness::Little)
+            .variants(&[ok, err])
+            .finish()
+    };
+}
+
+// Wire format: 1-byte tag, 0 = Included(T), 1 = Excluded(T), 2 = Unbounded - taken from this
+// crate's own `Readable`/`Writable` impls for `Bound`, which are what define the wire format
+// (and from the wire-format table in `src/std_types.rs`'s module docs), not from anything
+// about `core::ops::Bound`'s own declaration.
+impl<T: WireFingerprint> WireFingerprint for Bound<T> {
+    const WIRE_FINGERPRINT: u64 = {
+        let included = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0)
+            .nested::<T>()
+            .finish();
+        let excluded = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1)
+            .nested::<T>()
+            .finish();
+        let unbounded = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(2)
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1)
+            .signedness(Signedness::Unsigned)
+            .endianness(Endianness::Little)
+            .variants(&[included, excluded, unbounded])
+            .finish()
+    };
+}
+
+impl WireFingerprint for IpAddr {
+    const WIRE_FINGERPRINT: u64 = {
+        let v4 = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0)
+            .nested::<Ipv4Addr>()
+            .finish();
+        let v6 = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1)
+            .nested::<Ipv6Addr>()
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1)
+            .signedness(Signedness::Unsigned)
+            .endianness(Endianness::Little)
+            .variants(&[v4, v6])
+            .finish()
+    };
+}
+
+impl WireFingerprint for SocketAddr {
+    const WIRE_FINGERPRINT: u64 = {
+        let v4 = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(0)
+            .nested::<SocketAddrV4>()
+            .finish();
+        let v6 = FingerprintBuilder::new()
+            .tag(FingerprintTag::Struct)
+            .discriminant_tag(1)
+            .nested::<SocketAddrV6>()
+            .finish();
+        FingerprintBuilder::new()
+            .tag(FingerprintTag::Enum)
+            .width(1)
+            .signedness(Signedness::Unsigned)
+            .endianness(Endianness::Little)
+            .variants(&[v4, v6])
+            .finish()
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn distinct_primitive_types_have_distinct_fingerprints() {
+        use crate::WireFingerprint;
+        assert_ne!(u8::WIRE_FINGERPRINT, u16::WIRE_FINGERPRINT);
+        assert_ne!(u32::WIRE_FINGERPRINT, i32::WIRE_FINGERPRINT); // same width, different Signedness
+        assert_ne!(u32::WIRE_FINGERPRINT, f32::WIRE_FINGERPRINT); // same width, different tag
+        assert_ne!(bool::WIRE_FINGERPRINT, u8::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn same_primitive_type_is_deterministic() {
+        use crate::WireFingerprint;
+        assert_eq!(u64::WIRE_FINGERPRINT, u64::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn char_differs_from_u32() {
+        use crate::WireFingerprint;
+        assert_ne!(char::WIRE_FINGERPRINT, u32::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn nonzero_differs_from_its_inner_type() {
+        use crate::WireFingerprint;
+        use core::num::NonZero;
+        assert_ne!(
+            <NonZero<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn nonzero_of_different_widths_differ() {
+        use crate::WireFingerprint;
+        use core::num::NonZero;
+        assert_ne!(
+            <NonZero<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            <NonZero<u64> as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn ordering_is_enum_shaped_and_distinct_from_u8() {
+        use crate::WireFingerprint;
+        assert_ne!(core::cmp::Ordering::WIRE_FINGERPRINT, u8::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn transparent_wrappers_match_their_inner_type() {
+        use crate::WireFingerprint;
+        use core::cmp::Reverse;
+        assert_eq!(
+            <Reverse<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn ipv4_and_ipv6_differ() {
+        use crate::WireFingerprint;
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        assert_ne!(Ipv4Addr::WIRE_FINGERPRINT, Ipv6Addr::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn duration_is_struct_shaped() {
+        use crate::WireFingerprint;
+        use std::time::Duration;
+        assert_eq!(
+            Duration::WIRE_FINGERPRINT,
+            <(u64, u32) as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+}

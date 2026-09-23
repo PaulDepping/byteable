@@ -1,7 +1,9 @@
 //! Integration tests for ordered-float support.
 #![cfg(feature = "ordered-float")]
 
-use byteable::{Byteable, FromByteArray, PlainOldData, ToByteArray, TryFromByteArray};
+use byteable::{
+    Byteable, FromByteArray, PlainOldData, ToByteArray, TryFromByteArray, WireFingerprint,
+};
 use ordered_float::{NotNan, OrderedFloat};
 
 #[derive(Debug, Clone, Byteable, PartialEq, PartialOrd)]
@@ -122,6 +124,24 @@ fn ordered_float_transmute_safe() {
     fn assert_transmute_safe<T: PlainOldData>() {}
     assert_transmute_safe::<OrderedFloat<f32>>();
     assert_transmute_safe::<OrderedFloat<f64>>();
+}
+
+// --- WireFingerprint ---
+
+#[test]
+fn ordered_float_is_transparent() {
+    assert_eq!(
+        <OrderedFloat<f32> as WireFingerprint>::WIRE_FINGERPRINT,
+        f32::WIRE_FINGERPRINT
+    );
+}
+
+#[test]
+fn not_nan_differs_from_plain_float() {
+    assert_ne!(
+        <NotNan<f32> as WireFingerprint>::WIRE_FINGERPRINT,
+        f32::WIRE_FINGERPRINT
+    );
 }
 
 // --- #[derive(Byteable)] integration ---

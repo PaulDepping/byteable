@@ -14,6 +14,11 @@
 //!   `embedded-io`/`embedded-io-async`/tokio counterparts, depending on which features are
 //!   enabled.
 //!
+//! This crate is experimental: the wire format and API are still settling, and breaking
+//! changes should be expected between releases. Pin an exact version if you depend on
+//! wire-format stability, or use `#[byteable(fingerprint = ..)]` (see [`WireFingerprint`]) to
+//! catch drift at compile time.
+//!
 //! # Quick Start
 //!
 //! ## Fixed-size struct
@@ -123,10 +128,20 @@ mod alloc_types_eio_async;
 
 mod core_types;
 
+#[cfg(feature = "alloc")]
+mod alloc_types;
+
 #[cfg(feature = "std")]
 mod std_types;
 
 pub mod ext;
+
+mod fingerprint;
+pub use fingerprint::{
+    Constraint, Endianness, FingerprintBuilder, FingerprintTag, Signedness, WireFingerprint,
+};
+#[doc(hidden)]
+pub use fingerprint::{FingerprintEq, assert_fingerprint, fold_unordered};
 
 /// Hidden re-export of `bitflags` so [`impl_bitflags!`] can name its traits without the
 /// downstream crate needing `bitflags` as a direct dependency of its own.

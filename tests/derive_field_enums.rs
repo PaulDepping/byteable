@@ -402,3 +402,62 @@ fn hex_discriminant_roundtrip() {
         assert_eq!(decoded, original);
     }
 }
+
+// ── Generic field-carrying enum ──────────────────────────────────────────────
+//
+// Regression coverage for a bug where `resolve_enum_discriminants`'s generated discriminant
+// consts lived in `impl #enum_name { const ... }` with no generics on the `impl` block, even
+// though `enum_derive` (this dynamic/I-O pipeline) explicitly supports generic enums elsewhere
+// via `input.generics.split_for_impl()`. That produced E0107 ("missing generics for enum") on
+// any generic field-carrying enum. Fixed by making the discriminant consts free module-level
+// items instead of associated consts, since their values never depend on the enum's type
+// parameters in the first place.
+//
+// Gated on all four I/O pipeline features (in addition to this file's std+derive gate) because
+// the derive macro generates all four pipelines' impls whenever byteable_derive itself has all
+// four features enabled (as it does under `--all-features`), and each pipeline imposes its own
+// trait bound on `T` - this test only compiles/runs when all four are simultaneously active,
+// which is exactly the scenario that broke.
+#[cfg(all(
+    feature = "embedded-io",
+    feature = "tokio",
+    feature = "embedded-io-async"
+))]
+#[derive(Byteable, Debug, PartialEq)]
+enum GenericMessage<T>
+where
+    T: byteable::io::Readable
+        + byteable::io::Writable
+        + byteable::eio::EioReadable
+        + byteable::eio::EioWritable
+        + byteable::async_io::AsyncReadable
+        + byteable::async_io::AsyncWritable
+        + byteable::eio_async::EioAsyncReadable
+        + byteable::eio_async::EioAsyncWritable
+        + byteable::WireFingerprint
+        + std::fmt::Debug
+        + PartialEq,
+{
+    Value(T),
+    Empty,
+}
+
+#[cfg(all(
+    feature = "embedded-io",
+    feature = "tokio",
+    feature = "embedded-io-async"
+))]
+#[test]
+fn generic_field_carrying_enum_compiles_and_roundtrips() {
+    let msg: GenericMessage<u32> = GenericMessage::Value(42);
+    let mut buf = Vec::new();
+    buf.write_value(&msg).unwrap();
+    let decoded: GenericMessage<u32> = Cursor::new(&buf).read_value().unwrap();
+    assert_eq!(msg, decoded);
+
+    let empty: GenericMessage<u32> = GenericMessage::Empty;
+    let mut buf2 = Vec::new();
+    buf2.write_value(&empty).unwrap();
+    let decoded2: GenericMessage<u32> = Cursor::new(&buf2).read_value().unwrap();
+    assert_eq!(empty, decoded2);
+}

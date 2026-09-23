@@ -97,6 +97,10 @@ macro_rules! impl_bitflags {
                     <$ty as $crate::FromRawRepr>::from_raw(raw)
                 }
             }
+
+            impl $crate::WireFingerprint for $ty {
+                const WIRE_FINGERPRINT: u64 = <<$ty as $crate::__bitflags::Flags>::Bits as $crate::WireFingerprint>::WIRE_FINGERPRINT;
+            }
         )+
     };
 }

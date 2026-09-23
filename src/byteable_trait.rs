@@ -196,7 +196,13 @@ macro_rules! impl_byte_array {
 pub(crate) use impl_byte_array;
 
 unsafe_impl_plain_old_data!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
-// impl_byte_array!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+
+// Multi-byte types deliberately do not get `impl_byte_array!` here: transmuting them directly
+// would use native byte order, bypassing endianness entirely. They only reach `ToByteArray`
+// through their `RawRepr::Raw` (`LittleEndian<T>`/`BigEndian<T>`, via `impl_byte_array_endian!`
+// below), which is what actually enforces a wire-defined byte order. `u8`/`i8` are the
+// exception, single-byte types have no order to enforce and get `impl_byte_array!` directly
+// in `core_types.rs`.
 
 /// Error returned when decoding bytes into a typed value fails.
 ///
@@ -614,6 +620,54 @@ macro_rules! impl_byte_array_endian {
 impl_byte_array_endian!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 impl_from_endian_for_primitive!(u16, u32, u64, u128, i16, i32, i64, i128, f32, f64);
 
+// `T`, `LittleEndian<T>`, and `BigEndian<T>` are generated together from the same shared
+// shape facts (signedness, width) here, each stating its own explicit `Endianness` directly -
+// never by nesting another impl's *finished* fingerprint. `T::WIRE_FINGERPRINT` (in
+// `src/core_types.rs`) already folds in `.endianness(Endianness::Little)`, because an
+// unattributed `T` field's `RawRepr::Raw` is unconditionally `LittleEndian<T>` (see that
+// impl's doc comment) - so `LittleEndian<T>` delegates straight to it and the two are equal
+// by construction, while `BigEndian<T>` builds its own fingerprint from scratch with
+// `Endianness::Big` and so is guaranteed to differ.
+macro_rules! impl_fingerprint_endian_int {
+    ($signedness:expr, $($type:ty),+ $(,)?) => {
+        $(
+            impl crate::WireFingerprint for LittleEndian<$type> {
+                const WIRE_FINGERPRINT: u64 = <$type as crate::WireFingerprint>::WIRE_FINGERPRINT;
+            }
+            impl crate::WireFingerprint for BigEndian<$type> {
+                const WIRE_FINGERPRINT: u64 = crate::FingerprintBuilder::new()
+                    .tag(crate::FingerprintTag::FixedInt)
+                    .width(<$type as crate::ToByteArray>::BYTE_SIZE as u8)
+                    .signedness($signedness)
+                    .endianness(crate::Endianness::Big)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_endian_int!(crate::Signedness::Unsigned, u16, u32, u64, u128);
+impl_fingerprint_endian_int!(crate::Signedness::Signed, i16, i32, i64, i128);
+
+macro_rules! impl_fingerprint_endian_float {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl crate::WireFingerprint for LittleEndian<$type> {
+                const WIRE_FINGERPRINT: u64 = <$type as crate::WireFingerprint>::WIRE_FINGERPRINT;
+            }
+            impl crate::WireFingerprint for BigEndian<$type> {
+                const WIRE_FINGERPRINT: u64 = crate::FingerprintBuilder::new()
+                    .tag(crate::FingerprintTag::Float)
+                    .width(<$type as crate::ToByteArray>::BYTE_SIZE as u8)
+                    .endianness(crate::Endianness::Big)
+                    .finish();
+            }
+        )+
+    };
+}
+
+impl_fingerprint_endian_float!(f32, f64);
+
 /// Provides typed little-endian and big-endian representations for a type.
 ///
 /// This trait allows the derive macro to express per-field endian constraints at the type
@@ -709,5 +763,61 @@ impl<T: EndianConvert> FromEndianRepr for T {
 
     fn from_big_endian(be: Self::BE) -> Self {
         be.get()
+    }
+}
+
+impl<T: crate::WireFingerprint, const N: usize> crate::WireFingerprint for [T; N] {
+    const WIRE_FINGERPRINT: u64 = {
+        let mut b = crate::FingerprintBuilder::new().tag(crate::FingerprintTag::Struct);
+        let mut i = 0;
+        while i < N {
+            b = b.nested::<T>();
+            i += 1;
+        }
+        b.finish()
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn little_endian_matches_plain_type_big_endian_differs() {
+        // u32's RawRepr::Raw is unconditionally LittleEndian<u32> - an unattributed field and
+        // an explicit #[byteable(little_endian)] field are wire-identical (same wrapper type
+        // under the hood, not just same bytes), so they must fingerprint identically. Only
+        // BigEndian<u32> actually differs on the wire.
+        use crate::WireFingerprint;
+        assert_eq!(
+            <LittleEndian<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+        assert_ne!(
+            <BigEndian<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+        assert_ne!(
+            <BigEndian<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            <LittleEndian<u32> as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn endian_wrapper_widths_still_differ() {
+        use crate::WireFingerprint;
+        assert_ne!(
+            <BigEndian<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            <BigEndian<u64> as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn array_fingerprint_depends_on_length() {
+        use crate::WireFingerprint;
+        assert_ne!(
+            <[u32; 3] as WireFingerprint>::WIRE_FINGERPRINT,
+            <[u32; 7] as WireFingerprint>::WIRE_FINGERPRINT
+        );
     }
 }

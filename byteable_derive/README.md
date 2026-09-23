@@ -12,7 +12,7 @@ This crate provides the `#[derive(Byteable)]` macro. You almost certainly want t
 
 ```toml
 [dependencies]
-byteable = "0.31"          # includes #[derive(Byteable)] by default
+byteable = "0.37"          # includes #[derive(Byteable)] by default
 ```
 
 ## What `#[derive(Byteable)]` generates
@@ -34,8 +34,10 @@ The exact traits depend on the type and attributes used:
 | Attribute | Effect |
 |-----------|--------|
 | `#[byteable(little_endian)]` | All multi-byte fields use little-endian representation |
-| `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation |
+| `#[byteable(big_endian)]` | All multi-byte fields use big-endian representation (on an enum, applies only to the discriminant) |
 | `#[byteable(io_only)]` | Generate `Readable`/`Writable` instead of fixed-size traits |
+| `#[byteable(discriminant = uN/iN)]` | Enum only: set the discriminant's wire width, independently of any `#[repr(...)]` |
+| `#[byteable(fingerprint = "...")]` / `#[byteable(fingerprint)]` | Assert the type's compile-time `WireFingerprint` hash, to catch accidental wire-format drift |
 
 ### Field level
 
@@ -44,6 +46,16 @@ The exact traits depend on the type and attributes used:
 | `#[byteable(little_endian)]` | This field uses little-endian (overrides struct-level) |
 | `#[byteable(big_endian)]` | This field uses big-endian (overrides struct-level) |
 | `#[byteable(try_transparent)]` | Field decode may fail; struct impl becomes `TryFromRawRepr` |
+| `#[byteable(order = N)]` | Struct field only: pin this field's wire position to `N`, independently of declaration order |
+
+### Variant level
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[byteable(tag = <expr>)]` | Pin this variant's wire discriminant to `<expr>`, independently of declaration position and of any real Rust `= N` discriminant |
+
+See the [`byteable` README](https://github.com/PaulDepping/byteable#readme) for the full
+reference on `order`/`tag`/`discriminant`/`fingerprint`, including examples.
 
 ## Examples
 

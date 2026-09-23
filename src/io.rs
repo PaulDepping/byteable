@@ -253,6 +253,12 @@ pub trait ReadFixed: Read {
         T::read_fixed_from(self)
     }
 
+    /// Like [`read_fixed`](ReadFixed::read_fixed), but also returns the number of bytes
+    /// consumed from the reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadableError`] on I/O failure or decode error.
     #[inline]
     fn read_fixed_counted<T: FixedReadable>(&mut self) -> Result<(T, usize), ReadableError> {
         let mut reader = CountingReader::new(self);
@@ -290,6 +296,12 @@ pub trait ReadValue: Read {
         T::read_from(self)
     }
 
+    /// Like [`read_value`](ReadValue::read_value), but also returns the number of bytes
+    /// consumed from the reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadableError`] on I/O failure or decode error.
     #[inline]
     fn read_value_counted<T: Readable>(&mut self) -> Result<(T, usize), ReadableError> {
         let mut reader = CountingReader::new(self);
@@ -314,6 +326,11 @@ pub trait WriteFixed: Write {
         val.write_fixed_to(self)
     }
 
+    /// Like [`write_fixed`](WriteFixed::write_fixed), but returns the number of bytes written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::Error`] if writing fails.
     #[inline]
     fn write_fixed_counted(&mut self, val: &impl FixedWritable) -> io::Result<usize> {
         let mut w = CountingWriter::new(self);
@@ -349,6 +366,11 @@ pub trait WriteValue: Write {
         data.write_to(self)
     }
 
+    /// Like [`write_value`](WriteValue::write_value), but returns the number of bytes written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::Error`] if writing fails.
     #[inline]
     fn write_value_counted<T: Writable + ?Sized>(&mut self, data: &T) -> io::Result<usize> {
         let mut w = CountingWriter::new(self);

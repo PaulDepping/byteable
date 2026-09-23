@@ -16,9 +16,9 @@
 //! [`DecodeError::InvalidNaN`] if the bytes decode to NaN.
 
 use crate::{
-    BigEndian, DecodeError, EndianConvert, FromByteArray, FromEndianRepr, FromRawRepr,
-    HasEndianRepr, ToByteArray, LittleEndian, PlainOldData, RawRepr, TryFromByteArray,
-    TryFromEndianRepr, TryFromRawRepr,
+    BigEndian, Constraint, DecodeError, EndianConvert, FingerprintBuilder, FromByteArray,
+    FromEndianRepr, FromRawRepr, HasEndianRepr, LittleEndian, PlainOldData, RawRepr, ToByteArray,
+    TryFromByteArray, TryFromEndianRepr, TryFromRawRepr, WireFingerprint,
     core_types::{impl_byte_array_via_raw, impl_try_byte_array_via_raw},
 };
 use ordered_float::{FloatCore, NotNan, OrderedFloat};
@@ -113,3 +113,16 @@ impl<T: EndianConvert + FloatCore> TryFromEndianRepr for NotNan<T> {
 }
 
 impl_try_byte_array_via_raw!(NotNan<f32>, NotNan<f64>);
+
+// --- WireFingerprint ---
+
+impl<T: WireFingerprint> WireFingerprint for OrderedFloat<T> {
+    const WIRE_FINGERPRINT: u64 = <T as WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: WireFingerprint> WireFingerprint for NotNan<T> {
+    const WIRE_FINGERPRINT: u64 = FingerprintBuilder::new()
+        .nested::<T>()
+        .constraint(Constraint::NotNan)
+        .finish();
+}

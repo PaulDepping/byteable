@@ -4,7 +4,7 @@
 //! for fallible conversion from raw representation.
 #![cfg(feature = "derive")]
 
-use byteable::{Byteable, ToByteArray, RawRepr, TryFromByteArray, TryFromRawRepr};
+use byteable::{Byteable, RawRepr, ToByteArray, TryFromByteArray, TryFromRawRepr};
 
 /// A simple enum representing status codes
 #[derive(Byteable, Debug, Clone, Copy, PartialEq)]

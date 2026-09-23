@@ -219,10 +219,7 @@ mod unit_structs {
         struct Empty;
 
         assert_eq!(size_of::<Empty>(), 0);
-        assert_eq!(
-            size_of::<<Empty as byteable::ToByteArray>::ByteArray>(),
-            0
-        );
+        assert_eq!(size_of::<<Empty as byteable::ToByteArray>::ByteArray>(), 0);
     }
 }
 
@@ -553,14 +550,18 @@ mod safety {
     /// # }
     /// ```
     ///
-    /// Unannotated multi-byte primitives (`u16` without an endian wrapper) are rejected
-    /// because their native byte order is platform-dependent.
+    /// Struct-level `little_endian`/`big_endian` is rejected - it would need to reach into
+    /// nested Byteable types, which don't have a single top-level endianness. Endianness is
+    /// field-level only for structs (unannotated multi-byte fields are little-endian by
+    /// default via their own type, not platform-dependent - see `derive_enums.rs` for the
+    /// enum-level attribute, which is scoped to the discriminant only and does still work).
     ///
     /// ```compile_fail
     /// # #[cfg(feature = "derive")] {
     /// use byteable::Byteable;
     ///
     /// #[derive(Clone, Copy, Byteable)]
+    /// #[byteable(big_endian)]
     /// struct Bad {
     ///     value: u16,
     /// }
@@ -665,5 +666,170 @@ mod field_order {
             let restored: ReorderedIoTuple = std::io::Cursor::new(&buf).read_value().unwrap();
             assert_eq!(restored, value);
         }
+    }
+}
+
+// ── `WireFingerprint` derivation for structs ────────────────────────────────────
+
+mod fingerprint {
+    use byteable::{Byteable, WireFingerprint};
+
+    #[derive(Byteable)]
+    struct Declared {
+        a: u8,
+        b: u16,
+    }
+
+    // Declared fields in the opposite order (b, then a) but `order` pins the wire
+    // sequence back to match Declared's (a at wire position 0, b at wire position 1).
+    #[derive(Byteable)]
+    struct DeclaredDifferently {
+        #[byteable(order = 1)]
+        b: u16,
+        #[byteable(order = 0)]
+        a: u8,
+    }
+
+    #[test]
+    fn wire_compatible_structs_share_a_fingerprint() {
+        // Declared and DeclaredDifferently both encode as [a (1 byte), b (2 bytes LE)]
+        // despite declaring their fields in opposite order, so they must fingerprint
+        // identically too, matching Struct::WIRE_FINGERPRINT for (u8, u16) in that wire order.
+        assert_eq!(
+            Declared::WIRE_FINGERPRINT,
+            DeclaredDifferently::WIRE_FINGERPRINT
+        );
+        assert_eq!(
+            Declared::WIRE_FINGERPRINT,
+            <(u8, u16) as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[derive(Byteable)]
+    struct DifferentTypes {
+        a: u8,
+        b: u32, // different width from Declared's b: u16
+    }
+
+    #[test]
+    fn structurally_different_structs_differ() {
+        assert_ne!(Declared::WIRE_FINGERPRINT, DifferentTypes::WIRE_FINGERPRINT);
+    }
+
+    #[derive(Byteable)]
+    #[byteable(io_only)]
+    struct IoOnlyVersion {
+        a: u8,
+        b: u16,
+    }
+
+    #[test]
+    fn io_only_and_fixed_size_share_a_fingerprint_when_structurally_identical() {
+        // Whether a struct uses the fixed-size or io_only pipeline is deliberately NOT part
+        // of the fingerprint - only the wire bytes are.
+        assert_eq!(Declared::WIRE_FINGERPRINT, IoOnlyVersion::WIRE_FINGERPRINT);
+    }
+
+    // The fingerprint is built on the user-facing field type directly (substituting
+    // `BigEndian<T>` only for an explicit big-endian field), not on the hidden raw struct's
+    // field types - those two can differ for field types whose `RawRepr::Raw` is a distinct
+    // wrapper with no `WireFingerprint` impl of its own (e.g. `bool`, `char`). These tests
+    // exercise exactly that class of field type.
+
+    #[derive(Byteable)]
+    struct WithBool {
+        #[byteable(try_transparent)]
+        b: bool,
+    }
+
+    #[derive(Byteable)]
+    struct WithU8 {
+        b: u8,
+    }
+
+    #[test]
+    fn bool_field_is_distinguishable_from_u8_field() {
+        // bool rejects any byte other than 0/1 on decode; u8 doesn't. A fingerprint that
+        // can't tell these apart defeats the point of the feature for this field type.
+        assert_ne!(WithBool::WIRE_FINGERPRINT, WithU8::WIRE_FINGERPRINT);
+    }
+
+    #[derive(Byteable)]
+    struct WithNetworkField {
+        addr: std::net::Ipv4Addr,
+    }
+
+    #[test]
+    fn field_type_with_a_distinct_raw_wrapper_compiles_and_fingerprints() {
+        // Ipv4Addr's own RawRepr::Raw is a private wrapper type with no WireFingerprint
+        // impl of its own - this is a compile-time regression test as much as a runtime
+        // one: it must build at all. Value itself isn't asserted against anything else,
+        // just needs to exist and be deterministic.
+        assert_eq!(
+            WithNetworkField::WIRE_FINGERPRINT,
+            WithNetworkField::WIRE_FINGERPRINT
+        );
+    }
+
+    #[derive(Byteable)]
+    #[byteable(io_only)]
+    struct GenericIo<T: byteable::WireFingerprint + byteable::TryFromRawRepr> {
+        value: T,
+    }
+
+    #[test]
+    fn generic_io_only_struct_compiles_and_fingerprints() {
+        // Regression test for a real compile break found during review: the io_only
+        // path's WireFingerprint impl must carry the struct's own generics/where-clause,
+        // the same way its other generated impls already do.
+        assert_ne!(
+            <GenericIo<u32> as byteable::WireFingerprint>::WIRE_FINGERPRINT,
+            <GenericIo<u64> as byteable::WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+}
+
+mod fingerprint_assertion {
+    // This struct's asserted value must be the actual WIRE_FINGERPRINT for
+    // `struct { a: u8 }`. If this fails to compile, the value below is stale - read the
+    // compile error (which names the actual current fingerprint) and paste it in.
+    #[derive(byteable::Byteable)]
+    #[byteable(fingerprint = "0xa67a58f8363edba2")]
+    struct Checked {
+        a: u8,
+    }
+
+    #[test]
+    fn pins_value() {
+        // This is the actual guard: the struct above compiling at all only proves the
+        // assertion mechanism didn't *fail* - it would compile just as cleanly if the
+        // mechanism silently no-op'd (e.g. a malformed or duplicate attribute value quietly
+        // treated as absent). Checking the real `WIRE_FINGERPRINT` independently of the
+        // attribute confirms the value asserted above is the value the type actually
+        // produces, not a coincidence of the assertion never having fired.
+        assert_eq!(
+            <Checked as byteable::WireFingerprint>::WIRE_FINGERPRINT,
+            0xa67a58f8363edba2
+        );
+    }
+
+    // The mismatch diagnostic renders the actual fingerprint in *decimal* - that comes out of
+    // rustc's own const-generic formatting inside `#[diagnostic::on_unimplemented]` and can't
+    // be changed - and tells the user to paste that value back into the attribute. So the
+    // decimal form has to be accepted, or the feature's central copy-paste workflow is broken.
+    // Same type, same value as `Checked` above, written the other way.
+    #[derive(byteable::Byteable)]
+    #[byteable(fingerprint = "11995998380539960226")]
+    struct CheckedDecimal {
+        a: u8,
+    }
+
+    #[test]
+    fn decimal_form_pins_the_same_value_as_hex() {
+        assert_eq!(11995998380539960226u64, 0xa67a58f8363edba2);
+        assert_eq!(
+            <CheckedDecimal as byteable::WireFingerprint>::WIRE_FINGERPRINT,
+            11995998380539960226
+        );
     }
 }

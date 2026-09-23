@@ -72,8 +72,8 @@ fn u128_roundtrip() {
 }
 
 #[test]
-fn u128_byte_layout_is_native_endian() {
-    assert_eq!(1u128.to_byte_array(), 1u128.to_ne_bytes());
+fn u128_byte_layout_is_little_endian() {
+    assert_eq!(1u128.to_byte_array(), 1u128.to_le_bytes());
 }
 
 #[test]

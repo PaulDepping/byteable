@@ -495,6 +495,56 @@ impl_tuple!(A, B, C, D, E, F, G, H, I, J);
 impl_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
+// Note on cfg gating: this whole module (`mod std_types`) is only compiled under
+// `#[cfg(feature = "std")]` (see lib.rs), so the `WireFingerprint` impls below are `std`-only
+// too - which is correct only because each of these types is itself `std`-only
+// (`HashMap`/`HashSet` need `std`'s `RandomState`; `PathBuf`/`CString` and the smart pointers
+// get their wire impls here and nowhere else).
+//
+// Everything that is NOT `std`-only has deliberately been moved out, because a fingerprint
+// gated more narrowly than the type's own wire impls is a compile error waiting to happen:
+// tuples, `str`, `Option`, `Result`, `Bound`, `IpAddr` and `SocketAddr` are fingerprinted
+// unconditionally in `core_types.rs` (their wire impls exist on the `embedded-io` pipeline
+// with neither `std` nor `alloc`), and the `alloc`-backed collections are fingerprinted in
+// `alloc_types.rs` (their wire impls exist in `alloc_types_eio.rs` under `alloc`).
+impl<K: crate::WireFingerprint, V: crate::WireFingerprint, S> crate::WireFingerprint
+    for HashMap<K, V, S>
+{
+    const WIRE_FINGERPRINT: u64 = <Vec<(K, V)> as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: crate::WireFingerprint, S> crate::WireFingerprint for HashSet<T, S> {
+    const WIRE_FINGERPRINT: u64 = <Vec<T> as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl crate::WireFingerprint for PathBuf {
+    const WIRE_FINGERPRINT: u64 = <String as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl crate::WireFingerprint for Path {
+    const WIRE_FINGERPRINT: u64 = <str as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl crate::WireFingerprint for CString {
+    const WIRE_FINGERPRINT: u64 = <Vec<u8> as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl crate::WireFingerprint for CStr {
+    const WIRE_FINGERPRINT: u64 = <Vec<u8> as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: crate::WireFingerprint + ?Sized> crate::WireFingerprint for Arc<T> {
+    const WIRE_FINGERPRINT: u64 = <T as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: crate::WireFingerprint + ?Sized> crate::WireFingerprint for Rc<T> {
+    const WIRE_FINGERPRINT: u64 = <T as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
+impl<T: crate::WireFingerprint> crate::WireFingerprint for Box<T> {
+    const WIRE_FINGERPRINT: u64 = <T as crate::WireFingerprint>::WIRE_FINGERPRINT;
+}
+
 // Wire format: `u64` byte length (LE) + UTF-8 bytes. Rejects invalid UTF-8 with DecodeError.
 impl Readable for String {
     fn read_from(reader: &mut (impl Read + ?Sized)) -> Result<Self, ReadableError> {
@@ -755,5 +805,92 @@ impl Writable for CString {
 impl Writable for PathBuf {
     fn write_to(&self, writer: &mut (impl Write + ?Sized)) -> io::Result<()> {
         self.as_path().write_to(writer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tuple_fingerprint_depends_on_element_order() {
+        use crate::WireFingerprint;
+        assert_ne!(
+            <(u8, u32) as WireFingerprint>::WIRE_FINGERPRINT,
+            <(u32, u8) as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn tuple_and_array_of_same_element_type_and_count_match() {
+        // Deliberate: byte-identical wire shapes should fingerprint identically. A 2-tuple of
+        // u32 and a [u32; 2] both encode as "two consecutive u32s, no framing" - same promise
+        // as the struct/tuple-struct/bare-tuple unification elsewhere in this design.
+        use crate::WireFingerprint;
+        assert_eq!(
+            <(u32, u32) as WireFingerprint>::WIRE_FINGERPRINT,
+            <[u32; 2] as WireFingerprint>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn string_differs_from_vec_u8() {
+        use crate::WireFingerprint;
+        assert_ne!(String::WIRE_FINGERPRINT, Vec::<u8>::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn hashmap_pair_matches_tuple() {
+        use crate::WireFingerprint;
+        use std::collections::HashMap;
+        // A HashMap<K,V> is "count + alternating key/value pairs" - byte-identical to a
+        // Sequence of (K, V). Deliberate equality, same reasoning as the array/tuple test.
+        assert_eq!(
+            HashMap::<u32, String>::WIRE_FINGERPRINT,
+            Vec::<(u32, String)>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn option_and_result_are_enum_shaped_and_distinct() {
+        use crate::WireFingerprint;
+        assert_ne!(Option::<u32>::WIRE_FINGERPRINT, u32::WIRE_FINGERPRINT);
+        assert_ne!(
+            <Result<u32, String> as WireFingerprint>::WIRE_FINGERPRINT,
+            Option::<u32>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn hashset_matches_vec_of_same_element() {
+        use crate::WireFingerprint;
+        use std::collections::HashSet;
+        assert_eq!(
+            HashSet::<u32>::WIRE_FINGERPRINT,
+            Vec::<u32>::WIRE_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn pathbuf_matches_string() {
+        use crate::WireFingerprint;
+        use std::path::PathBuf;
+        assert_eq!(PathBuf::WIRE_FINGERPRINT, String::WIRE_FINGERPRINT);
+    }
+
+    #[test]
+    fn arc_rc_box_are_transparent() {
+        use crate::WireFingerprint;
+        use std::{rc::Rc, sync::Arc};
+        assert_eq!(
+            <Arc<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+        assert_eq!(
+            <Rc<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
+        assert_eq!(
+            <Box<u32> as WireFingerprint>::WIRE_FINGERPRINT,
+            u32::WIRE_FINGERPRINT
+        );
     }
 }

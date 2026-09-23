@@ -1,6 +1,6 @@
 [package]
 name = "byteable"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/PaulDepping/byteable"
@@ -24,7 +24,7 @@ tinyvec = ["dep:tinyvec"]
 defmt = ["dep:defmt"]
 
 [dependencies]
-byteable_derive = { version = "0.23.0", path = "byteable_derive", optional = true }
+byteable_derive = { version = "0.24.0", path = "byteable_derive", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ordered-float = { version = "5", optional = true, default-features = false }
 embedded-io = { version = "0.7", optional = true }
@@ -51,6 +51,22 @@ required-features = ["std", "derive"]
 [[example]]
 name = "file_format"
 required-features = ["std", "derive"]
+
+[[example]]
+name = "field_order"
+required-features = ["derive"]
+
+[[example]]
+name = "fingerprint"
+required-features = ["derive"]
+
+[[example]]
+name = "ext_types"
+required-features = ["derive", "std", "heapless", "bitflags", "ordered-float"]
+
+[[example]]
+name = "embedded_io"
+required-features = ["derive", "embedded-io"]
 
 [[bench]]
 name = "benchmarks"

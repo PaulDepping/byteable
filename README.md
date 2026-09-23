@@ -6,6 +6,11 @@
 
 Byte-level serialization and deserialization for Rust types.
 
+This crate is experimental: the wire format and API are still settling, and breaking changes
+should be expected between releases. Pin an exact version if you depend on wire-format
+stability, or use [`#[byteable(fingerprint = ..)]`](#pinning-the-wire-format-fingerprint) to
+catch drift at compile time.
+
 ## What is byteable?
 
 `byteable` gives you two paths for working with binary data:
@@ -20,44 +25,46 @@ Byte-level serialization and deserialization for Rust types.
   any `std::io::Read` / `Write` (or their async `tokio` equivalents).
 
 Both paths share the same derive macro and attribute syntax, and both produce deterministic,
-self-describing wire formats.
+positional wire formats: no type tags or field names on the wire, just the bytes each field
+inherently needs (plus, for a field-carrying enum, the discriminant that says which variant
+follows).
 
 ## Installation
 
 ```toml
 [dependencies]
 # default: derive macro + std I/O support
-byteable = "0.36"
+byteable = "0.37"
 
 # with async (tokio) support
-byteable = { version = "0.36", features = ["tokio"] }
+byteable = { version = "0.37", features = ["tokio"] }
 
 # with ordered-float support
-byteable = { version = "0.36", features = ["ordered-float"] }
+byteable = { version = "0.37", features = ["ordered-float"] }
 
 # with bitflags support
-byteable = { version = "0.36", features = ["bitflags"] }
+byteable = { version = "0.37", features = ["bitflags"] }
 
 # with heapless support (fixed-capacity collections, no `alloc` needed)
-byteable = { version = "0.36", features = ["heapless"] }
+byteable = { version = "0.37", features = ["heapless"] }
 
 # with arrayvec support (fixed-capacity collections, no `alloc` needed)
-byteable = { version = "0.36", features = ["arrayvec"] }
+byteable = { version = "0.37", features = ["arrayvec"] }
 
 # with tinyvec support (fixed-capacity, no unsafe, no `alloc` needed)
-byteable = { version = "0.36", features = ["tinyvec"] }
+byteable = { version = "0.37", features = ["tinyvec"] }
 
 # with defmt support (Format impls for this crate's own error/wrapper types)
-byteable = { version = "0.36", features = ["defmt"] }
+byteable = { version = "0.37", features = ["defmt"] }
 
 # with embedded-io support (no_std friendly, sync - combine with `alloc` for Vec/String support)
-byteable = { version = "0.36", features = ["embedded-io"] }
+byteable = { version = "0.37", features = ["embedded-io"] }
 
 # with embedded-io-async support (no_std friendly, async - combine with `alloc` for Vec/String support)
-byteable = { version = "0.36", features = ["embedded-io-async"] }
+byteable = { version = "0.37", features = ["embedded-io-async"] }
 
 # everything
-byteable = { version = "0.36", features = ["all"] }
+byteable = { version = "0.37", features = ["all"] }
 ```
 
 ## Quick Start
@@ -181,17 +188,37 @@ async fn example() {
 
 ### Controlling endianness
 
+Endianness is field-level for structs - unannotated multi-byte fields are little-endian by
+default (see the Wire Format Reference below), so you only need to annotate a field to opt
+into big-endian:
+
 ```rust
 use byteable::Byteable;
 
 #[derive(Byteable)]
-#[byteable(big_endian)]          // default for all fields
 struct NetworkHeader {
     #[byteable(big_endian)]
     magic: u32,
-    #[byteable(little_endian)]   // field-level override
-    payload_len: u16,
+    payload_len: u16,             // little-endian by default, no annotation needed
     version: u8,
+}
+```
+
+`#[byteable(little_endian)]`/`#[byteable(big_endian)]` at the *struct* level is a compile
+error, not a default-for-all-fields shorthand - it would need to reach into nested `Byteable`
+types, which don't have a single top-level endianness. The one place a struct/enum-level
+`little_endian`/`big_endian` attribute *is* valid is on an enum, where it controls only the
+discriminant (never variant-carried fields):
+
+```rust
+use byteable::Byteable;
+
+#[derive(Byteable, Clone, Copy)]
+#[byteable(discriminant = u16)]
+#[byteable(big_endian)]           // discriminant only
+enum Status {
+    Ok,
+    Error { code: u16 },          // `code` is still little-endian by default
 }
 ```
 
@@ -218,15 +245,19 @@ struct Header {
 }
 ```
 
-**`#[byteable(tag = N)]`** (enum variants) pins a variant's wire discriminant to the integer
-literal `N` (which may be negative), independently of declaration order and of Rust's own
-`= N` discriminant syntax. Variants without an explicit `tag` count up from the previous
-resolved value (or `0` for the first variant).
+**`#[byteable(tag = <expr>)]`** (enum variants) pins a variant's wire discriminant to `<expr>`,
+independently of its declaration position and of any real Rust `= N` discriminant. `<expr>`
+can be any expression valid in a `const X: repr_ty = <expr>;` position - an integer literal
+(positive or negative), a named const, or a simple arithmetic expression - and is range-checked
+against the enum's resolved discriminant width by rustc itself, with rustc's own diagnostics
+for anything that doesn't fit. Variants without an explicit `tag` continue from the previous
+variant's resolved value + 1 (or from `0` for the first variant); two variants resolving to
+the same value is a compile error.
 
 **Important: Rust's real `enum Foo { A = 1 }` discriminant syntax is never read for
-wire-encoding purposes**, for any enum, unit-only or field-carrying. It still compiles and
-still affects `as` casts and `std::mem::discriminant` as normal Rust - it's simply invisible to
-`byteable`'s wire format. If you need a specific wire value, use `#[byteable(tag = N)]`.
+wire-encoding purposes** - it still compiles and affects `as` casts and `std::mem::discriminant`
+as normal Rust, but it's simply invisible to `byteable`'s wire format. If you need a specific
+wire value, use `#[byteable(tag = <expr>)]`.
 
 **`#[byteable(discriminant = uN/iN)]`** (enums) overrides the *wire width* of the enum's
 discriminant - `u8`/`u16`/`u32`/`u64`/`u128`/`i8`/`i16`/`i32`/`i64`/`i128` - independently of
@@ -251,13 +282,70 @@ enum Message {
 }
 ```
 
-A `u128`-specific quirk: `tag` is parsed as `i128`, so no positive literal can express a value
-in the upper half of `u128`'s range (`2^127` to `u128::MAX`). Under
-`#[byteable(discriminant = u128)]`, a *negative* `tag` is the documented way to reach that
-range via two's-complement wraparound - e.g. `tag = -1` means `u128::MAX`, `tag = -10` means
-`u128::MAX - 9`. This is the one wire width where a negative `tag` is accepted; every other
-unsigned width (`u8`/`u16`/`u32`/`u64`) rejects a negative `tag` as a compile error since it
-can never round-trip there.
+### Pinning the wire format: `fingerprint`
+
+Every derived type gets a `WireFingerprint` impl - a `u64` computed at compile time from the
+type's exact wire shape: field types and their order, endianness, and (for enums) the
+discriminant's width, signedness and endianness plus every variant's tag and payload. Two
+types that encode and decode identical bytes hash identically; any edit that moves a byte
+changes the hash.
+
+**`#[byteable(fingerprint = "...")]`** (on the struct or enum itself) turns that into a
+compile-time assertion. If the wire format drifts - a reordered field, a widened integer, a
+renumbered variant - the build breaks instead of silently shipping an incompatible format:
+
+```rust
+use byteable::Byteable;
+
+#[derive(Byteable)]
+#[byteable(fingerprint = "0xa67a58f8363edba2")]
+struct Checked {
+    a: u8,
+}
+```
+
+The value can be written as **`0x`-prefixed hex or as plain decimal**. Both are accepted
+because the mismatch diagnostic renders the actual fingerprint in decimal - that comes from
+rustc's own const-generic formatting and can't be changed - and tells you to paste it back in,
+so pasting it back in has to work. With a `0x` prefix the value is read as hex; without one,
+as decimal.
+
+To find the value in the first place, use the bare **`#[byteable(fingerprint)]`** form. It
+asserts against `0`, which no real type hashes to, so the first build fails and the error names
+the real value:
+
+```text
+error[E0277]: byteable: wire-format fingerprint mismatch (asserted 0, actual 11995998380539960226)
+  = note: if this change was intentional, replace the asserted value with 11995998380539960226
+```
+
+Copy that number into the attribute and the assertion is armed. The same procedure applies
+whenever a deliberate format change makes it fire again.
+
+The attribute is type-level only; on a field or variant it is a compile error, since there
+would be nothing there for it to assert.
+
+> **Generic types must bound `WireFingerprint` themselves.** The generated
+> `impl WireFingerprint for YourType<T>` reuses your type's own `where` clause verbatim - the
+> derive macro cannot add bounds to it. So a generic type with a field or variant whose type
+> needs `WireFingerprint` must say so itself:
+>
+> ```rust
+> use byteable::{Byteable, TryFromRawRepr, WireFingerprint};
+>
+> #[derive(Byteable)]
+> #[byteable(io_only)]
+> struct Envelope<T>
+> where
+>     T: TryFromRawRepr + WireFingerprint, // `WireFingerprint` is the part you must add
+> {
+>     id: u32,
+>     payload: T,
+> }
+> ```
+>
+> This applies to every generic derived type, whether or not it uses
+> `#[byteable(fingerprint = ..)]`.
 
 ### bitflags support
 

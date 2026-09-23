@@ -126,3 +126,10 @@ async fn embedded_io_async_pipeline_roundtrip() {
     let restored: WideFlags = r.read_fixed().await.unwrap();
     assert_eq!(val, restored);
 }
+
+#[test]
+fn bitflags_fingerprint_matches_underlying_int() {
+    use byteable::WireFingerprint;
+    assert_eq!(Perms::WIRE_FINGERPRINT, u8::WIRE_FINGERPRINT);
+    assert_eq!(WideFlags::WIRE_FINGERPRINT, u32::WIRE_FINGERPRINT);
+}
