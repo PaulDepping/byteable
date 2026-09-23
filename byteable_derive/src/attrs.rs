@@ -1,50 +1,87 @@
-pub fn parse_field_order(attrs: &[syn::Attribute]) -> Option<u64> {
+/// One field's `#[byteable(order = ..)]` state, for [`resolve_field_wire_order`]. `span` is the
+/// order literal's own span when the field is annotated, or the field's own span when it isn't -
+/// either way, the span a misconfiguration error about *this field* should point at.
+pub struct FieldOrderEntry {
+    pub order: Option<u64>,
+    pub span: proc_macro2::Span,
+}
+
+/// Returns the field's `#[byteable(order = N)]` value and the literal's own span (for pointing
+/// a later misconfiguration error - duplicate/out-of-range/partial annotation - directly at the
+/// value that's wrong, rather than at the derive site). Panics (via [`std::panic::panic_any`]
+/// with the `syn::Error` payload, matching [`parse_variant_tag`]) on a malformed `order = ..`
+/// (missing `=`, non-integer value) or a second `order = ..` within the same field's attribute
+/// list, rather than silently keeping the first value - the same "don't swallow a malformed
+/// attribute" rule applied throughout this module.
+pub fn parse_field_order(attrs: &[syn::Attribute]) -> Option<(u64, proc_macro2::Span)> {
     let mut result = None;
     for attr in attrs {
         if !attr.path().is_ident("byteable") {
             continue;
         }
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("order") {
                 let lit: syn::LitInt = meta.value()?.parse()?;
+                let span = lit.span();
                 let value: u64 = lit.base10_parse()?;
                 if result.is_some() {
                     return Err(meta.error("duplicate #[byteable(order = ..)]"));
                 }
-                result = Some(value);
+                result = Some((value, span));
             }
             Ok(())
-        });
+        })
+        .unwrap_or_else(|e| std::panic::panic_any(e));
     }
     result
 }
 
-pub fn resolve_field_wire_order(orders: &[Option<u64>]) -> Result<Vec<usize>, String> {
-    let n = orders.len();
-    let annotated = orders.iter().filter(|o| o.is_some()).count();
+/// Resolves each field's wire position from its [`FieldOrderEntry`], or the identity order if
+/// none are annotated. Every returned `Err` carries the span of the specific field responsible
+/// (see `FieldOrderEntry::span`), which the caller re-raises via
+/// `std::panic::panic_any` so the top-level derive entry point can turn it into a
+/// correctly-anchored `compile_error!` instead of a generic derive-site one.
+pub fn resolve_field_wire_order(entries: &[FieldOrderEntry]) -> Result<Vec<usize>, syn::Error> {
+    let n = entries.len();
+    let annotated = entries.iter().filter(|e| e.order.is_some()).count();
 
     if annotated == 0 {
         return Ok((0..n).collect());
     }
     if annotated != n {
-        return Err(format!(
-            "#[byteable(order = ..)] must annotate every field or none; {annotated} of {n} \
-             fields are annotated"
+        // Points at the first field missing the annotation - with a mix of annotated and
+        // unannotated fields, that's the one the user most likely forgot.
+        let missing = entries
+            .iter()
+            .find(|e| e.order.is_none())
+            .expect("annotated != n implies at least one field lacks an order");
+        return Err(syn::Error::new(
+            missing.span,
+            format!(
+                "#[byteable(order = ..)] must annotate every field or none; {annotated} of {n} \
+                 fields are annotated, but this one isn't"
+            ),
         ));
     }
 
     let mut seen = vec![false; n];
     let mut wire_order = vec![0usize; n];
-    for (decl_idx, order) in orders.iter().enumerate() {
-        let order = order.unwrap() as usize;
+    for (decl_idx, entry) in entries.iter().enumerate() {
+        let order = entry.order.unwrap() as usize;
         if order >= n {
-            return Err(format!(
-                "#[byteable(order = {order})] is out of range; with {n} annotated fields, \
-                 valid values are 0..{n}"
+            return Err(syn::Error::new(
+                entry.span,
+                format!(
+                    "#[byteable(order = {order})] is out of range; with {n} annotated fields, \
+                     valid values are 0..{n}"
+                ),
             ));
         }
         if seen[order] {
-            return Err(format!("duplicate #[byteable(order = {order})]"));
+            return Err(syn::Error::new(
+                entry.span,
+                format!("duplicate #[byteable(order = {order})]"),
+            ));
         }
         seen[order] = true;
         wire_order[order] = decl_idx;
@@ -75,7 +112,7 @@ pub fn parse_variant_tag(attrs: &[syn::Attribute]) -> Option<syn::Expr> {
             }
             Ok(())
         })
-        .unwrap_or_else(|e| panic!("{e}"));
+        .unwrap_or_else(|e| std::panic::panic_any(e));
     }
     result
 }
@@ -84,15 +121,23 @@ pub fn parse_variant_tag(attrs: &[syn::Attribute]) -> Option<syn::Expr> {
 /// wire type used for the enum's discriminant independently of any real `#[repr(...)]` on the
 /// enum. The `<ident>` must be one of the 10 fixed-width integer type names
 /// (`u8`/`u16`/`u32`/`u64`/`u128`/`i8`/`i16`/`i32`/`i64`/`i128`); anything else, or a duplicate
-/// `discriminant = ..` on the same item, is a hard parse error that's silently swallowed here
-/// (unlike `parse_variant_tag`'s errors, which now panic - see its doc comment), so callers see
-/// `None` and the derive falls back to `extract_repr_type`/the auto-select ladder.
+/// `discriminant = ..` on the same item, panics (via [`std::panic::panic_any`] with the
+/// `syn::Error` payload, matching [`parse_variant_tag`]) rather than silently falling back to
+/// `None` and letting the derive pick `extract_repr_type`/the auto-select ladder instead - a
+/// typo'd width silently choosing a different width than the one asked for is exactly the
+/// failure mode this whole module exists to avoid.
 pub fn parse_discriminant_override(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
     let mut result = None;
     for attr in attrs {
         if !attr.path().is_ident("byteable") {
             continue;
         }
+        // A direct, unconditional panic for the `discriminant`-specific error branches below
+        // (rather than `return Err(..)`) is deliberate: the call is `let _ = ..`, so an `Err`
+        // for *this* key would be silently swallowed exactly like a malformed value for any
+        // other key in the same list is (see the `else if` branch below) - the right behavior
+        // for "somebody else's business to validate", but wrong for `discriminant` itself,
+        // which this function exists specifically to validate.
         let _ = attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("discriminant") {
                 let ident: syn::Ident = meta.value()?.parse()?;
@@ -108,14 +153,21 @@ pub fn parse_discriminant_override(attrs: &[syn::Attribute]) -> Option<syn::Iden
                         | "u128"
                         | "i128"
                 ) {
-                    return Err(meta.error(
+                    std::panic::panic_any(meta.error(
                         "#[byteable(discriminant = ..)] must be one of u8/u16/u32/u64/u128/i8/i16/i32/i64/i128",
                     ));
                 }
                 if result.is_some() {
-                    return Err(meta.error("duplicate #[byteable(discriminant = ..)]"));
+                    std::panic::panic_any(meta.error("duplicate #[byteable(discriminant = ..)]"));
                 }
                 result = Some(ident);
+            } else if meta.input.peek(syn::Token![=]) {
+                // Not our key - consume its value so `parse_nested_meta` can keep scanning the
+                // rest of the list (e.g. `#[byteable(discriminant = u8, fingerprint = "..")]`)
+                // instead of leaving it unconsumed, which `parse_nested_meta` would otherwise
+                // report itself as a generic, unhelpful "expected `,`" - somebody else's
+                // business to validate, same reasoning as `reject_non_type_level_fingerprint`.
+                meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
         });
@@ -213,53 +265,97 @@ mod tests {
     use super::*;
     use syn::parse_quote;
 
+    /// Runs `f`, which is expected to panic with a `syn::Error` payload (the convention every
+    /// hard-error path in this module and `lib.rs` now follows - see each function's doc
+    /// comment), and returns that error so its message can be asserted on. `#[should_panic]`
+    /// can't be used for this: it matches the panic payload against a `&str`/`String`, and a
+    /// `syn::Error` payload is neither, so it would report "panic did not contain expected
+    /// string" even when the panic and its message are both correct.
+    fn expect_abort(f: impl FnOnce() + std::panic::UnwindSafe) -> syn::Error {
+        let payload = std::panic::catch_unwind(f).expect_err("expected a panic");
+        *payload
+            .downcast::<syn::Error>()
+            .expect("panic payload should be a syn::Error - see each function's doc comment")
+    }
+
+    fn entries(orders: &[Option<u64>]) -> Vec<FieldOrderEntry> {
+        orders
+            .iter()
+            .map(|&order| FieldOrderEntry {
+                order,
+                span: proc_macro2::Span::call_site(),
+            })
+            .collect()
+    }
+
     #[test]
     fn parse_field_order_reads_value() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(order = 3)])];
-        assert_eq!(parse_field_order(&attrs), Some(3));
+        assert_eq!(parse_field_order(&attrs).map(|(v, _)| v), Some(3));
     }
 
     #[test]
     fn parse_field_order_absent() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(big_endian)])];
-        assert_eq!(parse_field_order(&attrs), None);
+        assert!(parse_field_order(&attrs).is_none());
     }
 
     #[test]
     fn parse_field_order_combined_with_endian() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(big_endian, order = 1)])];
-        assert_eq!(parse_field_order(&attrs), Some(1));
+        assert_eq!(parse_field_order(&attrs).map(|(v, _)| v), Some(1));
+    }
+
+    #[test]
+    fn parse_field_order_rejects_missing_value() {
+        let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(order)])];
+        let err = expect_abort(|| {
+            parse_field_order(&attrs);
+        });
+        assert!(err.to_string().contains('='));
+    }
+
+    #[test]
+    fn parse_field_order_rejects_duplicate_within_one_field() {
+        let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(order = 1, order = 2)])];
+        let err = expect_abort(|| {
+            parse_field_order(&attrs);
+        });
+        assert!(err.to_string().contains("duplicate"));
     }
 
     #[test]
     fn resolve_no_annotations_is_identity() {
-        assert_eq!(resolve_field_wire_order(&[None, None, None]), Ok(vec![0, 1, 2]));
+        assert_eq!(
+            resolve_field_wire_order(&entries(&[None, None, None])).unwrap(),
+            vec![0, 1, 2]
+        );
     }
 
     #[test]
     fn resolve_full_reorder() {
         // field 0 -> wire pos 2, field 1 -> wire pos 0, field 2 -> wire pos 1
-        let orders = [Some(2), Some(0), Some(1)];
+        let orders = entries(&[Some(2), Some(0), Some(1)]);
         // wire_order[wire_pos] = decl_idx
-        assert_eq!(resolve_field_wire_order(&orders), Ok(vec![1, 2, 0]));
+        assert_eq!(resolve_field_wire_order(&orders).unwrap(), vec![1, 2, 0]);
     }
 
     #[test]
     fn resolve_partial_annotation_errors() {
-        let orders = [Some(0), None, Some(1)];
+        let orders = entries(&[Some(0), None, Some(1)]);
         assert!(resolve_field_wire_order(&orders).is_err());
     }
 
     #[test]
     fn resolve_gap_errors() {
         // 2 fields, orders {0, 2} - not dense 0..2
-        let orders = [Some(0), Some(2)];
+        let orders = entries(&[Some(0), Some(2)]);
         assert!(resolve_field_wire_order(&orders).is_err());
     }
 
     #[test]
     fn resolve_duplicate_errors() {
-        let orders = [Some(0), Some(0)];
+        let orders = entries(&[Some(0), Some(0)]);
         assert!(resolve_field_wire_order(&orders).is_err());
     }
 
@@ -288,20 +384,24 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "expected")]
     fn parse_variant_tag_rejects_missing_value() {
         // `#[byteable(tag)]` with no `= value` must panic rather than be silently accepted as
         // if `tag` were absent - same "don't swallow a malformed attribute" rule as the
         // duplicate-tag and duplicate-fingerprint checks below.
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(tag)])];
-        parse_variant_tag(&attrs);
+        let err = expect_abort(|| {
+            parse_variant_tag(&attrs);
+        });
+        assert!(err.to_string().contains('='));
     }
 
     #[test]
-    #[should_panic(expected = "duplicate")]
     fn parse_variant_tag_rejects_duplicate() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(tag = 1, tag = 2)])];
-        parse_variant_tag(&attrs);
+        let err = expect_abort(|| {
+            parse_variant_tag(&attrs);
+        });
+        assert!(err.to_string().contains("duplicate"));
     }
 
     #[test]
@@ -319,19 +419,28 @@ mod tests {
 
     #[test]
     fn parse_discriminant_override_rejects_invalid_type_name() {
+        // Regression test: this used to silently fall back to `None` (see the function's doc
+        // comment) - the very first thing that should happen for a typo'd width is a compile
+        // error, not a silently different discriminant width than the one asked for.
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(discriminant = u24)])];
-        assert_eq!(parse_discriminant_override(&attrs), None);
+        let err = expect_abort(|| {
+            parse_discriminant_override(&attrs);
+        });
+        assert!(
+            err.to_string()
+                .contains("u8/u16/u32/u64/u128/i8/i16/i32/i64/i128")
+        );
     }
 
     #[test]
     fn parse_discriminant_override_rejects_duplicate() {
+        // Also used to silently keep the first value - see the function's doc comment.
         let attrs: Vec<syn::Attribute> =
             vec![parse_quote!(#[byteable(discriminant = u8, discriminant = u16)])];
-        let ident = parse_discriminant_override(&attrs);
-        // First value sticks (mirrors parse_variant_tag_rejects_duplicate's documented
-        // left-to-right, stop-at-first-error behavior of parse_nested_meta); what matters is
-        // the second value is never accepted.
-        assert_eq!(ident.map(|i| i.to_string()), Some("u8".to_string()));
+        let err = expect_abort(|| {
+            parse_discriminant_override(&attrs);
+        });
+        assert!(err.to_string().contains("duplicate"));
     }
 
     #[test]
@@ -374,7 +483,10 @@ mod tests {
     #[test]
     fn parse_fingerprint_value_reads_0x_prefixed_hex() {
         assert_eq!(parse_fingerprint_value("0x1234").unwrap(), 0x1234);
-        assert_eq!(parse_fingerprint_value("0xfbcd309b421eb67c").unwrap(), 0xfbcd309b421eb67c);
+        assert_eq!(
+            parse_fingerprint_value("0xfbcd309b421eb67c").unwrap(),
+            0xfbcd309b421eb67c
+        );
     }
 
     #[test]

@@ -461,3 +461,96 @@ fn generic_field_carrying_enum_compiles_and_roundtrips() {
     let decoded2: GenericMessage<u32> = Cursor::new(&buf2).read_value().unwrap();
     assert_eq!(empty, decoded2);
 }
+
+// ── `#[byteable(order = N)]` field reordering on variant fields ─────────────
+
+mod variant_field_order {
+    use byteable::io::{ReadValue, WriteValue};
+    use byteable::{Byteable, WireFingerprint};
+
+    #[derive(Byteable, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Declared {
+        #[byteable(tag = 0)]
+        Point { a: u8, b: u16 },
+    }
+
+    // `b` is declared second but ordered first (wire position 0), `a` is ordered
+    // second (wire position 1) - so the payload bytes are [b_le_bytes, a_byte],
+    // NOT declaration order. Same per-variant `order` namespace as struct fields.
+    #[derive(Byteable, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Reordered {
+        #[byteable(tag = 0)]
+        Point {
+            #[byteable(order = 1)]
+            a: u8,
+            #[byteable(order = 0)]
+            b: u16,
+        },
+    }
+
+    #[test]
+    fn order_controls_wire_layout_for_named_variant_fields() {
+        let declared = Declared::Point { a: 42, b: 0x1234 };
+        let mut declared_bytes = Vec::new();
+        declared_bytes.write_value(&declared).unwrap();
+        assert_eq!(declared_bytes, [0, 42, 0x34, 0x12]); // disc, a, then b (LE)
+
+        let reordered = Reordered::Point { a: 42, b: 0x1234 };
+        let mut reordered_bytes = Vec::new();
+        reordered_bytes.write_value(&reordered).unwrap();
+        assert_eq!(reordered_bytes, [0, 0x34, 0x12, 42]); // disc, b (LE), then a
+
+        let restored: Reordered = std::io::Cursor::new(&reordered_bytes).read_value().unwrap();
+        assert_eq!(restored, reordered);
+    }
+
+    #[derive(Byteable, Debug, PartialEq)]
+    #[repr(u8)]
+    enum ReorderedTuple {
+        #[byteable(tag = 0)]
+        Point(#[byteable(order = 1)] u8, #[byteable(order = 0)] u16),
+    }
+
+    #[test]
+    fn order_controls_wire_layout_for_tuple_variant_fields() {
+        let value = ReorderedTuple::Point(42, 0x1234);
+        let mut buf = Vec::new();
+        buf.write_value(&value).unwrap();
+        assert_eq!(buf, [0, 0x34, 0x12, 42]); // disc, .1 (LE), then .0
+
+        let restored: ReorderedTuple = std::io::Cursor::new(&buf).read_value().unwrap();
+        assert_eq!(restored, value);
+    }
+
+    // Fields declared in the opposite order (b, then a) but `order` pins the wire
+    // sequence back to match Declared's (a at wire position 0, b at wire position 1).
+    #[derive(Byteable, Debug, PartialEq)]
+    #[repr(u8)]
+    enum DeclaredDifferently {
+        #[byteable(tag = 0)]
+        Point {
+            #[byteable(order = 1)]
+            b: u16,
+            #[byteable(order = 0)]
+            a: u8,
+        },
+    }
+
+    #[test]
+    fn wire_compatible_variants_share_a_fingerprint() {
+        // Declared and DeclaredDifferently both encode their payload as [a (1 byte),
+        // b (2 bytes LE)] despite declaring their fields in opposite order, so their
+        // WireFingerprints must match too.
+        assert_eq!(
+            Declared::WIRE_FINGERPRINT,
+            DeclaredDifferently::WIRE_FINGERPRINT
+        );
+
+        // Reordered, by contrast, genuinely puts b before a on the wire (see
+        // order_controls_wire_layout_for_named_variant_fields above), so it must
+        // fingerprint differently from Declared.
+        assert_ne!(Declared::WIRE_FINGERPRINT, Reordered::WIRE_FINGERPRINT);
+    }
+}

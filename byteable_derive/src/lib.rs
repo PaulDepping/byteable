@@ -1,6 +1,7 @@
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
 use quote::{format_ident, quote};
+use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, Ident, Meta, Type, parse_macro_input};
 
 mod attrs;
@@ -14,8 +15,55 @@ enum AttributeType {
     None,
 }
 
-fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
-    let mut found: Option<AttributeType> = None;
+/// The attribute syntax a user would actually type for `kind`, for use in error messages -
+/// `{kind:?}` would print the internal Rust variant name (`IoOnly`) instead.
+fn attribute_syntax(kind: AttributeType) -> &'static str {
+    match kind {
+        AttributeType::LittleEndian => "little_endian",
+        AttributeType::BigEndian => "big_endian",
+        AttributeType::TryTransparent => "try_transparent",
+        AttributeType::IoOnly => "io_only",
+        AttributeType::None => "transparent",
+    }
+}
+
+/// Builds the `attrs::resolve_field_wire_order` input for a field list: each field's
+/// `#[byteable(order = ..)]` value and the span a misconfiguration error about *that* field
+/// should point at - the order literal's own span when present, else the field's own span (so
+/// e.g. "must annotate every field or none" can point at the field that's missing it).
+fn field_order_entries<'a>(
+    fields: impl IntoIterator<Item = &'a syn::Field>,
+) -> Vec<attrs::FieldOrderEntry> {
+    fields
+        .into_iter()
+        .map(|f| match attrs::parse_field_order(&f.attrs) {
+            Some((order, span)) => attrs::FieldOrderEntry {
+                order: Some(order),
+                span,
+            },
+            None => attrs::FieldOrderEntry {
+                order: None,
+                span: f.span(),
+            },
+        })
+        .collect()
+}
+
+/// Scans `attrs` for a `#[byteable(..)]` attribute and returns which of the mutually-exclusive
+/// endian/transparent/io_only kinds is present (`AttributeType::None` if none is), together with
+/// the span of the specific token that decided it - `meta.path`'s span for a matched kind, or
+/// `Span::call_site()` when nothing matched at all (callers only use the span when a specific
+/// `AttributeType` is misused, and `None` is never itself a misuse).
+///
+/// Every hard error here - unknown attribute, conflicting kinds, a malformed `fingerprint = ..`
+/// value or a missing `=` on any of `order`/`discriminant`/`fingerprint` - panics via
+/// [`std::panic::panic_any`] with the `syn::Error` payload rather than `panic!`-ing a bare
+/// string: the top-level `byteable_derive_macro` entry point is the only place in this crate
+/// that catches these panics, and it downcasts the payload back to a `syn::Error` so the
+/// resulting `compile_error!` is anchored at the actual offending token instead of the derive
+/// site (see `byteable_derive_macro`'s doc comment for the whole scheme).
+fn parse_byteable_attr(attrs: &[syn::Attribute]) -> (AttributeType, Span) {
+    let mut found: Option<(AttributeType, Span)> = None;
     let mut fingerprint_seen = false;
     for attr in attrs {
         if !attr.path().is_ident("byteable") {
@@ -44,10 +92,10 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
             } else if meta.path.is_ident("fingerprint") {
                 // Consumed by `attrs::parse_fingerprint_assertion`, but validated eagerly
                 // right here too (both the value and duplicate-detection): this whole
-                // `attr.parse_nested_meta` call already panics on any `Err` (see below),
-                // while `parse_fingerprint_assertion`'s own error handling silently discards
-                // a malformed/duplicate value (matching `parse_field_order`'s and
-                // `parse_discriminant_override`'s existing swallow-on-error style). Without
+                // `attr.parse_nested_meta` call already aborts on any `Err` (see below), while
+                // `parse_fingerprint_assertion`'s own error handling silently discards a
+                // malformed/duplicate value (matching `parse_field_order`'s and
+                // `parse_discriminant_override`'s pre-fix swallow-on-error style). Without
                 // validating here, a typo like `fingerprint = "0x7O26af.."` would silently
                 // disable the assertion forever instead of failing to compile - the worst
                 // possible failure mode for what's meant to be a safety check.
@@ -66,10 +114,16 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                 }
                 None
             } else {
-                return Err(meta.error(
-                    "Unknown byteable attribute. Valid attributes are: little_endian, \
-                     big_endian, try_transparent, io_only, order, discriminant, fingerprint.",
-                ));
+                let name = meta
+                    .path
+                    .get_ident()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<path>".to_string());
+                return Err(meta.error(format!(
+                    "unknown byteable attribute `{name}`; valid attributes are: little_endian, \
+                     big_endian, transparent, try_transparent, io_only, order, discriminant, \
+                     fingerprint"
+                )));
             };
             if let Some(kind) = kind {
                 if found.is_some() {
@@ -78,13 +132,13 @@ fn parse_byteable_attr(attrs: &[syn::Attribute]) -> AttributeType {
                          io_only may be specified",
                     ));
                 }
-                found = Some(kind);
+                found = Some((kind, meta.path.span()));
             }
             Ok(())
         })
-        .unwrap_or_else(|e| panic!("{e}"));
+        .unwrap_or_else(|e| std::panic::panic_any(e));
     }
-    found.unwrap_or(AttributeType::None)
+    found.unwrap_or((AttributeType::None, Span::call_site()))
 }
 
 /// Assembles the output of the dynamic (`io_only`/field-enum) pipeline from the four
@@ -108,11 +162,14 @@ fn dynamic_pipeline_impls(
     eio_async_impl: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     if !cfg!(feature = "std") && !cfg!(feature = "embedded-io") {
-        panic!(
-            "deriving Byteable on `{type_name}` needs the io_only/field-enum dynamic pipeline, \
-             which requires the `std` and/or `embedded-io` feature of `byteable` to be enabled - \
-             neither is active for this build"
-        );
+        std::panic::panic_any(syn::Error::new(
+            type_name.span(),
+            format!(
+                "deriving Byteable on `{type_name}` needs the io_only/field-enum dynamic \
+                 pipeline, which requires the `std` and/or `embedded-io` feature of `byteable` \
+                 to be enabled - neither is active for this build"
+            ),
+        ));
     }
     let std_impl = if cfg!(feature = "std") {
         std_impl
@@ -398,12 +455,48 @@ fn byteable_crate_path() -> proc_macro2::TokenStream {
 #[proc_macro_derive(Byteable, attributes(byteable))]
 pub fn byteable_derive_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: DeriveInput = parse_macro_input!(input);
-    reject_non_type_level_fingerprint(&input);
-    match input.data {
-        Data::Struct(_) => struct_derive(input),
-        Data::Enum(_) => enum_derive(input),
-        Data::Union(_) => panic!("union structs are unsupported"),
-    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reject_non_type_level_fingerprint(&input);
+        match input.data {
+            Data::Struct(_) => struct_derive(input),
+            Data::Enum(_) => enum_derive(input),
+            Data::Union(data) => std::panic::panic_any(syn::Error::new(
+                data.union_token.span(),
+                "union types are unsupported",
+            )),
+        }
+    }));
+    result.unwrap_or_else(abort_payload_to_compile_error)
+}
+
+/// Recovers the `syn::Error` every hard error in this crate panics with (see
+/// `parse_byteable_attr`'s doc comment for why) and turns it into `compile_error!` tokens
+/// anchored at that error's own span, instead of letting the panic surface as rustc's generic,
+/// span-less "proc-macro derive panicked" diagnostic. This is the only `catch_unwind` in the
+/// crate, so it's the one place a panic from anywhere in the derive - `parse_byteable_attr`,
+/// `attrs::resolve_field_wire_order`, `dynamic_pipeline_impls`, etc. - is turned into a normal
+/// compile error.
+///
+/// A panic that didn't opt into this scheme (a bare `panic!`/`.unwrap()`/`.expect()`, e.g. from
+/// a future `syn`/`quote` version) falls back to a `Span::call_site()` compile error carrying
+/// whatever message text could be recovered from the payload, rather than re-panicking and
+/// losing the diagnostic - and losing rustc's own "1 previous error" bookkeeping with it -
+/// entirely.
+fn abort_payload_to_compile_error(
+    payload: Box<dyn std::any::Any + Send>,
+) -> proc_macro::TokenStream {
+    let err = match payload.downcast::<syn::Error>() {
+        Ok(err) => *err,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "the byteable derive macro panicked".to_string());
+            syn::Error::new(Span::call_site(), message)
+        }
+    };
+    err.to_compile_error().into()
 }
 
 /// Rejects `#[byteable(fingerprint = ..)]` anywhere other than on the derived type itself.
@@ -426,15 +519,24 @@ fn reject_non_type_level_fingerprint(input: &DeriveInput) {
             if !attr.path().is_ident("byteable") {
                 continue;
             }
+            // A direct, unconditional panic (rather than `return Err(..)`) is deliberate: the
+            // whole call below is `let _ = ..`, so an `Err` from this closure for *this* key
+            // would be silently swallowed exactly like a malformed value for any other key is
+            // (see the comment below) - that's the right behavior for "somebody else's
+            // business to validate", but wrong for a misplaced `fingerprint` attribute, which
+            // this function exists specifically to catch.
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("fingerprint") {
-                    panic!(
-                        "#[byteable(fingerprint = ..)] is only supported on the type itself, \
-                         not on {location}. The assertion describes the whole type's wire \
-                         shape; there is nothing it could assert here, and leaving it in \
-                         place would silently assert nothing at all. Move it up to the \
-                         `struct`/`enum` item."
-                    );
+                    std::panic::panic_any(syn::Error::new(
+                        meta.path.span(),
+                        format!(
+                            "#[byteable(fingerprint = ..)] is only supported on the type \
+                             itself, not on {location}. The assertion describes the whole \
+                             type's wire shape; there is nothing it could assert here, and \
+                             leaving it in place would silently assert nothing at all. Move it \
+                             up to the `struct`/`enum` item."
+                        ),
+                    ));
                 }
                 // Every other key is somebody else's business to validate - this pass only
                 // consumes its `= <value>` so `parse_nested_meta` can keep scanning the rest
@@ -469,14 +571,18 @@ fn reject_non_type_level_fingerprint(input: &DeriveInput) {
 }
 
 fn struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
-    match parse_byteable_attr(&input.attrs) {
+    let (attr_kind, attr_span) = parse_byteable_attr(&input.attrs);
+    match attr_kind {
         AttributeType::IoOnly => io_struct_derive(input),
-        AttributeType::LittleEndian | AttributeType::BigEndian => panic!(
-            "#[byteable(little_endian)]/#[byteable(big_endian)] is not supported at the \
+        AttributeType::LittleEndian | AttributeType::BigEndian => {
+            std::panic::panic_any(syn::Error::new(
+                attr_span,
+                "#[byteable(little_endian)]/#[byteable(big_endian)] is not supported at the \
              struct level - it would need to reach into nested Byteable types, which don't \
              have a single top-level endianness. Annotate each multi-byte field individually, \
-             e.g. `#[byteable(big_endian)] field_name: u32`."
-        ),
+             e.g. `#[byteable(big_endian)] field_name: u32`.",
+            ))
+        }
         _ => fixed_struct_derived(input),
     }
 }
@@ -501,7 +607,7 @@ fn wire_fingerprint_field_types<'a>(
     wire_ordered_fields
         .map(|field| {
             let ty = &field.ty;
-            match parse_byteable_attr(&field.attrs) {
+            match parse_byteable_attr(&field.attrs).0 {
                 AttributeType::BigEndian => quote! { <#ty as #bc::HasEndianRepr>::BE },
                 _ => quote! { #ty },
             }
@@ -681,7 +787,8 @@ fn gen_struct_field_write(
     bc: &proc_macro2::TokenStream,
     awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    match parse_byteable_attr(attrs) {
+    let (attr_kind, attr_span) = parse_byteable_attr(attrs);
+    match attr_kind {
         AttributeType::LittleEndian => quote! {
             writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(#field_access))#awaited?;
         },
@@ -689,13 +796,15 @@ fn gen_struct_field_write(
             writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_big_endian(#field_access))#awaited?;
         },
         AttributeType::None => quote! { writer.write_value(&#field_access)#awaited?; },
-        AttributeType::IoOnly => {
-            panic!("#[byteable(io_only)] is a struct-level attribute and cannot be used on a field")
-        }
-        AttributeType::TryTransparent => panic!(
-            "#[byteable(try_transparent)] is not applicable in \
-             io_only mode; remove the annotation or use a plain field"
-        ),
+        AttributeType::IoOnly => std::panic::panic_any(syn::Error::new(
+            attr_span,
+            "#[byteable(io_only)] is a struct-level attribute and cannot be used on a field",
+        )),
+        AttributeType::TryTransparent => std::panic::panic_any(syn::Error::new(
+            attr_span,
+            "#[byteable(try_transparent)] is not applicable in io_only mode; remove the \
+             annotation or use a plain field",
+        )),
     }
 }
 
@@ -706,7 +815,8 @@ fn gen_field_read(
     bc: &proc_macro2::TokenStream,
     awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    match parse_byteable_attr(attrs) {
+    let (attr_kind, attr_span) = parse_byteable_attr(attrs);
+    match attr_kind {
         AttributeType::LittleEndian => {
             quote! { let #field_ident: #field_ty = reader.read_value::<<#field_ty as #bc::HasEndianRepr>::LE>()#awaited?.get(); }
         }
@@ -716,10 +826,14 @@ fn gen_field_read(
         AttributeType::None => {
             quote! { let #field_ident: #field_ty = reader.read_value()#awaited?; }
         }
-        other => panic!(
-            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
-             only little_endian and big_endian are supported here"
-        ),
+        other => std::panic::panic_any(syn::Error::new(
+            attr_span,
+            format!(
+                "unsupported #[byteable({})] attribute on field `{field_ident}`; only \
+                 little_endian and big_endian are supported here",
+                attribute_syntax(other)
+            ),
+        )),
     }
 }
 
@@ -826,8 +940,9 @@ fn io_struct_derive(input: DeriveInput) -> proc_macro::TokenStream {
         syn::Fields::Unit => unreachable!(),
     };
 
-    let orders: Vec<Option<u64>> = fields.iter().map(|f| attrs::parse_field_order(&f.attrs)).collect();
-    let wire_order = attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| panic!("{e}"));
+    let orders = field_order_entries(fields.iter());
+    let wire_order =
+        attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| std::panic::panic_any(e));
 
     let awaited_sync = quote! {};
     let awaited_async = quote! { .await };
@@ -1018,8 +1133,7 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
     if let Fields::Unit = fields_data {
         let wire_fingerprint_impl =
             wire_fingerprint_impl_for_struct(&bc, original_name, &input.generics, &[]);
-        let fingerprint_assertion =
-            fingerprint_assertion_impl(&bc, &input.attrs, original_name);
+        let fingerprint_assertion = fingerprint_assertion_impl(&bc, &input.attrs, original_name);
         return quote! {
             #[derive(Clone, Copy)]
             #[doc(hidden)]
@@ -1105,8 +1219,9 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         Fields::Unit => unreachable!(),
     };
 
-    let orders: Vec<Option<u64>> = fields.iter().map(|f| attrs::parse_field_order(&f.attrs)).collect();
-    let wire_order = attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| panic!("{e}"));
+    let orders = field_order_entries(fields.iter());
+    let wire_order =
+        attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| std::panic::panic_any(e));
     let mut wire_position_of = vec![0usize; wire_order.len()];
     for (wire_pos, &decl_idx) in wire_order.iter().enumerate() {
         wire_position_of[decl_idx] = wire_pos;
@@ -1124,7 +1239,7 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
 
     for (i, field) in fields.iter().enumerate() {
         let field_type = &field.ty;
-        let attr = parse_byteable_attr(&field.attrs);
+        let (attr, attr_span) = parse_byteable_attr(&field.attrs);
         if attr == AttributeType::TryTransparent {
             has_try = true;
         }
@@ -1153,9 +1268,10 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
                     to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#self_idx) },
                     from_raw_expr: quote! { <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#raw_idx)? },
                 },
-                AttributeType::IoOnly => panic!(
-                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
-                ),
+                AttributeType::IoOnly => std::panic::panic_any(syn::Error::new(
+                    attr_span,
+                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields",
+                )),
                 AttributeType::None => FieldInfo {
                     raw_field_def: quote! { #vis <#field_type as #bc::RawRepr>::Raw },
                     to_raw_expr: quote! { <#field_type as #bc::RawRepr>::to_raw(&self.#self_idx) },
@@ -1180,9 +1296,10 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
                     to_raw_expr: quote! { #name: <#field_type as #bc::RawRepr>::to_raw(&self.#name) },
                     from_raw_expr: quote! { #name: <#field_type as #bc::TryFromRawRepr>::try_from_raw(value.#name)? },
                 },
-                AttributeType::IoOnly => panic!(
-                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields"
-                ),
+                AttributeType::IoOnly => std::panic::panic_any(syn::Error::new(
+                    attr_span,
+                    "#[byteable(io_only)] is a struct-level attribute and cannot be used on individual fields",
+                )),
                 AttributeType::None => FieldInfo {
                     raw_field_def: quote! { #vis #name: <#field_type as #bc::RawRepr>::Raw },
                     to_raw_expr: quote! { #name: <#field_type as #bc::RawRepr>::to_raw(&self.#name) },
@@ -1193,9 +1310,15 @@ fn fixed_struct_derived(input: DeriveInput) -> proc_macro::TokenStream {
         field_infos.push(field_info);
     }
 
-    let wire_field_infos: Vec<&FieldInfo> = wire_order.iter().map(|&decl_idx| &field_infos[decl_idx]).collect();
+    let wire_field_infos: Vec<&FieldInfo> = wire_order
+        .iter()
+        .map(|&decl_idx| &field_infos[decl_idx])
+        .collect();
 
-    let wire_fields: Vec<&syn::Field> = wire_order.iter().map(|&decl_idx| &fields[decl_idx]).collect();
+    let wire_fields: Vec<&syn::Field> = wire_order
+        .iter()
+        .map(|&decl_idx| &fields[decl_idx])
+        .collect();
     let field_types = wire_fingerprint_field_types(&bc, wire_fields.into_iter());
     let wire_fingerprint_impl =
         wire_fingerprint_impl_for_struct(&bc, original_name, &input.generics, &field_types);
@@ -1386,7 +1509,8 @@ fn gen_enum_field_write(
     bc: &proc_macro2::TokenStream,
     awaited: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    match parse_byteable_attr(attrs) {
+    let (attr_kind, attr_span) = parse_byteable_attr(attrs);
+    match attr_kind {
         AttributeType::LittleEndian => quote! {
             writer.write_value(&<#field_type as #bc::HasEndianRepr>::to_little_endian(*#field_ident))#awaited?;
         },
@@ -1396,11 +1520,32 @@ fn gen_enum_field_write(
         AttributeType::None => quote! {
             writer.write_value(#field_ident)#awaited?;
         },
-        other => panic!(
-            "unsupported #[byteable] attribute `{other:?}` on field `{field_ident}`; \
-             only little_endian and big_endian are supported here"
-        ),
+        other => std::panic::panic_any(syn::Error::new(
+            attr_span,
+            format!(
+                "unsupported #[byteable({})] attribute on field `{field_ident}`; only \
+                 little_endian and big_endian are supported here",
+                attribute_syntax(other)
+            ),
+        )),
     }
+}
+
+/// Resolves a field-carrying enum variant's wire field order from any `#[byteable(order = N)]`
+/// attributes on its fields, via the same `attrs::resolve_field_wire_order` machinery used for
+/// struct fields (`io_struct_derive`/`fixed_struct_derived`) - each variant gets its own
+/// independent `0..field_count` namespace, just like a struct's own field list. Panics with the
+/// variant name for context (unlike the struct call sites, which don't need it - a struct has
+/// only one field list, an enum has one per variant, so naming which one is misconfigured
+/// matters here).
+fn variant_field_wire_order(variant_name: &Ident, fields: &Fields) -> Vec<usize> {
+    let orders = field_order_entries(fields.iter());
+    attrs::resolve_field_wire_order(&orders).unwrap_or_else(|e| {
+        std::panic::panic_any(syn::Error::new(
+            e.span(),
+            format!("variant `{variant_name}`: {e}"),
+        ))
+    })
 }
 
 fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
@@ -1439,7 +1584,7 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             Ident::new(ty_str, name.span())
         });
 
-    let endian_attr = parse_byteable_attr(&input.attrs);
+    let endian_attr = parse_byteable_attr(&input.attrs).0;
     let EnumDiscriminants {
         defs: discriminant_defs,
         refs: discriminants,
@@ -1492,15 +1637,14 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                         #name::#variant_name => { #write_disc }
                     },
                     Fields::Named(named) => {
-                        let field_names: Vec<_> = named
-                            .named
+                        let fields: Vec<_> = named.named.iter().collect();
+                        let field_names: Vec<_> =
+                            fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        let wire_order = variant_field_wire_order(variant_name, &variant.fields);
+                        let field_writes: Vec<_> = wire_order
                             .iter()
-                            .map(|f| f.ident.as_ref().unwrap())
-                            .collect();
-                        let field_writes: Vec<_> = named
-                            .named
-                            .iter()
-                            .map(|f| {
+                            .map(|&i| {
+                                let f = fields[i];
                                 gen_enum_field_write(f.ident.as_ref().unwrap(), &f.ty, &f.attrs, &bc, awaited)
                             })
                             .collect();
@@ -1512,14 +1656,16 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                         }
                     }
                     Fields::Unnamed(unnamed) => {
-                        let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        let fields: Vec<_> = unnamed.unnamed.iter().collect();
+                        let field_idents: Vec<_> = (0..fields.len())
                             .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
                             .collect();
-                        let field_writes: Vec<_> = unnamed
-                            .unnamed
+                        let wire_order = variant_field_wire_order(variant_name, &variant.fields);
+                        let field_writes: Vec<_> = wire_order
                             .iter()
-                            .zip(&field_idents)
-                            .map(|(f, ident)| gen_enum_field_write(ident, &f.ty, &f.attrs, &bc, awaited))
+                            .map(|&i| {
+                                gen_enum_field_write(&field_idents[i], &fields[i].ty, &fields[i].attrs, &bc, awaited)
+                            })
                             .collect();
                         quote! {
                             #name::#variant_name(#(#field_idents),*) => {
@@ -1548,15 +1694,14 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                         #disc_tokens => Ok(#name::#variant_name),
                     },
                     Fields::Named(named) => {
-                        let field_idents: Vec<_> = named
-                            .named
+                        let fields: Vec<_> = named.named.iter().collect();
+                        let field_idents: Vec<_> =
+                            fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        let wire_order = variant_field_wire_order(variant_name, &variant.fields);
+                        let field_reads: Vec<_> = wire_order
                             .iter()
-                            .map(|f| f.ident.as_ref().unwrap())
-                            .collect();
-                        let field_reads: Vec<_> = named
-                            .named
-                            .iter()
-                            .map(|f| {
+                            .map(|&i| {
+                                let f = fields[i];
                                 gen_field_read(
                                     f.ident.as_ref().unwrap(),
                                     &f.ty,
@@ -1574,14 +1719,22 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
                         }
                     }
                     Fields::Unnamed(unnamed) => {
-                        let field_idents: Vec<_> = (0..unnamed.unnamed.len())
+                        let fields: Vec<_> = unnamed.unnamed.iter().collect();
+                        let field_idents: Vec<_> = (0..fields.len())
                             .map(|i| Ident::new(&format!("__field_{i}"), name.span()))
                             .collect();
-                        let field_reads: Vec<_> = unnamed
-                            .unnamed
+                        let wire_order = variant_field_wire_order(variant_name, &variant.fields);
+                        let field_reads: Vec<_> = wire_order
                             .iter()
-                            .zip(&field_idents)
-                            .map(|(f, ident)| gen_field_read(ident, &f.ty, &f.attrs, &bc, awaited))
+                            .map(|&i| {
+                                gen_field_read(
+                                    &field_idents[i],
+                                    &fields[i].ty,
+                                    &fields[i].attrs,
+                                    &bc,
+                                    awaited,
+                                )
+                            })
                             .collect();
                         quote! {
                             #disc_tokens => {
@@ -1700,7 +1853,10 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
         .iter()
         .zip(&discriminants)
         .map(|(variant, tag_ref)| {
-            let field_types = wire_fingerprint_field_types(&bc, variant.fields.iter());
+            let fields: Vec<_> = variant.fields.iter().collect();
+            let wire_order = variant_field_wire_order(&variant.ident, &variant.fields);
+            let wire_fields = wire_order.into_iter().map(|i| fields[i]);
+            let field_types = wire_fingerprint_field_types(&bc, wire_fields);
             variant_fingerprint_expr(&bc, tag_ref, &unsigned_repr, &field_types)
         })
         .collect();
@@ -1715,7 +1871,8 @@ fn enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
     );
     let fingerprint_assertion = fingerprint_assertion_impl(&bc, &input.attrs, &name);
 
-    let dynamic_impls = dynamic_pipeline_impls(&name, std_impl, eio_impl, async_impl, eio_async_impl);
+    let dynamic_impls =
+        dynamic_pipeline_impls(&name, std_impl, eio_impl, async_impl, eio_async_impl);
     quote! {
         #discriminant_defs
         #dynamic_impls
@@ -1784,7 +1941,10 @@ fn resolve_enum_discriminants(
     variants: &syn::punctuated::Punctuated<syn::Variant, syn::Token![,]>,
     repr_ty: &syn::Ident,
 ) -> EnumDiscriminants {
-    let enum_name_upper = enum_name.to_string().trim_start_matches("r#").to_uppercase();
+    let enum_name_upper = enum_name
+        .to_string()
+        .trim_start_matches("r#")
+        .to_uppercase();
     let const_idents: Vec<Ident> = (0..variants.len())
         .map(|i| format_ident!("__BYTEABLE_TAG_{}_{}", enum_name_upper, i))
         .collect();
@@ -1817,8 +1977,9 @@ fn resolve_enum_discriminants(
         quote! {}
     } else {
         let shadow_name = format_ident!("__BYTEABLE_TAG_CHECK_{}", enum_name_upper);
-        let shadow_variant_idents: Vec<Ident> =
-            (0..variants.len()).map(|i| format_ident!("__V{}", i)).collect();
+        let shadow_variant_idents: Vec<Ident> = (0..variants.len())
+            .map(|i| format_ident!("__V{}", i))
+            .collect();
         let shadow_variants: Vec<proc_macro2::TokenStream> = shadow_variant_idents
             .iter()
             .zip(&refs)
@@ -1865,7 +2026,7 @@ fn unit_enum_derive(input: DeriveInput) -> proc_macro::TokenStream {
             Ident::new(ty_str, enum_name.span())
         });
 
-    let endian_attr = parse_byteable_attr(&input.attrs);
+    let endian_attr = parse_byteable_attr(&input.attrs).0;
     let EnumDiscriminants {
         defs: discriminant_defs,
         refs: discriminants,
@@ -2008,31 +2169,51 @@ mod tests {
     use super::*;
     use syn::parse_quote;
 
+    /// Runs `f`, which is expected to panic with a `syn::Error` payload (the convention every
+    /// hard-error path in this crate now follows - see `parse_byteable_attr`'s doc comment),
+    /// and returns that error so its message can be asserted on. `#[should_panic]` can't be
+    /// used for this: it matches the panic payload against a `&str`/`String`, and a `syn::Error`
+    /// payload is neither, so it would report "panic did not contain expected string" even when
+    /// the panic and its message are both correct.
+    fn expect_abort(f: impl FnOnce() + std::panic::UnwindSafe) -> syn::Error {
+        let payload = std::panic::catch_unwind(f).expect_err("expected a panic");
+        *payload
+            .downcast::<syn::Error>()
+            .expect("panic payload should be a syn::Error - see each function's doc comment")
+    }
+
     #[test]
-    #[should_panic(expected = "not supported at the struct level")]
     fn struct_derive_rejects_struct_level_little_endian() {
         let input: DeriveInput = parse_quote! {
             #[byteable(little_endian)]
             struct Foo { a: u32 }
         };
-        struct_derive(input);
+        let err = expect_abort(|| {
+            struct_derive(input);
+        });
+        assert!(
+            err.to_string()
+                .contains("not supported at the struct level")
+        );
     }
 
     #[test]
-    #[should_panic(expected = "at most one of")]
     fn struct_derive_rejects_struct_level_big_endian_on_io_only() {
         let input: DeriveInput = parse_quote! {
             #[byteable(io_only)]
             #[byteable(big_endian)]
             struct Foo { a: u32 }
         };
-        struct_derive(input);
+        let err = expect_abort(|| {
+            struct_derive(input);
+        });
+        assert!(err.to_string().contains("at most one of"));
     }
 
     #[test]
     fn parse_byteable_attr_ignores_order_token() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(order = 0, big_endian)])];
-        assert_eq!(parse_byteable_attr(&attrs), AttributeType::BigEndian);
+        assert_eq!(parse_byteable_attr(&attrs).0, AttributeType::BigEndian);
     }
 
     #[test]
@@ -2041,42 +2222,46 @@ mod tests {
             parse_quote!(#[byteable(order = 2)]),
             parse_quote!(#[byteable(big_endian)]),
         ];
-        assert_eq!(parse_byteable_attr(&attrs), AttributeType::BigEndian);
+        assert_eq!(parse_byteable_attr(&attrs).0, AttributeType::BigEndian);
     }
 
     #[test]
     fn parse_byteable_attr_still_rejects_unknown_tokens() {
         let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(not_a_real_attribute)])];
-        let result = std::panic::catch_unwind(|| parse_byteable_attr(&attrs));
-        assert!(result.is_err());
+        let err = expect_abort(|| {
+            parse_byteable_attr(&attrs);
+        });
+        assert!(err.to_string().contains("unknown byteable attribute"));
     }
 
     #[test]
     fn parse_byteable_attr_accepts_fingerprint_token() {
-        // `fingerprint` must not fall into the "Unknown byteable attribute" branch.
-        let attrs: Vec<syn::Attribute> =
-            vec![parse_quote!(#[byteable(fingerprint = "0x1234")])];
-        assert_eq!(parse_byteable_attr(&attrs), AttributeType::None);
+        // `fingerprint` must not fall into the "unknown byteable attribute" branch.
+        let attrs: Vec<syn::Attribute> = vec![parse_quote!(#[byteable(fingerprint = "0x1234")])];
+        assert_eq!(parse_byteable_attr(&attrs).0, AttributeType::None);
     }
 
     #[test]
-    #[should_panic(expected = "expected a fingerprint value")]
     fn parse_byteable_attr_rejects_malformed_fingerprint_value() {
         // Regression test for the "typo silently disables the assertion forever" bug: a
         // malformed hex value (letter `O` instead of digit `0`) must be a hard compile-time
         // panic here, not something `parse_fingerprint_assertion` is left to quietly ignore.
         let attrs: Vec<syn::Attribute> =
             vec![parse_quote!(#[byteable(fingerprint = "0x7O26af966196fd")])];
-        parse_byteable_attr(&attrs);
+        let err = expect_abort(|| {
+            parse_byteable_attr(&attrs);
+        });
+        assert!(err.to_string().contains("expected a fingerprint value"));
     }
 
     #[test]
-    #[should_panic(expected = "duplicate")]
     fn parse_byteable_attr_rejects_duplicate_fingerprint() {
-        let attrs: Vec<syn::Attribute> = vec![
-            parse_quote!(#[byteable(fingerprint = "0x1", fingerprint = "0x2")]),
-        ];
-        parse_byteable_attr(&attrs);
+        let attrs: Vec<syn::Attribute> =
+            vec![parse_quote!(#[byteable(fingerprint = "0x1", fingerprint = "0x2")])];
+        let err = expect_abort(|| {
+            parse_byteable_attr(&attrs);
+        });
+        assert!(err.to_string().contains("duplicate"));
     }
 
     #[test]
@@ -2089,7 +2274,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only supported on the type itself")]
     fn struct_field_fingerprint_is_rejected() {
         // Before this check, a field-level `fingerprint` was hex-validated by
         // `parse_byteable_attr` and then produced *no assertion at all* - the worst possible
@@ -2101,11 +2285,16 @@ mod tests {
                 a: u8,
             }
         };
-        reject_non_type_level_fingerprint(&input);
+        let err = expect_abort(|| {
+            reject_non_type_level_fingerprint(&input);
+        });
+        assert!(
+            err.to_string()
+                .contains("only supported on the type itself")
+        );
     }
 
     #[test]
-    #[should_panic(expected = "only supported on the type itself")]
     fn enum_variant_fingerprint_is_rejected() {
         let input: DeriveInput = parse_quote! {
             enum E {
@@ -2114,18 +2303,29 @@ mod tests {
                 B,
             }
         };
-        reject_non_type_level_fingerprint(&input);
+        let err = expect_abort(|| {
+            reject_non_type_level_fingerprint(&input);
+        });
+        assert!(
+            err.to_string()
+                .contains("only supported on the type itself")
+        );
     }
 
     #[test]
-    #[should_panic(expected = "only supported on the type itself")]
     fn enum_variant_field_fingerprint_is_rejected() {
         let input: DeriveInput = parse_quote! {
             enum E {
                 A(#[byteable(fingerprint = "0x1234")] u32),
             }
         };
-        reject_non_type_level_fingerprint(&input);
+        let err = expect_abort(|| {
+            reject_non_type_level_fingerprint(&input);
+        });
+        assert!(
+            err.to_string()
+                .contains("only supported on the type itself")
+        );
     }
 
     #[test]
@@ -2155,7 +2355,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only supported on the type itself")]
     fn fingerprint_after_another_key_in_the_same_list_is_still_rejected() {
         let input: DeriveInput = parse_quote! {
             enum E {
@@ -2163,6 +2362,12 @@ mod tests {
                 A,
             }
         };
-        reject_non_type_level_fingerprint(&input);
+        let err = expect_abort(|| {
+            reject_non_type_level_fingerprint(&input);
+        });
+        assert!(
+            err.to_string()
+                .contains("only supported on the type itself")
+        );
     }
 }

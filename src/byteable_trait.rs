@@ -284,6 +284,13 @@ impl core::error::Error for DecodeError {}
 /// [`TryFromRawRepr`] (fallible) or [`FromRawRepr`] (infallible).
 ///
 /// A blanket impl provides `RawRepr` for `[T; N]` when `T: RawRepr`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` has no fixed-size wire representation",
+    label = "`{Self}` can't be used in a fixed-size #[derive(Byteable)] struct",
+    note = "if `{Self}` is variable-length (String, Vec<T>, HashMap<K, V>, ...), add \
+            `#[byteable(io_only)]` to the struct that uses it",
+    note = "if `{Self}` is a type you control and should be fixed-size, derive `Byteable` for it"
+)]
 pub trait RawRepr: Sized {
     /// The [`PlainOldData`] type that `Self` serializes to.
     type Raw: PlainOldData;
@@ -306,6 +313,13 @@ impl<T: RawRepr, const N: usize> RawRepr for [T; N] {
 /// fail (e.g. `bool`, `char`, `NonZero<T>`), implement [`TryFromRawRepr`] instead.
 ///
 /// A blanket impl provides `FromRawRepr` for `[T; N]` when `T: FromRawRepr`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` has no fixed-size wire representation",
+    label = "`{Self}` can't be used in a fixed-size #[derive(Byteable)] struct",
+    note = "if `{Self}` is variable-length (String, Vec<T>, HashMap<K, V>, ...), add \
+            `#[byteable(io_only)]` to the struct that uses it",
+    note = "if `{Self}` is a type you control and should be fixed-size, derive `Byteable` for it"
+)]
 pub trait FromRawRepr: RawRepr {
     /// Convert a raw representation into `Self`. Infallible.
     fn from_raw(raw: Self::Raw) -> Self;
@@ -328,6 +342,13 @@ impl<T: FromRawRepr, const N: usize> FromRawRepr for [T; N] {
 /// # Errors
 ///
 /// Returns [`DecodeError`] if the raw bytes do not encode a valid `Self`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` has no fixed-size wire representation",
+    label = "`{Self}` can't be used in a fixed-size #[derive(Byteable)] struct",
+    note = "if `{Self}` is variable-length (String, Vec<T>, HashMap<K, V>, ...), add \
+            `#[byteable(io_only)]` to the struct that uses it",
+    note = "if `{Self}` is a type you control and should be fixed-size, derive `Byteable` for it"
+)]
 pub trait TryFromRawRepr: RawRepr {
     /// Attempt to convert a raw representation into `Self`.
     ///

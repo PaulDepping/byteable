@@ -228,10 +228,12 @@ Three attributes let you pin the exact wire layout independently of how a type i
 Rust source - useful when the wire format is a fixed protocol spec and declaration order/Rust's
 own discriminants aren't allowed to drift with refactors.
 
-**`#[byteable(order = N)]`** (struct fields) pins a field's wire position to `N`, independently
-of its declaration order in the struct. It must annotate either every field or none, and the
-`N` values must form a dense `0..field_count` permutation - it only changes which byte range
-each field occupies, adding zero bytes to the wire format.
+**`#[byteable(order = N)]`** (struct fields, and fields of a field-carrying enum variant) pins a
+field's wire position to `N`, independently of its declaration order. It must annotate either
+every field or none within the same struct/variant, and the `N` values must form a dense
+`0..field_count` permutation - it only changes which byte range each field occupies, adding zero
+bytes to the wire format. On an enum, each variant has its own independent `order` namespace;
+annotating one variant's fields has no effect on any other variant's.
 
 ```rust
 use byteable::Byteable;
@@ -242,6 +244,17 @@ struct Header {
     flags: u8,
     #[byteable(order = 0)]   // encoded first on the wire, despite being declared second
     version: u8,
+}
+
+#[derive(Byteable)]
+enum Message {
+    Ping,
+    Pong {
+        #[byteable(order = 1)]
+        flags: u8,
+        #[byteable(order = 0)]   // encoded first in this variant's payload
+        version: u8,
+    },
 }
 ```
 
